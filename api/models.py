@@ -1,0 +1,137 @@
+import os
+
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+from django.utils import timezone
+from django.utils.text import slugify
+
+
+class CustomUser(AbstractUser):
+    """
+    The project's user model. Lives in `api` so the entire backend —
+    content, SEO, blog, forms, images, and auth — is one self-contained
+    Django app. `IsAdminUser` (is_staff) is the only thing every admin-gated
+    endpoint in this app checks; nothing else about this model is special.
+    """
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+
+
+class ComponentData(models.Model):
+    """Generic named JSON blob backing inline-editable page/component content."""
+    name = models.CharField(max_length=255, unique=True)
+    data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class UploadedImage(models.Model):
+    category = models.CharField(max_length=255)
+    image = models.FileField(upload_to="uploaded_images/")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self):
+        return f"{self.image.name} - {self.category}"
+
+    def save(self, *args, **kwargs):
+        base_filename, ext = os.path.splitext(self.image.name)
+        max_filename_length = 100
+
+        if len(base_filename) > max_filename_length:
+            base_filename = base_filename[:max_filename_length]
+
+        new_filename = f"{slugify(base_filename)}{ext}"
+        self.image.name = f"uploaded_images/{new_filename}"
+
+        super().save(*args, **kwargs)
+
+
+class SiteSettings(models.Model):
+    """Singleton row holding site-wide identity, default SEO, and injected scripts."""
+    data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return "Site settings"
+
+
+class PageSEO(models.Model):
+    """Per-page SEO metadata, keyed by the page's path (e.g. 'home', 'about', 'services/x')."""
+    path = models.CharField(max_length=255, unique=True)  # e.g. "home", "about", "services/web-development"
+    data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["path"]
+
+    def __str__(self):
+        return self.path
+
+
+class BlogPost(models.Model):
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("published", "Published"),
+    ]
+
+    slug = models.SlugField(max_length=255, unique=True)
+    title = models.CharField(max_length=255)
+    excerpt = models.TextField(blank=True)
+    content = models.JSONField(default=dict)  # {"coverImage": "", "coverImageAlt": "", "sections": [...]}
+    author = models.CharField(max_length=120, blank=True)
+    seo_title = models.CharField(max_length=255, blank=True)
+    meta_description = models.CharField(max_length=300, blank=True)
+    og_image = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    published_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+
+    def save(self, *args, **kwargs):
+        # Flipping status to "published" without an explicit date means
+        # "publish now" — set it here so the public queryset's
+        # published_at__lte=now filter doesn't hide the post indefinitely.
+        if self.status == "published" and self.published_at is None:
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+class Redirect(models.Model):
+    source = models.CharField(max_length=500, unique=True)
+    destination = models.CharField(max_length=500)
+    permanent = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source"]
+
+    def __str__(self):
+        return f"{self.source} -> {self.destination}"
+
+
+class FormSubmission(models.Model):
+    """A single submission of a named form (e.g. 'booking', 'contact')."""
+    form_name = models.CharField(max_length=100)
+    data = models.JSONField(default=dict)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.form_name} submission #{self.pk}"

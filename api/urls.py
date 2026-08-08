@@ -1,0 +1,42 @@
+# api/urls.py
+
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from .views import (
+    AdminLoginView,
+    BlogPostViewSet,
+    ComponentDataView,
+    FormSubmissionListView,
+    FormSubmitView,
+    PageSEODetailView,
+    PageSEOListView,
+    RedirectViewSet,
+    RetrieveImage,
+    SiteSettingsView,
+    UploadedImageViewSet,
+)
+
+router = DefaultRouter()
+router.register(r'blog', BlogPostViewSet, basename='blog')
+router.register(r'redirects', RedirectViewSet, basename='redirect')
+
+urlpatterns = [
+    path('auth/login/', AdminLoginView.as_view(), name='admin-login'),
+
+    # Generic inline-editable ("CMS") sections — e.g. home/footer/, home/hero/
+    path('home/<slug:name>/', ComponentDataView.as_view(), name='home-component'),
+
+    path('images/', UploadedImageViewSet.as_view(), name='image-list-create'),
+    path('images/<int:pk>/', RetrieveImage.as_view(), name='image-retrieve'),
+
+    path('settings/site/', SiteSettingsView.as_view(), name='site-settings'),
+
+    path('seo/', PageSEOListView.as_view(), name='seo-list'),
+    path('seo/<path:path>/', PageSEODetailView.as_view(), name='seo-detail'),
+
+    path('forms/<slug:name>/submit/', FormSubmitView.as_view(), name='form-submit'),
+    path('forms/<slug:name>/submissions/', FormSubmissionListView.as_view(), name='form-submissions'),
+
+    path('', include(router.urls)),
+]
