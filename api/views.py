@@ -1,3 +1,5 @@
+from collections import Counter
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
@@ -21,6 +23,7 @@ from .models import (
     FormSubmission,
     PageSEO,
     Redirect,
+    SEOAuditResult,
     SEOChangeHistory,
     SiteSettings,
     UploadedImage,
@@ -403,6 +406,81 @@ class PageSEORevertView(APIView):
                 page=row, changed_by=user, old_data=old_data, new_data=row.data,
             )
         return Response(row.data)
+
+
+class SEOAuditView(APIView):
+    """GET  seo/analyze/<path>/ — run a fresh audit, persist it, return it.
+    POST seo/analyze/<path>/ — same, plus live-DOM checks from {html, url}.
+    (admin — audits reveal content gaps and are not for the public.)"""
+    permission_classes = [IsAdminUser]
+
+    def _run(self, path, html=None, url=None):
+        from .models import PageSEO
+        from .seo_analyzer import analyze_page
+
+        result = analyze_page(path, html=html, url=url)
+        row = PageSEO.objects.filter(path=path.strip("/")).first()
+        if row is not None:
+            SEOAuditResult.objects.create(
+                page=row, score=result["overall"],
+                technical_score=result["technical_score"],
+                content_score=result["content_score"],
+                metadata_score=result["metadata_score"],
+                schema_score=result["schema_score"],
+                issues=result["issues"], checks=result["checks"],
+            )
+        return result
+
+    def get(self, request, *args, **kwargs):
+        return Response(self._run(kwargs.get("path")))
+
+    def post(self, request, *args, **kwargs):
+        return Response(self._run(
+            kwargs.get("path"),
+            html=request.data.get("html"),
+            url=request.data.get("url"),
+        ))
+
+
+class SEOAuditRollupView(APIView):
+    """GET seo/analyze/ — site-wide roll-up, worst pages first (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        from .models import PageSEO
+        from .seo_analyzer import analyze_page
+
+        rows = []
+        for page in PageSEO.objects.all():
+            r = analyze_page(page.path)
+            rows.append({
+                "path": page.path, "overall": r["overall"],
+                "technical_score": r["technical_score"],
+                "content_score": r["content_score"],
+                "metadata_score": r["metadata_score"],
+                "schema_score": r["schema_score"],
+                "issue_count": len(r["issues"]),
+            })
+        rows.sort(key=lambda x: x["overall"])
+        grades = Counter(_grade(r["overall"]) for r in rows)
+        avg = round(sum(r["overall"] for r in rows) / len(rows)) if rows else 0
+        return Response({
+            "average_score": avg,
+            "count_by_grade": dict(grades),
+            "pages": rows,
+        })
+
+
+def _grade(score):
+    if score >= 90:
+        return "A"
+    if score >= 75:
+        return "B"
+    if score >= 60:
+        return "C"
+    if score >= 40:
+        return "D"
+    return "F"
 
 
 class SEOResolveView(APIView):

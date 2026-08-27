@@ -131,6 +131,22 @@ class PageSEO(models.Model):
         return self.path
 
 
+class SEOAuditResult(models.Model):
+    """Persisted result of one seo_analyzer.analyze_page run."""
+    page = models.ForeignKey(PageSEO, on_delete=models.CASCADE, related_name="audits")
+    score = models.IntegerField(default=0)
+    technical_score = models.IntegerField(default=0)
+    content_score = models.IntegerField(default=0)
+    metadata_score = models.IntegerField(default=0)
+    schema_score = models.IntegerField(default=0)
+    issues = models.JSONField(default=list)
+    checks = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class SEOChangeHistory(models.Model):
     """Old->new snapshot of a PageSEO.data on every admin PATCH. Revert
     restores an old_data as a new PATCH (non-destructive)."""

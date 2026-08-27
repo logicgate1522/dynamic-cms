@@ -414,6 +414,48 @@ class PageSEOHistoryResolveTests(AdminAuthMixin, APITestCase):
         self.assertEqual(r.status_code, 200)
 
 
+class SEOAuditTests(AdminAuthMixin, APITestCase):
+    def test_audit_flags_missing_metadata_and_persists(self):
+        self.admin_client.patch("/api/seo/thin/", {"seoTitle": "Hi"}, format="json")
+        r = self.admin_client.get("/api/seo/analyze/thin/")
+        self.assertEqual(r.status_code, 200)
+        ids = {c["id"]: c["passed"] for c in r.data["checks"]}
+        self.assertFalse(ids["desc-present"])
+        self.assertTrue(ids["title-present"])
+        self.assertLess(r.data["overall"], 100)
+        from .models import SEOAuditResult
+        self.assertEqual(SEOAuditResult.objects.count(), 1)
+
+    def test_audit_requires_admin(self):
+        PageSEO.objects.create(path="x", data={})
+        self.assertEqual(self.client.get("/api/seo/analyze/x/").status_code, 401)
+
+    def test_post_html_adds_dom_checks(self):
+        PageSEO.objects.create(path="p", data={"focusKeyword": "widgets"})
+        html = "<html lang='en'><head><meta name='viewport' content='x'>" \
+               "<link rel='icon' href='/f.ico'></head><body><h1>Widgets</h1>" \
+               "<h2>More</h2><p>" + ("widget " * 400) + "</p>" \
+               "<a href='/other'>related</a><img src='/a.png' alt='a'></body></html>"
+        r = self.admin_client.post("/api/seo/analyze/p/", {"html": html}, format="json")
+        ids = {c["id"]: c["passed"] for c in r.data["checks"]}
+        self.assertTrue(ids["single-h1"])
+        self.assertTrue(ids["viewport"])
+        self.assertTrue(ids["fk-in-h1"])
+        self.assertTrue(ids["internal-links"])
+
+    def test_rollup_orders_worst_first(self):
+        self.admin_client.patch("/api/seo/good/", {
+            "seoTitle": "A well sized title of about fifty five characters here",
+            "metaDescription": "x" * 140, "canonicalUrl": "https://a.test/good",
+            "social": {"ogTitle": "t", "ogDescription": "d", "ogImage": "i", "ogImageAlt": "a"},
+            "schema": {"enabled": True},
+        }, format="json")
+        self.admin_client.patch("/api/seo/bad/", {"seoTitle": "x"}, format="json")
+        r = self.admin_client.get("/api/seo/analyze/")
+        self.assertEqual(r.data["pages"][0]["path"], "bad")
+        self.assertIn("average_score", r.data)
+
+
 # ==================== BlogPost ====================
 
 class BlogPostTests(AdminAuthMixin, APITestCase):
