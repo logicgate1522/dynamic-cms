@@ -13,15 +13,30 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
-from .models import BlogPost, ComponentData, FormSubmission, PageSEO, Redirect, SiteSettings, UploadedImage
+from .models import (
+    BlogPost,
+    ComponentData,
+    ComponentRevision,
+    ComponentSchema,
+    FormSubmission,
+    PageSEO,
+    Redirect,
+    SiteSettings,
+    UploadedImage,
+)
+from .schema_validation import validate_against_schema
 from .serializers import (
     BlogPostSerializer,
+    ComponentRevisionSerializer,
+    ComponentSchemaSerializer,
     FormSubmissionSerializer,
     PageSEOSerializer,
     RedirectSerializer,
     UploadedImageSerializer,
 )
 from .utils import deep_merge
+
+REVISION_HISTORY_LIMIT = 20
 
 
 # ==================== ADMIN LOGIN ====================
@@ -95,33 +110,145 @@ class ComponentDataView(APIView):
     def get(self, request, *args, **kwargs):
         try:
             component = ComponentData.objects.get(name=self._name())
-            return Response(component.data)
         except ComponentData.DoesNotExist:
             return Response({})
+        # ?mode=draft returns the working copy (admin editors); default GET
+        # is unchanged — the public/published payload.
+        if request.query_params.get("mode") == "draft":
+            return Response(component.draft_data or component.data)
+        return Response(component.data)
+
+    def _resolve_schema(self, schema_key):
+        if not schema_key:
+            return None
+        row = ComponentSchema.objects.filter(key=schema_key).first()
+        return row.schema if row else None
 
     def patch(self, request, *args, **kwargs):
         name = self._name()
-        # select_for_update + atomic: two admins (or an admin double-clicking
-        # Save) PATCHing the same name concurrently must not race on the
-        # read-modify-write merge below and silently drop one edit.
+        draft_mode = request.query_params.get("mode") == "draft"
+        payload = request.data if isinstance(request.data, dict) else {}
+        incoming_schema_key = payload.get("schema_key")
+
+        # select_for_update + atomic: concurrent PATCHes on the same name must
+        # not race on the read-modify-write merge and silently drop an edit.
         with transaction.atomic():
             component, created = ComponentData.objects.select_for_update().get_or_create(
-                name=name, defaults={"data": request.data}
+                name=name, defaults={"data": {} if draft_mode else {}}
             )
-            if not created:
-                component.data = deep_merge(component.data, request.data)
-                component.save()
-        return Response(component.data)
+
+            schema_key = incoming_schema_key or component.schema_key
+            schema = self._resolve_schema(schema_key)
+            base = (component.draft_data or component.data) if draft_mode else component.data
+            merged = deep_merge(base or {}, payload)
+            merged.pop("schema_key", None)  # not part of the content payload
+
+            if schema is not None:
+                errors = validate_against_schema(payload, schema)
+                if errors:
+                    return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+            if incoming_schema_key is not None:
+                component.schema_key = incoming_schema_key
+            if draft_mode:
+                component.draft_data = merged
+                component.status = "draft"
+            else:
+                component.data = merged
+            component.updated_by = request.user if request.user.is_authenticated else None
+            component.save()
+
+            self._snapshot(component, request.user, "draft edit" if draft_mode else "edit")
+
+        return Response(component.draft_data if draft_mode else component.data)
 
     def put(self, request, *args, **kwargs):
-        component, _ = ComponentData.objects.update_or_create(
-            name=self._name(), defaults={"data": request.data}
-        )
+        payload = request.data if isinstance(request.data, dict) else {}
+        with transaction.atomic():
+            component, _ = ComponentData.objects.update_or_create(
+                name=self._name(), defaults={"data": payload}
+            )
+            component.updated_by = request.user if request.user.is_authenticated else None
+            component.save(update_fields=["updated_by"])
+            self._snapshot(component, request.user, "replace (PUT)")
         return Response(component.data)
 
     def delete(self, request, *args, **kwargs):
         ComponentData.objects.filter(name=self._name()).delete()
         return Response(status=204)
+
+    @staticmethod
+    def _snapshot(component, user, note):
+        ComponentRevision.objects.create(
+            component=component,
+            data=component.data,
+            saved_by=user if getattr(user, "is_authenticated", False) else None,
+            note=note,
+        )
+
+
+class ComponentSchemaListView(ListAPIView):
+    """GET home/schemas/ — public discovery of every editable-field contract."""
+    queryset = ComponentSchema.objects.all()
+    serializer_class = ComponentSchemaSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+
+class ComponentHistoryView(APIView):
+    """GET home/<name>/history/ — last N revisions (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        component = ComponentData.objects.filter(name=kwargs.get("name")).first()
+        if component is None:
+            return Response({"detail": "No such component."}, status=status.HTTP_404_NOT_FOUND)
+        revisions = component.revisions.all()[:REVISION_HISTORY_LIMIT]
+        return Response(ComponentRevisionSerializer(revisions, many=True).data)
+
+
+class ComponentPublishView(APIView):
+    """POST home/<name>/publish/ — copy draft_data -> data (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        with transaction.atomic():
+            component = ComponentData.objects.select_for_update().filter(
+                name=kwargs.get("name")
+            ).first()
+            if component is None:
+                return Response({"detail": "No such component."}, status=status.HTTP_404_NOT_FOUND)
+            if component.draft_data:
+                component.data = component.draft_data
+            component.status = "published"
+            component.updated_by = request.user if request.user.is_authenticated else None
+            component.save()
+            ComponentDataView._snapshot(component, request.user, "publish")
+        return Response(component.data)
+
+
+class ComponentRevertView(APIView):
+    """POST home/<name>/revert/<revision_id>/ — restore a revision as a NEW
+    revision, never destructive (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        with transaction.atomic():
+            component = ComponentData.objects.select_for_update().filter(
+                name=kwargs.get("name")
+            ).first()
+            if component is None:
+                return Response({"detail": "No such component."}, status=status.HTTP_404_NOT_FOUND)
+            revision = component.revisions.filter(pk=kwargs.get("revision_id")).first()
+            if revision is None:
+                return Response({"detail": "No such revision."}, status=status.HTTP_404_NOT_FOUND)
+            component.data = revision.data
+            component.updated_by = request.user if request.user.is_authenticated else None
+            component.save()
+            ComponentDataView._snapshot(
+                component, request.user, f"revert to revision {revision.pk}"
+            )
+        return Response(component.data)
 
 
 # ==================== IMAGE UPLOADS ====================

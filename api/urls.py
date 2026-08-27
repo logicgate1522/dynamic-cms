@@ -7,6 +7,10 @@ from .views import (
     AdminLoginView,
     BlogPostViewSet,
     ComponentDataView,
+    ComponentHistoryView,
+    ComponentPublishView,
+    ComponentRevertView,
+    ComponentSchemaListView,
     FormSubmissionListView,
     FormSubmitView,
     PageSEODetailView,
@@ -24,7 +28,12 @@ router.register(r'redirects', RedirectViewSet, basename='redirect')
 urlpatterns = [
     path('auth/login/', AdminLoginView.as_view(), name='admin-login'),
 
-    # Generic inline-editable ("CMS") sections — e.g. home/footer/, home/hero/
+    # Generic inline-editable ("CMS") sections — e.g. home/footer/, home/hero/.
+    # Specific sub-routes MUST precede the greedy <slug:name> catch-all.
+    path('home/schemas/', ComponentSchemaListView.as_view(), name='component-schemas'),
+    path('home/<slug:name>/history/', ComponentHistoryView.as_view(), name='component-history'),
+    path('home/<slug:name>/publish/', ComponentPublishView.as_view(), name='component-publish'),
+    path('home/<slug:name>/revert/<int:revision_id>/', ComponentRevertView.as_view(), name='component-revert'),
     path('home/<slug:name>/', ComponentDataView.as_view(), name='home-component'),
 
     path('images/', UploadedImageViewSet.as_view(), name='image-list-create'),

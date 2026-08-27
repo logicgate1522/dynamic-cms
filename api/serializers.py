@@ -1,7 +1,15 @@
 from rest_framework import serializers
 
 from .image_validation import validate_upload
-from .models import BlogPost, FormSubmission, PageSEO, Redirect, UploadedImage
+from .models import (
+    BlogPost,
+    ComponentRevision,
+    ComponentSchema,
+    FormSubmission,
+    PageSEO,
+    Redirect,
+    UploadedImage,
+)
 
 MAX_REDIRECT_CHAIN_DEPTH = 20
 
@@ -74,6 +82,20 @@ class RedirectSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class ComponentRevisionSerializer(serializers.ModelSerializer):
+    saved_by = serializers.StringRelatedField()
+
+    class Meta:
+        model = ComponentRevision
+        fields = ["id", "data", "saved_by", "note", "created_at"]
+
+
+class ComponentSchemaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ComponentSchema
+        fields = ["key", "label", "schema", "builtin", "updated_at"]
 
 
 class FormSubmissionSerializer(serializers.ModelSerializer):

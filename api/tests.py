@@ -159,6 +159,94 @@ class ComponentDataTests(AdminAuthMixin, APITestCase):
         self.assertFalse(ComponentData.objects.filter(name="temp").exists())
 
 
+class ComponentDataBackCompatTests(AdminAuthMixin, APITestCase):
+    """The original contract must be byte-identical when no mode / schema_key
+    is involved."""
+
+    def test_plain_patch_writes_data_and_get_is_unchanged(self):
+        r = self.admin_client.patch("/api/home/hero/", {"title": "Hi"}, format="json")
+        self.assertEqual(r.data, {"title": "Hi"})
+        g = self.client.get("/api/home/hero/")
+        self.assertEqual(g.data, {"title": "Hi"})
+
+    def test_plain_patch_deep_merge_still_works(self):
+        ComponentData.objects.create(name="cta", data={"a": {"x": 1, "y": 2}})
+        r = self.admin_client.patch("/api/home/cta/", {"a": {"x": 9}}, format="json")
+        self.assertEqual(r.data["a"], {"x": 9, "y": 2})
+
+    def test_revision_written_on_every_admin_patch(self):
+        self.admin_client.patch("/api/home/hero/", {"title": "1"}, format="json")
+        self.admin_client.patch("/api/home/hero/", {"title": "2"}, format="json")
+        c = ComponentData.objects.get(name="hero")
+        self.assertEqual(c.revisions.count(), 2)
+        self.assertEqual(c.updated_by, self.admin)
+
+
+class ComponentDraftPublishTests(AdminAuthMixin, APITestCase):
+    def test_draft_mode_does_not_touch_public_data(self):
+        self.admin_client.patch("/api/home/hero/", {"title": "live"}, format="json")
+        self.admin_client.patch(
+            "/api/home/hero/?mode=draft", {"title": "wip"}, format="json"
+        )
+        self.assertEqual(self.client.get("/api/home/hero/").data, {"title": "live"})
+        self.assertEqual(
+            self.admin_client.get("/api/home/hero/?mode=draft").data, {"title": "wip"}
+        )
+
+    def test_publish_promotes_draft_to_live(self):
+        self.admin_client.patch("/api/home/hero/", {"title": "live"}, format="json")
+        self.admin_client.patch("/api/home/hero/?mode=draft", {"title": "wip"}, format="json")
+        r = self.admin_client.post("/api/home/hero/publish/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.get("/api/home/hero/").data, {"title": "wip"})
+
+    def test_publish_requires_admin(self):
+        ComponentData.objects.create(name="hero", data={})
+        self.assertEqual(self.client.post("/api/home/hero/publish/").status_code, 401)
+
+
+class ComponentHistoryRevertTests(AdminAuthMixin, APITestCase):
+    def test_history_and_revert(self):
+        self.admin_client.patch("/api/home/hero/", {"title": "v1"}, format="json")
+        self.admin_client.patch("/api/home/hero/", {"title": "v2"}, format="json")
+        hist = self.admin_client.get("/api/home/hero/history/").data
+        self.assertEqual(len(hist), 2)
+        first_rev = hist[-1]["id"]
+        r = self.admin_client.post(f"/api/home/hero/revert/{first_rev}/")
+        self.assertEqual(r.data["title"], "v1")
+        # revert is non-destructive — a new revision was written
+        self.assertEqual(ComponentData.objects.get(name="hero").revisions.count(), 3)
+
+    def test_history_requires_admin(self):
+        ComponentData.objects.create(name="hero", data={})
+        self.assertEqual(self.client.get("/api/home/hero/history/").status_code, 401)
+
+
+class ComponentSchemaTests(AdminAuthMixin, APITestCase):
+    def test_builtin_catalogue_is_seeded_and_public(self):
+        r = self.client.get("/api/home/schemas/")
+        self.assertEqual(r.status_code, 200)
+        keys = {row["key"] for row in r.data}
+        self.assertTrue({"hero", "faq", "pricing", "footer"}.issubset(keys))
+
+    def test_schema_validation_rejects_wrong_type_without_writing(self):
+        self.admin_client.patch(
+            "/api/home/myhero/", {"schema_key": "hero"}, format="json"
+        )
+        r = self.admin_client.patch(
+            "/api/home/myhero/", {"heading": 123}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("heading", r.data)
+        self.assertEqual(ComponentData.objects.get(name="myhero").data, {})
+
+    def test_schema_validation_allows_valid_payload(self):
+        self.admin_client.patch("/api/home/h2/", {"schema_key": "hero"}, format="json")
+        r = self.admin_client.patch("/api/home/h2/", {"heading": "Hello"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["heading"], "Hello")
+
+
 # ==================== Image uploads ====================
 
 class UploadedImageTests(AdminAuthMixin, APITestCase):

@@ -17,13 +17,68 @@ class CustomUser(AbstractUser):
 
 
 class ComponentData(models.Model):
-    """Generic named JSON blob backing inline-editable page/component content."""
+    """Generic named JSON blob backing inline-editable page/component content.
+
+    `data` is the live/published payload the public GET returns — a plain
+    PATCH (no ?mode=draft) writes it directly, identical to the original
+    contract. `draft_data` is the editor's working copy, written by
+    PATCH ?mode=draft; POST home/<name>/publish/ copies draft_data -> data.
+    """
+    STATUS_CHOICES = [("draft", "Draft"), ("published", "Published")]
+
     name = models.CharField(max_length=255, unique=True)
     data = models.JSONField(default=dict)
+    draft_data = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="published")
+    schema_key = models.CharField(max_length=100, blank=True)
+    updated_by = models.ForeignKey(
+        "CustomUser", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+",
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
+
+
+class ComponentRevision(models.Model):
+    """Immutable snapshot of a ComponentData payload, written on every admin
+    PATCH / publish / revert. Revert restores one as a *new* revision."""
+    component = models.ForeignKey(
+        ComponentData, on_delete=models.CASCADE, related_name="revisions"
+    )
+    data = models.JSONField(default=dict)
+    saved_by = models.ForeignKey(
+        "CustomUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.component.name} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class ComponentSchema(models.Model):
+    """A reusable field contract for a class of component (hero, cards, faq…).
+
+    Powers the AI prompt generator, optional server-side PATCH validation
+    (when a ComponentData row sets `schema_key`), and the frontend
+    "what is editable" discovery endpoint GET home/schemas/.
+    """
+    key = models.CharField(max_length=100, unique=True)
+    label = models.CharField(max_length=255, blank=True)
+    schema = models.JSONField(default=dict)
+    builtin = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return self.key
 
 
 class UploadedImage(models.Model):
