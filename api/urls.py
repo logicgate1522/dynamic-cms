@@ -3,6 +3,22 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .section_views import (
+    BlogSectionDetailView,
+    BlogSectionListView,
+    BlogSectionMediaUploadView,
+    BlogSectionReorderView,
+    ContentPageDetailView,
+    ContentPageListCreateView,
+    CopyStructurePromptView,
+    DynamicPagePromptView,
+    PasteToBuildView,
+    SectionDetailView,
+    SectionListView,
+    SectionMediaUploadView,
+    SectionReorderView,
+    SectionSchemaView,
+)
 from .views import (
     AdminLoginView,
     BlogPostViewSet,
@@ -59,6 +75,22 @@ urlpatterns = [
     path('seo/<path:path>/history/', PageSEOHistoryView.as_view(), name='seo-history'),
     path('seo/<path:path>/revert/<int:history_id>/', PageSEORevertView.as_view(), name='seo-revert'),
     path('seo/<path:path>/', PageSEODetailView.as_view(), name='seo-detail'),
+
+    # ---- Dynamic Page / Section system ----
+    path('ai/section-schema/', SectionSchemaView.as_view(), name='section-schema'),
+    path('ai/dynamic-page-prompt/', DynamicPagePromptView.as_view(), name='dynamic-page-prompt'),
+    path('ai/copy-structure-prompt/', CopyStructurePromptView.as_view(), name='copy-structure-prompt'),
+    path('content/paste-to-build/', PasteToBuildView.as_view(), name='paste-to-build'),
+    path('content/pages/', ContentPageListCreateView.as_view(), name='content-page-list'),
+    path('content/pages/<path:path>/', ContentPageDetailView.as_view(), name='content-page-detail'),
+    path('content/<path:key>/sections/reorder/', SectionReorderView.as_view(), name='content-section-reorder'),
+    path('content/<path:key>/sections/<int:pk>/media/<str:slot>/', SectionMediaUploadView.as_view(), name='content-section-media'),
+    path('content/<path:key>/sections/<int:pk>/', SectionDetailView.as_view(), name='content-section-detail'),
+    path('content/<path:key>/sections/', SectionListView.as_view(), name='content-section-list'),
+    path('blog/<slug:key>/sections/reorder/', BlogSectionReorderView.as_view(), name='blog-section-reorder'),
+    path('blog/<slug:key>/sections/<int:pk>/media/<str:slot>/', BlogSectionMediaUploadView.as_view(), name='blog-section-media'),
+    path('blog/<slug:key>/sections/<int:pk>/', BlogSectionDetailView.as_view(), name='blog-section-detail'),
+    path('blog/<slug:key>/sections/', BlogSectionListView.as_view(), name='blog-section-list'),
 
     path('forms/<slug:name>/submit/', FormSubmitView.as_view(), name='form-submit'),
     path('forms/<slug:name>/submissions/', FormSubmissionListView.as_view(), name='form-submissions'),

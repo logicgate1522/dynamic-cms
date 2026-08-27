@@ -1,9 +1,13 @@
 import os
 
 from django.contrib.auth.models import AbstractUser
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
+
+from .utils import build_unique_slug
 
 
 class CustomUser(AbstractUser):
@@ -168,7 +172,7 @@ class BlogPost(models.Model):
         ("published", "Published"),
     ]
 
-    slug = models.SlugField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True, blank=True)
     title = models.CharField(max_length=255)
     excerpt = models.TextField(blank=True)
     content = models.JSONField(default=dict)  # {"coverImage": "", "coverImageAlt": "", "sections": [...]}
@@ -178,8 +182,16 @@ class BlogPost(models.Model):
     og_image = models.CharField(max_length=500, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     published_at = models.DateTimeField(null=True, blank=True)
+    # "legacy" = content.sections blob (existing posts). "dynamic" = real
+    # DynamicSection rows drive the render.
+    body_mode = models.CharField(
+        max_length=10, choices=[("legacy", "Legacy"), ("dynamic", "Dynamic")],
+        default="legacy",
+    )
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    dynamic_sections = GenericRelation("DynamicSection")
 
     class Meta:
         ordering = ["-published_at", "-created_at"]
@@ -190,10 +202,93 @@ class BlogPost(models.Model):
         # published_at__lte=now filter doesn't hide the post indefinitely.
         if self.status == "published" and self.published_at is None:
             self.published_at = timezone.now()
+        if not self.slug:
+            self.slug = build_unique_slug(BlogPost, self.title, instance_pk=self.pk)
         super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title
+
+
+class ContentPage(models.Model):
+    """Generic host for dynamic (section-built) or legacy (blob) page content.
+
+    Complements BlogPost — articles stay on BlogPost, everything else
+    (landing, service, product, generic…) lives here. Both share the
+    DynamicSection / SectionMedia models via a generic relation.
+    """
+    STATUS_CHOICES = [("draft", "Draft"), ("published", "Published")]
+    BODY_MODES = [("legacy", "Legacy"), ("dynamic", "Dynamic")]
+
+    path = models.CharField(max_length=255, unique=True)
+    title = models.CharField(max_length=255)
+    page_type = models.CharField(max_length=50, default="generic")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    published_at = models.DateTimeField(null=True, blank=True)
+    seo_path = models.CharField(max_length=255, blank=True)
+    body_mode = models.CharField(max_length=10, choices=BODY_MODES, default="dynamic")
+    content = models.JSONField(default=dict, blank=True)  # legacy-mode blob
+    updated_by = models.ForeignKey(
+        "CustomUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    sections = GenericRelation("DynamicSection")
+
+    class Meta:
+        ordering = ["path"]
+
+    def save(self, *args, **kwargs):
+        if self.status == "published" and self.published_at is None:
+            self.published_at = timezone.now()
+        if not self.seo_path:
+            self.seo_path = self.path
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.path
+
+
+class DynamicSection(models.Model):
+    """One ordered, typed section attached (via generic FK) to a ContentPage
+    or a BlogPost. Validity of `section_type` and `content` is enforced by
+    dynamic_pages.parse_and_validate / the serializer, not the DB."""
+    STATUS_CHOICES = [("draft", "Draft"), ("published", "Published")]
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    host = GenericForeignKey("content_type", "object_id")
+
+    section_type = models.CharField(max_length=40)
+    order = models.PositiveIntegerField(default=0)
+    content = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="published")
+
+    class Meta:
+        ordering = ["content_type", "object_id", "order"]
+        indexes = [models.Index(fields=["content_type", "object_id", "order"])]
+
+    def __str__(self):
+        return f"{self.section_type} #{self.order}"
+
+
+class SectionMedia(models.Model):
+    """A named image slot inside a section (image, items[0].image, …)."""
+    section = models.ForeignKey(DynamicSection, on_delete=models.CASCADE, related_name="media")
+    slot = models.CharField(max_length=100, default="image")
+    image = models.ForeignKey(
+        UploadedImage, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    image_prompt = models.TextField(blank=True)
+    alt_override = models.CharField(max_length=255, blank=True)
+    required = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ["section", "slot"]
+
+    def __str__(self):
+        return f"{self.section_id}:{self.slot}"
 
 
 class Redirect(models.Model):

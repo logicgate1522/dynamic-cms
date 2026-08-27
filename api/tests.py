@@ -10,7 +10,15 @@ from rest_framework.test import APITestCase
 
 from rest_framework.authtoken.models import Token
 
-from .models import BlogPost, ComponentData, PageSEO, Redirect, SiteSettings
+from .models import (
+    BlogPost,
+    ComponentData,
+    ContentPage,
+    DynamicSection,
+    PageSEO,
+    Redirect,
+    SiteSettings,
+)
 
 User = get_user_model()
 
@@ -599,6 +607,164 @@ class BlogPostTests(AdminAuthMixin, APITestCase):
             "/api/blog/", {"slug": "x", "title": "X"}, format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+import json as _json
+
+
+class DynamicPageTests(AdminAuthMixin, APITestCase):
+    def _payload(self, **over):
+        base = {
+            "page_type": "landing",
+            "title": "Launch",
+            "sections": [
+                {"type": "hero", "heading": "Hi", "description": "There",
+                 "image_required": True, "image_prompt": "a rocket launching"},
+                {"type": "faq", "items": [{"question": "Q?", "answer": "A."}]},
+            ],
+        }
+        base.update(over)
+        return base
+
+    def test_section_schema_endpoint_is_public(self):
+        r = self.client.get("/api/ai/section-schema/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("hero", r.data["section_schema"])
+
+    def test_dynamic_page_prompt_requires_admin_and_filters(self):
+        self.assertEqual(self.client.get("/api/ai/dynamic-page-prompt/").status_code, 401)
+        r = self.admin_client.get("/api/ai/dynamic-page-prompt/?sections=hero,faq")
+        self.assertIn("hero", r.data["prompt"])
+
+    def test_paste_to_build_happy_path(self):
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/",
+            {"raw": _json.dumps(self._payload())}, format="json",
+        )
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["host"]["kind"], "content")
+        self.assertEqual(len(r.data["pending_images"]), 1)
+        page = ContentPage.objects.get(path=r.data["host"]["key"])
+        self.assertEqual(page.body_mode, "dynamic")
+        self.assertEqual(page.status, "draft")
+        self.assertEqual(page.sections.count(), 2)
+
+    def test_paste_to_build_article_creates_blogpost(self):
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/",
+            {"raw": _json.dumps(self._payload(page_type="article"))}, format="json",
+        )
+        self.assertEqual(r.data["host"]["kind"], "blog")
+        self.assertTrue(BlogPost.objects.filter(slug=r.data["host"]["key"]).exists())
+
+    def test_paste_to_build_invalid_json_rejected(self):
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": "{not json"}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("errors", r.data)
+
+    def test_paste_to_build_unknown_type_rejected_atomically(self):
+        bad = self._payload(sections=[{"type": "nope", "heading": "x"}])
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": _json.dumps(bad)}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(ContentPage.objects.count(), 0)
+        self.assertEqual(DynamicSection.objects.count(), 0)
+
+    def test_paste_to_build_image_prompt_required(self):
+        bad = self._payload(sections=[
+            {"type": "hero", "heading": "h", "description": "d", "image_required": True},
+        ])
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": _json.dumps(bad)}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_video_url_allowlist_enforced(self):
+        bad = self._payload(sections=[{"type": "video", "video_url": "https://evil.test/x"}])
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": _json.dumps(bad)}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_raw_html_in_content_rejected(self):
+        bad = self._payload(sections=[{"type": "rich_text", "content": "<script>x</script>"}])
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": _json.dumps(bad)}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def _build(self):
+        r = self.admin_client.post(
+            "/api/content/paste-to-build/", {"raw": _json.dumps(self._payload())}, format="json"
+        )
+        return r.data["host"]["key"]
+
+    def test_sections_get_is_public_published_only(self):
+        key = self._build()
+        # sections are created published, but host is draft -> visible to admin,
+        # the section list endpoint itself returns published sections
+        r = self.client.get(f"/api/content/{key}/sections/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 2)
+
+    def test_reorder_rejects_foreign_id_set(self):
+        key = self._build()
+        ids = [s["id"] for s in self.admin_client.get(f"/api/content/{key}/sections/").data]
+        r = self.admin_client.post(
+            f"/api/content/{key}/sections/reorder/", {"order": ids[:1]}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        r2 = self.admin_client.post(
+            f"/api/content/{key}/sections/reorder/", {"order": list(reversed(ids))}, format="json"
+        )
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.data[0]["order"], 0)
+
+    def test_publish_guard_blocks_until_required_image_uploaded(self):
+        key = self._build()
+        r = self.admin_client.patch(
+            f"/api/content/pages/{key}/", {"status": "published"}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        # upload the missing hero image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        png = SimpleUploadedFile("h.png", b"\x89PNG\r\n\x1a\n" + b"\0" * 40, content_type="image/png")
+        hero = DynamicSection.objects.get(section_type="hero")
+        up = self.admin_client.post(
+            f"/api/content/{key}/sections/{hero.id}/media/image/",
+            {"image": png}, format="multipart",
+        )
+        self.assertEqual(up.status_code, 200)
+        r2 = self.admin_client.patch(
+            f"/api/content/pages/{key}/", {"status": "published"}, format="json"
+        )
+        self.assertEqual(r2.status_code, 200)
+
+    def test_section_crud_and_delete(self):
+        key = self._build()
+        sid = self.admin_client.get(f"/api/content/{key}/sections/").data[1]["id"]
+        p = self.admin_client.patch(
+            f"/api/content/{key}/sections/{sid}/",
+            {"content": {"items": [{"question": "New?", "answer": "Yes."}]}}, format="json",
+        )
+        self.assertEqual(p.data["content"]["items"][0]["question"], "New?")
+        d = self.admin_client.delete(f"/api/content/{key}/sections/{sid}/")
+        self.assertEqual(d.status_code, 204)
+
+    def test_blog_section_subroute_mirrors_content(self):
+        post = BlogPost.objects.create(title="Post", status="draft", body_mode="dynamic")
+        r = self.admin_client.post(
+            f"/api/blog/{post.slug}/sections/",
+            [{"section_type": "rich_text", "content": {"content": "Hello world"}}],
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            len(self.client.get(f"/api/blog/{post.slug}/sections/").data), 1
+        )
 
 
 # ==================== Redirect ====================
