@@ -414,6 +414,42 @@ class PageSEOHistoryResolveTests(AdminAuthMixin, APITestCase):
         self.assertEqual(r.status_code, 200)
 
 
+class RobotsSitemapTests(AdminAuthMixin, APITestCase):
+    def test_robots_txt_has_sitemap_and_default_disallows(self):
+        r = self.client.get("/robots.txt")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn("Disallow: /api/", body)
+        self.assertIn("Sitemap:", body)
+
+    def test_staging_noindex_blocks_everything(self):
+        self.admin_client.patch(
+            "/api/settings/site/",
+            {"seoDefaults": {"robots": {"index": False}}}, format="json",
+        )
+        body = self.client.get("/robots.txt").content.decode()
+        self.assertIn("Disallow: /", body)
+
+    def test_sitemap_lists_published_blog_and_included_pages(self):
+        BlogPost.objects.create(slug="p1", title="P1", status="published")
+        BlogPost.objects.create(slug="d1", title="D1", status="draft")
+        self.admin_client.patch("/api/seo/about/", {"seoTitle": "About"}, format="json")
+        self.admin_client.patch(
+            "/api/seo/secret/", {"sitemap": {"include": False}}, format="json"
+        )
+        body = self.client.get("/sitemap.xml").content.decode()
+        self.assertIn("/blog/p1", body)
+        self.assertNotIn("/blog/d1", body)
+        self.assertIn("/about", body)
+        self.assertNotIn("/secret", body)
+
+    def test_section_sitemap_and_index(self):
+        BlogPost.objects.create(slug="p1", title="P1", status="published")
+        self.assertIn("/blog/p1", self.client.get("/sitemap-blog.xml").content.decode())
+        self.assertEqual(self.client.get("/sitemap-nope.xml").status_code, 404)
+        self.assertIn("sitemap-blog.xml", self.client.get("/sitemap-index.xml").content.decode())
+
+
 class SEOAuditTests(AdminAuthMixin, APITestCase):
     def test_audit_flags_missing_metadata_and_persists(self):
         self.admin_client.patch("/api/seo/thin/", {"seoTitle": "Hi"}, format="json")

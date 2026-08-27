@@ -395,4 +395,12 @@ ALLOW_SVG_UPLOAD = os.getenv('ALLOW_SVG_UPLOAD', 'False') == 'True'
 # API Version
 API_VERSION = 'v1'
 
+# Extra sitemap content sources for a cloned project. Each entry is
+# "module.path:callable"; the callable returns dicts with path/changefreq/
+# priority/lastmod. "pages" and "blog" are always included. Example:
+#   SITEMAP_SOURCES = ['myproject.sitemaps:products']
+SITEMAP_SOURCES = [
+    s.strip() for s in os.getenv('SITEMAP_SOURCES', '').split(',') if s.strip()
+]
+
 
