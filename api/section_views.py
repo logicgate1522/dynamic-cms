@@ -13,8 +13,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import ModelViewSet
-from rest_framework import permissions, serializers as drf_serializers
+from rest_framework import serializers as drf_serializers
 from django.utils import timezone
 
 from .dynamic_pages import (
@@ -28,7 +27,7 @@ from .dynamic_pages import (
     build_copy_structure_prompt,
     parse_and_validate,
 )
-from .models import BlogPost, ContentPage, DynamicSection, SectionMedia, UploadedImage
+from .models import BlogPost, ContentPage, DynamicSection, SectionMedia
 from .utils import build_unique_slug
 
 
@@ -53,7 +52,7 @@ def _sections_qs(host, published_only):
     return qs
 
 
-def serialize_section(section):
+def serialize_section(section, request=None):
     return {
         "id": section.id,
         "section_type": section.section_type,
@@ -64,18 +63,22 @@ def serialize_section(section):
             {
                 "id": m.id, "slot": m.slot, "required": m.required,
                 "image_prompt": m.image_prompt, "alt_override": m.alt_override,
-                "image": _image_payload(m.image),
+                "image": _image_payload(m.image, request),
             }
             for m in section.media.all()
         ],
     }
 
 
-def _image_payload(image):
+def _image_payload(image, request=None):
     if image is None:
         return None
-    return {"id": image.id, "url": image.image.url if image.image else None,
-            "alt_text": getattr(image, "alt_text", "")}
+    url = image.image.url if image.image else None
+    if url and request is not None:
+        url = request.build_absolute_uri(url)
+    return {"id": image.id, "url": url,
+            "alt_text": getattr(image, "alt_text", ""),
+            "width": image.width, "height": image.height}
 
 
 def _missing_required_media(host):
@@ -261,7 +264,7 @@ class SectionListView(_SectionBase):
         if host is None:
             return Response([])
         published_only = not self.is_admin(request)
-        data = [serialize_section(s) for s in
+        data = [serialize_section(s, request) for s in
                 _sections_qs(host, published_only).prefetch_related("media__image")]
         return Response(data)
 
@@ -277,7 +280,7 @@ class SectionListView(_SectionBase):
         with transaction.atomic():
             _sections_qs(host, published_only=False).delete()
             _create_sections(host, validated)
-        return Response([serialize_section(s) for s in _sections_qs(host, False)],
+        return Response([serialize_section(s, request) for s in _sections_qs(host, False)],
                         status=status.HTTP_200_OK)
 
 
@@ -304,7 +307,7 @@ class SectionDetailView(_SectionBase):
         if "section_type" in request.data and request.data["section_type"] in SECTION_SCHEMA:
             section.section_type = request.data["section_type"]
         section.save()
-        return Response(serialize_section(section))
+        return Response(serialize_section(section, request))
 
     def delete(self, request, key, pk):
         host, section = self._get(key, pk)
@@ -331,7 +334,7 @@ class SectionReorderView(_SectionBase):
         with transaction.atomic():
             for position, sid in enumerate(order):
                 DynamicSection.objects.filter(pk=sid).update(order=position)
-        return Response([serialize_section(s) for s in _sections_qs(host, False)])
+        return Response([serialize_section(s, request) for s in _sections_qs(host, False)])
 
 
 class SectionMediaUploadView(_SectionBase):
@@ -362,7 +365,7 @@ class SectionMediaUploadView(_SectionBase):
         if "alt_override" in request.data:
             media.alt_override = request.data["alt_override"]
         media.save()
-        return Response(serialize_section(section), status=status.HTTP_200_OK)
+        return Response(serialize_section(section, request), status=status.HTTP_200_OK)
 
 
 # --------------------------------------------------------------- publish guard
@@ -429,7 +432,7 @@ class ContentPageDetailView(APIView):
             return Response({"detail": "Not found."}, status=404)
         data = ContentPageSerializer(row).data
         data["sections"] = [
-            serialize_section(s) for s in
+            serialize_section(s, request) for s in
             _sections_qs(row, published_only=not (request.user and request.user.is_staff))
         ]
         return Response(data)

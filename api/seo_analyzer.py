@@ -17,7 +17,6 @@ stored-metadata checks. No external requests are made.
 
 import json
 import re
-from collections import Counter
 from html.parser import HTMLParser
 
 TECHNICAL, CONTENT, METADATA, SCHEMA = "technical", "content", "metadata", "schema"
@@ -301,6 +300,8 @@ def _content_checks(d, dom=None, min_words=DEFAULT_MIN_WORDS):
         external = [l for l in dom.links if l["href"].startswith("http")]
         out.append(_check("internal-links", CONTENT, "Has internal links", len(internal) >= 1,
                           f"{len(internal)} internal link(s).", "Add links to related pages."))
+        out.append(_check("external-links", CONTENT, "Outbound links", True,
+                          f"{len(external)} external link(s).", "", weight=0))
         out.append(_check("link-text", CONTENT, "Links have anchor text",
                           all(l["text"] for l in dom.links) if dom.links else True,
                           "All links have descriptive text." if all(l["text"] for l in dom.links)
@@ -385,7 +386,7 @@ def _duplicate_checks(d, path):
 
 
 def analyze_page(path, html=None, url=None):
-    from .models import BlogPost, PageSEO
+    from .models import PageSEO
 
     path = (path or "").strip("/")
     row = PageSEO.objects.filter(path=path).first()

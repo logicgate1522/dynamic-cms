@@ -170,7 +170,11 @@ class ComponentDataView(APIView):
             component.updated_by = request.user if request.user.is_authenticated else None
             component.save()
 
-            self._snapshot(component, request.user, "draft edit" if draft_mode else "edit")
+            self._snapshot(
+                component, request.user,
+                "draft edit" if draft_mode else "edit",
+                snapshot_data=component.draft_data if draft_mode else component.data,
+            )
 
         return Response(component.draft_data if draft_mode else component.data)
 
@@ -190,10 +194,10 @@ class ComponentDataView(APIView):
         return Response(status=204)
 
     @staticmethod
-    def _snapshot(component, user, note):
+    def _snapshot(component, user, note, snapshot_data=None):
         ComponentRevision.objects.create(
             component=component,
-            data=component.data,
+            data=component.data if snapshot_data is None else snapshot_data,
             saved_by=user if getattr(user, "is_authenticated", False) else None,
             note=note,
         )
@@ -606,7 +610,7 @@ class RedirectViewSet(ModelViewSet):
             # noindex PageSEO row
             noindex = {
                 r.path for r in PageSEO.objects.all()
-                if (r.data or {}).get("robots", {}).get("index") is False
+                if ((r.data or {}).get("robots") or {}).get("index") is False
             }
             chain_sources = set(Redirect.objects.values_list("source", flat=True))
             broken_ids = [
@@ -706,7 +710,8 @@ class FormSubmitView(APIView):
         import hashlib
 
         form_name = kwargs.get('name')
-        payload = dict(request.data)
+        # QueryDict (form-encoded / multipart) -> flat dict; JSON body is already a dict.
+        payload = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
 
         definition = {}
         row = ComponentData.objects.filter(name=f"form-{form_name}").first()

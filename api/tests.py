@@ -421,6 +421,22 @@ class PageSEOHistoryResolveTests(AdminAuthMixin, APITestCase):
         r = self.client.get("/api/seo/resolve/nope/")
         self.assertEqual(r.status_code, 200)
 
+    def test_resolve_blog_path_emits_blogposting_and_uses_post_fallback(self):
+        BlogPost.objects.create(
+            slug="hello", title="Hello World", status="published",
+            excerpt="An intro", seo_title="", meta_description="",
+        )
+        self.admin_client.patch(
+            "/api/settings/site/",
+            {"seoDefaults": {"siteUrl": "https://acme.test"}}, format="json",
+        )
+        r = self.client.get("/api/seo/resolve/blog/hello/")
+        self.assertEqual(r.data["title"], "Hello World")       # BlogPost.title fallback
+        self.assertEqual(r.data["description"], "An intro")     # BlogPost.excerpt fallback
+        types = [n.get("@type") for n in r.data["jsonLd"]["@graph"]]
+        self.assertIn("BlogPosting", types)
+        self.assertIn("BreadcrumbList", types)
+
 
 class SchemaBuilderTests(AdminAuthMixin, APITestCase):
     def test_organization_and_localbusiness(self):
@@ -630,6 +646,14 @@ class DynamicPageTests(AdminAuthMixin, APITestCase):
         r = self.client.get("/api/ai/section-schema/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("hero", r.data["section_schema"])
+
+    def test_section_schema_keys_match_parser_and_registry_contract(self):
+        # The single-source-of-truth guarantee: the endpoint, the parser, and
+        # the model-level type list must all agree.
+        from .dynamic_pages import SECTION_SCHEMA, SECTION_TYPES
+        r = self.client.get("/api/ai/section-schema/")
+        self.assertEqual(set(r.data["section_schema"]), set(SECTION_SCHEMA))
+        self.assertEqual(set(SECTION_TYPES), set(SECTION_SCHEMA))
 
     def test_dynamic_page_prompt_requires_admin_and_filters(self):
         self.assertEqual(self.client.get("/api/ai/dynamic-page-prompt/").status_code, 401)
@@ -1016,6 +1040,28 @@ class ImageUploadValidationTests(AdminAuthMixin, APITestCase):
         )
         r = self.client.get("/api/images/?missing_alt=1")
         self.assertGreaterEqual(r.data["count"], 1)
+
+    def test_metadata_patch_does_not_rename_stored_file(self):
+        created = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png("orig.png")}, format="multipart"
+        ).data
+        stored = created["image"]
+        self.assertIn("uploaded_images/", stored)
+        r = self.admin_client.patch(
+            f"/api/images/{created['id']}/", {"alt_text": "A brand new caption"}, format="json"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["image"], stored)          # path unchanged
+        self.assertEqual(r.data["alt_text"], "A brand new caption")
+        from .models import UploadedImage
+        self.assertEqual(UploadedImage.objects.get(pk=created["id"]).image.name, stored.split("/media/")[-1])
+
+    def test_dimensions_and_checksum_filled_on_upload(self):
+        row = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png("m.png")}, format="multipart"
+        ).data
+        self.assertEqual(len(row["checksum"]), 64)
+        self.assertIsNotNone(row["file_size"])
 
     def test_usage_endpoint_scans_section_media(self):
         img = self.admin_client.post(

@@ -133,13 +133,18 @@ class UploadedImage(models.Model):
         return secrets.token_hex(6)
 
     def save(self, *args, **kwargs):
-        _, ext = os.path.splitext(self.image.name or "")
-        ext = ext.lower() or ".jpg"
-        self.image.name = f"uploaded_images/{self._seo_stem()}{ext}"
-
-        f = getattr(self.image, "file", None)
-        if f is not None and not self.checksum:
-            self._fill_metadata(f)
+        name = self.image.name or ""
+        # Only slugify + fingerprint a *newly uploaded* file. A metadata-only
+        # update (e.g. PATCH alt_text) must never rewrite image.name — the
+        # file on disk isn't moved, so that would dangle the reference.
+        is_new_file = bool(name) and not name.startswith("uploaded_images/")
+        if is_new_file:
+            _, ext = os.path.splitext(name)
+            ext = ext.lower() or ".jpg"
+            self.image.name = f"uploaded_images/{self._seo_stem()}{ext}"
+            f = getattr(self.image, "file", None)
+            if f is not None:
+                self._fill_metadata(f)
 
         super().save(*args, **kwargs)
 

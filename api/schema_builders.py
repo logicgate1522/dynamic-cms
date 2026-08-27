@@ -376,7 +376,12 @@ def assemble(path, page_seo_data=None, site_data=None, article_ctx=None, base_ur
     builders = schema_cfg.get("builders") or []
     if article_ctx:
         graph.append(article(article_ctx, site_data, base_url))
+    elif ("Article" in builders or "BlogPosting" in builders) and page_seo_data.get("article"):
+        graph.append(article(page_seo_data["article"], site_data, base_url))
     for name in builders:
+        # breadcrumb + article are already composed above; don't double-add.
+        if name in ("BreadcrumbList", "Article", "BlogPosting"):
+            continue
         fn = BUILDER_MAP.get(name)
         if not fn:
             continue
