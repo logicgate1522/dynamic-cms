@@ -1,10 +1,13 @@
 from collections import Counter
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 
 from rest_framework import generics, permissions, status
 from rest_framework.authtoken.models import Token
@@ -30,6 +33,7 @@ from .models import (
 )
 from . import schema_builders
 from .seo_resolve import resolve_seo
+from .form_validation import validate_submission
 from .schema_validation import validate_against_schema
 from .settings_validation import validate_site_settings
 from .serializers import (
@@ -605,29 +609,61 @@ class FormSubmitView(APIView):
     throttle_scope = 'form_submit'
 
     def post(self, request, *args, **kwargs):
+        import hashlib
+
         form_name = kwargs.get('name')
         payload = dict(request.data)
 
-        # Honeypot: a hidden field real users never fill in. Silently accept
-        # (don't tip off bots) but never persist it.
-        if payload.pop("website", None):
+        definition = {}
+        row = ComponentData.objects.filter(name=f"form-{form_name}").first()
+        if row is not None:
+            definition = row.data or {}
+
+        # Honeypot: a configurable hidden field real users never fill in.
+        honeypot = definition.get("honeypotField", "website")
+        if payload.pop(honeypot, None):
             return Response({"success": True})
 
-        FormSubmission.objects.create(form_name=form_name, data=payload)
-        self._notify(form_name, payload)
+        # Server-side validation against the field definition (if one exists).
+        if definition.get("fields"):
+            cleaned, errors = validate_submission(definition, payload)
+            if errors:
+                return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+            payload = cleaned
+
+        ip = request.META.get("REMOTE_ADDR", "")
+        ip_hash = hashlib.sha256(f"{ip}:{settings.SECRET_KEY}".encode()).hexdigest() if ip else ""
+        ua = request.META.get("HTTP_USER_AGENT", "")[:400]
+        referer = request.META.get("HTTP_REFERER", "")[:500]
+
+        # 60-second same-email dedupe.
+        email = payload.get("email")
+        if email:
+            recent = FormSubmission.objects.filter(
+                form_name=form_name, created_at__gte=timezone.now() - timedelta(seconds=60),
+            )
+            if any((s.data or {}).get("email") == email for s in recent):
+                return Response({"success": True}, status=status.HTTP_201_CREATED)
+
+        FormSubmission.objects.create(
+            form_name=form_name, data=payload,
+            ip_hash=ip_hash, user_agent=ua, referer=referer,
+        )
+        self._notify(form_name, payload, definition)
         return Response({"success": True}, status=status.HTTP_201_CREATED)
 
-    def _notify(self, form_name, payload):
-        """Best-effort email nudge so a new booking/lead doesn't just sit
-        unread until someone happens to poll the submissions endpoint.
-        Never lets a notification failure fail the submission itself."""
-        recipient = getattr(settings, 'FORM_NOTIFICATION_EMAIL', '')
+    def _notify(self, form_name, payload, definition=None):
+        """Best-effort email nudge. Never lets a notification failure fail the
+        submission itself."""
+        notify = (definition or {}).get("notify") or {}
+        recipient = notify.get("email") or getattr(settings, 'FORM_NOTIFICATION_EMAIL', '')
         if not recipient:
             return
+        subject = notify.get("subject") or f"New {form_name} submission"
         body_lines = [f"New '{form_name}' form submission:\n"]
         body_lines += [f"{key}: {value}" for key, value in payload.items()]
         send_mail(
-            subject=f"New {form_name} submission",
+            subject=subject,
             message="\n".join(body_lines),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[recipient],
@@ -635,10 +671,73 @@ class FormSubmitView(APIView):
         )
 
 
+def _filtered_submissions(name, params):
+    qs = FormSubmission.objects.filter(form_name=name)
+    if params.get("is_read") in ("0", "1"):
+        qs = qs.filter(is_read=params["is_read"] == "1")
+    if params.get("is_spam") in ("0", "1"):
+        qs = qs.filter(is_spam=params["is_spam"] == "1")
+    since = params.get("since")
+    if since:
+        parsed = parse_datetime(since) or parse_date(since)
+        if parsed is not None:
+            qs = qs.filter(created_at__gte=parsed)
+    return qs
+
+
 class FormSubmissionListView(ListAPIView):
-    """Admin-only list of submissions for a named form."""
+    """Admin-only list of submissions for a named form.
+    Filters: ?is_read=&is_spam=&since=ISO8601."""
     serializer_class = FormSubmissionSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
-        return FormSubmission.objects.filter(form_name=self.kwargs.get('name'))
+        return _filtered_submissions(self.kwargs.get('name'), self.request.query_params)
+
+
+class FormSubmissionExportView(APIView):
+    """GET forms/<name>/submissions/export/?format=csv|json (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        import csv
+        import io
+
+        name = kwargs.get("name")
+        rows = _filtered_submissions(name, request.query_params).order_by("created_at")
+        fmt = request.query_params.get("format", "csv")
+
+        if fmt == "json":
+            return Response(FormSubmissionSerializer(rows, many=True).data)
+
+        keys = []
+        for r in rows:
+            for k in (r.data or {}):
+                if k not in keys:
+                    keys.append(k)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["id", "created_at", "is_read", "is_spam", *keys])
+        for r in rows:
+            writer.writerow([r.id, r.created_at.isoformat(), r.is_read, r.is_spam,
+                             *[(r.data or {}).get(k, "") for k in keys]])
+        resp = HttpResponse(buf.getvalue(), content_type="text/csv")
+        resp["Content-Disposition"] = f'attachment; filename="{name}-submissions.csv"'
+        return resp
+
+
+class FormSubmissionDetailView(APIView):
+    """PATCH forms/<name>/submissions/<id>/ — toggle is_read / is_spam (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, *args, **kwargs):
+        sub = FormSubmission.objects.filter(
+            form_name=kwargs.get("name"), pk=kwargs.get("pk")
+        ).first()
+        if sub is None:
+            return Response({"detail": "Not found."}, status=404)
+        for field in ("is_read", "is_spam"):
+            if field in request.data:
+                setattr(sub, field, bool(request.data[field]))
+        sub.save()
+        return Response(FormSubmissionSerializer(sub).data)

@@ -260,6 +260,10 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
+    # We ship only the JSON renderer, so DRF's ?format= content-negotiation
+    # override is useless — and it collides with endpoints that take a
+    # ?format=csv|json app-level param (form-submission export). Disable it.
+    'URL_FORMAT_OVERRIDE': None,
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',

@@ -374,6 +374,10 @@ class FormSubmission(models.Model):
     form_name = models.CharField(max_length=100)
     data = models.JSONField(default=dict)
     is_read = models.BooleanField(default=False)
+    is_spam = models.BooleanField(default=False)
+    ip_hash = models.CharField(max_length=64, blank=True)
+    user_agent = models.CharField(max_length=400, blank=True)
+    referer = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

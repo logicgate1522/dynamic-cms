@@ -1004,6 +1004,88 @@ class ImageUploadValidationTests(AdminAuthMixin, APITestCase):
         self.assertTrue(row["image_url"].startswith("http"))
 
 
+class FormValidationTests(AdminAuthMixin, APITestCase):
+    def _define(self, name="contact", **extra):
+        definition = {
+            "fields": [
+                {"name": "email", "label": "Email", "type": "email", "required": True},
+                {"name": "age", "label": "Age", "type": "number",
+                 "validation": {"min": 18, "max": 120}},
+                {"name": "topic", "label": "Topic", "type": "select",
+                 "options": ["sales", "support"]},
+            ],
+        }
+        definition.update(extra)
+        self.admin_client.patch(f"/api/home/form-{name}/", definition, format="json")
+
+    def test_missing_required_field_rejected(self):
+        self._define()
+        r = self.client.post("/api/forms/contact/submit/", {"age": 20}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("email", r.data["errors"])
+
+    def test_type_and_range_validation(self):
+        self._define()
+        r = self.client.post(
+            "/api/forms/contact/submit/",
+            {"email": "bad", "age": 5}, format="json",
+        )
+        self.assertIn("email", r.data["errors"])
+        self.assertIn("age", r.data["errors"])
+
+    def test_option_membership_enforced(self):
+        self._define()
+        r = self.client.post(
+            "/api/forms/contact/submit/",
+            {"email": "a@b.co", "topic": "hacking"}, format="json",
+        )
+        self.assertIn("topic", r.data["errors"])
+
+    def test_valid_submission_persists_with_metadata(self):
+        self._define()
+        r = self.client.post(
+            "/api/forms/contact/submit/",
+            {"email": "a@b.co", "age": 30, "topic": "sales"}, format="json",
+        )
+        self.assertEqual(r.status_code, 201)
+        from .models import FormSubmission
+        sub = FormSubmission.objects.get(form_name="contact")
+        self.assertTrue(sub.ip_hash)
+
+    def test_same_email_dedupe_within_60s(self):
+        self._define()
+        body = {"email": "dup@b.co", "age": 30}
+        self.client.post("/api/forms/contact/submit/", body, format="json")
+        self.client.post("/api/forms/contact/submit/", body, format="json")
+        from .models import FormSubmission
+        self.assertEqual(FormSubmission.objects.filter(form_name="contact").count(), 1)
+
+    def test_configurable_honeypot(self):
+        self._define(honeypotField="nickname")
+        r = self.client.post(
+            "/api/forms/contact/submit/",
+            {"email": "a@b.co", "age": 30, "nickname": "bot"}, format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        from .models import FormSubmission
+        self.assertEqual(FormSubmission.objects.filter(form_name="contact").count(), 0)
+
+    def test_submissions_filter_export_and_toggle(self):
+        self._define()
+        self.client.post("/api/forms/contact/submit/",
+                         {"email": "x@b.co", "age": 30}, format="json")
+        from .models import FormSubmission
+        sub = FormSubmission.objects.get(form_name="contact")
+        p = self.admin_client.patch(
+            f"/api/forms/contact/submissions/{sub.id}/", {"is_spam": True}, format="json"
+        )
+        self.assertTrue(p.data["is_spam"])
+        listed = self.admin_client.get("/api/forms/contact/submissions/?is_spam=1")
+        self.assertEqual(listed.data["count"], 1)
+        csv = self.admin_client.get("/api/forms/contact/submissions/export/?format=csv")
+        self.assertIn("x@b.co", csv.content.decode())
+
+
 class FormSubmitThrottleTests(AdminAuthMixin, APITestCase):
     def test_throttle_actually_blocks_after_the_configured_rate(self):
         # Regression test for the bug found during audit: a custom

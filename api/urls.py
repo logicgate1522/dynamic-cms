@@ -27,6 +27,8 @@ from .views import (
     ComponentPublishView,
     ComponentRevertView,
     ComponentSchemaListView,
+    FormSubmissionDetailView,
+    FormSubmissionExportView,
     FormSubmissionListView,
     FormSubmitView,
     OrganizationSchemaView,
@@ -95,6 +97,8 @@ urlpatterns = [
     path('blog/<slug:key>/sections/', BlogSectionListView.as_view(), name='blog-section-list'),
 
     path('forms/<slug:name>/submit/', FormSubmitView.as_view(), name='form-submit'),
+    path('forms/<slug:name>/submissions/export/', FormSubmissionExportView.as_view(), name='form-submissions-export'),
+    path('forms/<slug:name>/submissions/<int:pk>/', FormSubmissionDetailView.as_view(), name='form-submission-detail'),
     path('forms/<slug:name>/submissions/', FormSubmissionListView.as_view(), name='form-submissions'),
 
     path('', include(router.urls)),
