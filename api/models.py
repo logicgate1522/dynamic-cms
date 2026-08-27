@@ -357,13 +357,29 @@ class SectionMedia(models.Model):
 
 
 class Redirect(models.Model):
+    STATUS_CHOICES = [(301, "301 Moved Permanently"), (302, "302 Found"),
+                      (307, "307 Temporary Redirect"), (308, "308 Permanent Redirect")]
+
     source = models.CharField(max_length=500, unique=True)
     destination = models.CharField(max_length=500)
     permanent = models.BooleanField(default=True)
+    status_code = models.PositiveSmallIntegerField(choices=STATUS_CHOICES, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    hit_count = models.PositiveIntegerField(default=0)
+    last_hit_at = models.DateTimeField(null=True, blank=True)
+    notes = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        "CustomUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["source"]
+
+    @property
+    def effective_status(self):
+        return self.status_code or (301 if self.permanent else 302)
 
     def __str__(self):
         return f"{self.source} -> {self.destination}"

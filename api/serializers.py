@@ -52,9 +52,12 @@ class PageSEOSerializer(serializers.ModelSerializer):
 
 
 class RedirectSerializer(serializers.ModelSerializer):
+    effective_status = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Redirect
         fields = "__all__"
+        read_only_fields = ["hit_count", "last_hit_at", "created_by", "created_at"]
 
     def validate(self, attrs):
         source = attrs.get("source", getattr(self.instance, "source", None))

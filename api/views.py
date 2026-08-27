@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import F
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -591,13 +592,106 @@ class BlogPostViewSet(ModelViewSet):
 # ==================== REDIRECTS ====================
 
 class RedirectViewSet(ModelViewSet):
-    queryset = Redirect.objects.all()
     serializer_class = RedirectSerializer
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [AllowAny()]
         return [IsAdminUser()]
+
+    def get_queryset(self):
+        qs = Redirect.objects.all()
+        if self.request.query_params.get("broken") == "1":
+            # target is itself a source of another redirect (chain) or a known
+            # noindex PageSEO row
+            noindex = {
+                r.path for r in PageSEO.objects.all()
+                if (r.data or {}).get("robots", {}).get("index") is False
+            }
+            chain_sources = set(Redirect.objects.values_list("source", flat=True))
+            broken_ids = [
+                r.id for r in qs
+                if r.destination in chain_sources or r.destination.strip("/") in noindex
+            ]
+            qs = qs.filter(id__in=broken_ids)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user if self.request.user.is_authenticated else None)
+
+
+class RedirectResolveView(APIView):
+    """GET redirects/resolve/?path=/old — public, cached. {to, status} or 404.
+    Increments hit_count/last_hit_at best-effort."""
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "resolve"
+
+    def get(self, request, *args, **kwargs):
+        from django.core.cache import cache
+
+        path = request.query_params.get("path", "")
+        if not path:
+            return Response({"detail": "path query param required."}, status=400)
+        cache_key = f"redirect-resolve:{path}"
+        hit = cache.get(cache_key)
+        if hit is None:
+            row = Redirect.objects.filter(source=path, is_active=True).first()
+            hit = {"to": row.destination, "status": row.effective_status, "_id": row.id} if row else {}
+            cache.set(cache_key, hit, 300)
+        if not hit:
+            return Response({"detail": "No redirect."}, status=404)
+        Redirect.objects.filter(pk=hit["_id"]).update(
+            hit_count=F("hit_count") + 1, last_hit_at=timezone.now()
+        )
+        return Response({"to": hit["to"], "status": hit["status"]})
+
+
+class RedirectImportExportView(APIView):
+    """GET  redirects/io/?format=csv  — export all
+    POST redirects/io/  (text/csv body or {csv: "..."}) — import (upsert). Admin."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        import csv
+        import io
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["source", "destination", "status_code", "is_active", "notes"])
+        for r in Redirect.objects.all():
+            w.writerow([r.source, r.destination, r.effective_status, r.is_active, r.notes])
+        resp = HttpResponse(buf.getvalue(), content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="redirects.csv"'
+        return resp
+
+    def post(self, request, *args, **kwargs):
+        import csv
+        import io
+
+        body = request.data.get("csv") if isinstance(request.data, dict) else None
+        if body is None:
+            body = request.body.decode("utf-8", "ignore")
+        reader = csv.DictReader(io.StringIO(body))
+        created, updated, errors = 0, 0, []
+        for i, row in enumerate(reader):
+            src = (row.get("source") or "").strip()
+            dst = (row.get("destination") or "").strip()
+            if not src or not dst:
+                errors.append({"row": i, "message": "source and destination required"})
+                continue
+            defaults = {"destination": dst, "notes": (row.get("notes") or "").strip()}
+            if row.get("status_code"):
+                try:
+                    defaults["status_code"] = int(row["status_code"])
+                except ValueError:
+                    pass
+            if row.get("is_active") is not None:
+                defaults["is_active"] = str(row.get("is_active")).lower() not in ("false", "0", "")
+            _, was_created = Redirect.objects.update_or_create(source=src, defaults=defaults)
+            created += was_created
+            updated += not was_created
+        return Response({"created": created, "updated": updated, "errors": errors})
 
 
 # ==================== FORM SUBMISSIONS ====================

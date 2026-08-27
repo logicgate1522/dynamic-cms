@@ -807,6 +807,36 @@ class RedirectTests(AdminAuthMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
+    def test_resolve_returns_target_and_status_and_counts_hit(self):
+        Redirect.objects.create(source="/old", destination="/new", permanent=True)
+        r = self.client.get("/api/redirects/resolve/?path=/old")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data, {"to": "/new", "status": 301})
+        self.assertEqual(Redirect.objects.get(source="/old").hit_count, 1)
+
+    def test_resolve_404_for_unknown(self):
+        self.assertEqual(self.client.get("/api/redirects/resolve/?path=/x").status_code, 404)
+
+    def test_status_code_override_wins_over_permanent(self):
+        Redirect.objects.create(source="/a", destination="/b", permanent=True, status_code=307)
+        r = self.client.get("/api/redirects/resolve/?path=/a")
+        self.assertEqual(r.data["status"], 307)
+
+    def test_broken_filter_flags_chained_target(self):
+        Redirect.objects.create(source="/a", destination="/b")
+        Redirect.objects.create(source="/b", destination="/c")
+        r = self.admin_client.get("/api/redirects/?broken=1")
+        paths = {row["source"] for row in r.data["results"]}
+        self.assertIn("/a", paths)
+        self.assertNotIn("/b", paths)
+
+    def test_csv_import_export_roundtrip(self):
+        csv_body = "source,destination,status_code,is_active,notes\n/x,/y,302,true,moved\n"
+        imp = self.admin_client.post("/api/redirects/io/", {"csv": csv_body}, format="json")
+        self.assertEqual(imp.data["created"], 1)
+        out = self.admin_client.get("/api/redirects/io/?format=csv").content.decode()
+        self.assertIn("/x,/y,302", out)
+
     def test_list_is_public_write_requires_admin(self):
         response = self.client.get("/api/redirects/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)

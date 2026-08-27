@@ -32,6 +32,8 @@ from .views import (
     FormSubmissionListView,
     FormSubmitView,
     OrganizationSchemaView,
+    RedirectImportExportView,
+    RedirectResolveView,
     PageSEODetailView,
     PageSEOHistoryView,
     PageSEOListView,
@@ -100,6 +102,9 @@ urlpatterns = [
     path('forms/<slug:name>/submissions/export/', FormSubmissionExportView.as_view(), name='form-submissions-export'),
     path('forms/<slug:name>/submissions/<int:pk>/', FormSubmissionDetailView.as_view(), name='form-submission-detail'),
     path('forms/<slug:name>/submissions/', FormSubmissionListView.as_view(), name='form-submissions'),
+
+    path('redirects/resolve/', RedirectResolveView.as_view(), name='redirect-resolve'),
+    path('redirects/io/', RedirectImportExportView.as_view(), name='redirect-io'),
 
     path('', include(router.urls)),
 ]
