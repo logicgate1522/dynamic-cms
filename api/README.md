@@ -90,6 +90,6 @@ documented in `FRONTEND_INTEGRATION_PROMPT.md` §13.6 (the full endpoint table).
 
 ## Tests
 
-`api/tests.py` — 110 tests. Run with `python manage.py test api`.
+`api/tests.py` — 114 tests. Run with `python manage.py test api`.
 `python manage.py makemigrations --check` is clean; migrations `0001`–`0009`
 are forward-only and additive.

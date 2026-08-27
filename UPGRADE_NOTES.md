@@ -4,7 +4,7 @@ Brings dynamic-cms to parity with (and past) the logic-gate-portfolio
 reference: revisioned CMS content, a full SEO engine, server-side JSON-LD,
 a generalised Dynamic Page / Section system, richer forms, images, and
 redirects. Everything is additive — the original 38 tests and the existing
-frontend contract still pass unchanged (now 110 tests).
+frontend contract still pass unchanged (now 114 tests).
 
 ## Moving an existing clone forward
 

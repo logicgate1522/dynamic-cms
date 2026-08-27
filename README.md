@@ -62,7 +62,7 @@ curl http://127.0.0.1:8000/api/home/anything/
 # -> {}  (never 404s — see "Upsert semantics" below)
 ```
 
-Run the test suite (110 tests, no external services required):
+Run the test suite (114 tests, no external services required):
 
 ```bash
 python manage.py test api
@@ -83,6 +83,10 @@ first time.
 
 ## Models
 
+The full model list (22 models: revisions, schemas, SEO history/audit,
+`ContentPage`/`DynamicSection`/`SectionMedia`, extended images/forms/redirects)
+is in [`api/README.md`](api/README.md). The originals:
+
 | Model | Purpose | Notes |
 |---|---|---|
 | `CustomUser` | the project's user model | `AbstractUser` + optional `phone_number`. `is_staff` is the entire admin contract — nothing else about a user matters to this backend. |
@@ -96,29 +100,33 @@ first time.
 
 ## Endpoints
 
-All relative to `/api/`.
+All relative to `/api/`. **The complete, current endpoint table (~50 routes)
+lives in [`FRONTEND_INTEGRATION_PROMPT.md`](FRONTEND_INTEGRATION_PROMPT.md)
+§13.6** — including which of the two URL shapes each one uses. The core set:
 
 | Purpose | Method | Path | Auth |
 |---|---|---|---|
 | Admin login | POST | `auth/login/` | public |
-| Get/set a content block | GET / PATCH / PUT / DELETE | `home/<name>/` | GET public; writes admin |
+| Get/set a content block | GET / PATCH / PUT / DELETE | `home/<name>/` (`?mode=draft`) | GET public; writes admin |
+| Component schemas / history / publish / revert | GET/POST | `home/schemas/`, `home/<name>/history/`, `.../publish/`, `.../revert/<id>/` | schemas public; rest admin |
 | Get/set site-wide settings | GET / PATCH | `settings/site/` | GET public; PATCH admin |
-| List all page SEO rows | GET | `seo/` | public (paginated) |
-| Get/set one page's SEO | GET / PATCH | `seo/<path>/` | GET public; PATCH admin |
-| List/create blog posts | GET / POST | `blog/` | GET public (published only); POST admin |
-| Get/update/delete one post | GET / PATCH / DELETE | `blog/<slug>/` | GET public if published; writes admin |
-| List/create redirects | GET / POST | `redirects/` | GET public; POST admin |
-| Update/delete a redirect | PATCH / DELETE | `redirects/<id>/` | admin |
-| Submit a form | POST | `forms/<name>/submit/` | public, throttled |
-| List a form's submissions | GET | `forms/<name>/submissions/` | admin |
-| Upload an image | POST | `images/` | admin |
-| List/get/update/delete images | GET / PATCH / DELETE | `images/`, `images/<id>/` | GET public; writes admin |
+| Computed Organization JSON-LD | GET | `settings/site/schema/organization/` | public |
+| List / get / set page SEO | GET / PATCH | `seo/`, `seo/<path>/` | GET public; PATCH admin |
+| Resolved metadata + JSON-LD @graph | GET | `seo/resolve/<path>/` | public (cached) |
+| SEO history / revert / audit / roll-up / validate | GET/POST | `seo/<path>/history/`, `.../revert/<id>/`, `seo/analyze/<path>/`, `seo/analyze/`, `seo/validate-schema/` | admin |
+| Dynamic page builder | GET/POST | `ai/section-schema/` (public), `ai/dynamic-page-prompt/`, `ai/copy-structure-prompt/`, `content/paste-to-build/` | as noted |
+| Content pages + sections | GET/POST/PATCH/DELETE | `content/pages/…`, `content/<path>/sections/…`, `blog/<slug>/sections/…` | GET public; writes admin |
+| Blog posts | GET / POST / PATCH / DELETE | `blog/`, `blog/<slug>/` | GET public (published only); writes admin |
+| Redirects + resolve + io | GET/POST/PATCH/DELETE | `redirects/`, `redirects/<id>/`, `redirects/resolve/?path=`, `redirects/io/` | GET/resolve public; rest admin |
+| Forms | POST / GET / PATCH | `forms/<name>/submit/` (public), `.../submissions/`, `.../submissions/export/`, `.../submissions/<id>/` | submit public; rest admin |
+| Images | GET / POST / PATCH / DELETE | `images/?category=&unused=1&missing_alt=1`, `images/<id>/`, `images/<id>/usage/` | GET public; writes admin |
+| SEO discovery files (project root) | GET | `/robots.txt`, `/sitemap.xml`, `/sitemap-index.xml`, `/sitemap-<section>.xml` | public |
 
 **Two different URL shapes on purpose:** `home/`, `settings/site/`, and
-`seo/` are name/path-keyed and upsert-safe — never append an id to these.
-`blog/`, `redirects/`, and `images/` are real REST resource collections
-with their own id/slug in the URL for anything but list/create — treat
-those like any normal API.
+`seo/<path>/` (plus `seo/resolve/`) are name/path-keyed and upsert-safe —
+`GET` on an unknown key returns `200 {}`, never append an id. `blog/`,
+`redirects/`, `images/`, `content/pages/`, sections, and submissions are
+real REST collections with their own id/slug.
 
 ## Auth contract
 

@@ -3,7 +3,7 @@
 Living document. Updated at the end of every upgrade phase. Severity: **High**
 (exploitable now), **Medium** (hardening / defence-in-depth), **Low** (note).
 
-**Status after full upgrade (phases 1–13):** 110 tests pass;
+**Status after full upgrade (phases 1–13):** 114 tests pass;
 `manage.py check --deploy` clean with prod env vars; `makemigrations --check`
 clean; every write endpoint admin-gated (enforced by `PermissionAuditTests`
 walking the URLconf on every run); no new deploy warnings introduced.
