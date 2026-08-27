@@ -18,6 +18,7 @@ from .views import (
     PageSEOHistoryView,
     PageSEOListView,
     PageSEORevertView,
+    SchemaValidateView,
     SEOAuditRollupView,
     SEOAuditView,
     SEOResolveView,
@@ -52,6 +53,7 @@ urlpatterns = [
     # Specific routes MUST precede the greedy seo/<path:path>/ catch-all —
     # otherwise <path:path> swallows ".../history/", "resolve/...", etc.
     path('seo/resolve/<path:path>/', SEOResolveView.as_view(), name='seo-resolve'),
+    path('seo/validate-schema/', SchemaValidateView.as_view(), name='seo-validate-schema'),
     path('seo/analyze/', SEOAuditRollupView.as_view(), name='seo-audit-rollup'),
     path('seo/analyze/<path:path>/', SEOAuditView.as_view(), name='seo-audit'),
     path('seo/<path:path>/history/', PageSEOHistoryView.as_view(), name='seo-history'),

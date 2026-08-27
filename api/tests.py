@@ -414,6 +414,69 @@ class PageSEOHistoryResolveTests(AdminAuthMixin, APITestCase):
         self.assertEqual(r.status_code, 200)
 
 
+class SchemaBuilderTests(AdminAuthMixin, APITestCase):
+    def test_organization_and_localbusiness(self):
+        from api import schema_builders as sb
+        site = {
+            "organization": {"name": "Acme", "logo": "/l.png", "sameAs": ["https://x.com/a"]},
+            "contact": {"email": "hi@acme.test"},
+            "seoDefaults": {"siteUrl": "https://acme.test"},
+            "schema": {"organizationType": "LocalBusiness"},
+            "locations": [{"name": "HQ", "streetAddress": "1 Main",
+                           "latitude": 1.0, "longitude": 2.0,
+                           "openingHours": [{"days": ["Monday"], "opens": "09:00", "closes": "17:00"}]}],
+        }
+        node = sb.organization(site)
+        self.assertEqual(node["@type"], "LocalBusiness")
+        self.assertEqual(node["contactPoint"]["email"], "hi@acme.test")
+        self.assertEqual(node["location"][0]["geo"]["latitude"], 1.0)
+        self.assertTrue(node["location"][0]["openingHoursSpecification"])
+
+    def test_faq_skips_when_no_valid_pairs(self):
+        from api import schema_builders as sb
+        self.assertIsNone(sb.faq([{"question": "Q only"}]))
+        self.assertEqual(sb.faq([{"question": "Q", "answer": "A"}])["@type"], "FAQPage")
+
+    def test_breadcrumb_matches_depth(self):
+        from api import schema_builders as sb
+        bc = sb.breadcrumb("services/web", base_url="https://a.test")
+        self.assertEqual(len(bc["itemListElement"]), 3)
+        self.assertEqual(bc["itemListElement"][-1]["item"], "https://a.test/services/web")
+
+    def test_escape_jsonld_neutralises_angle_bracket(self):
+        from api import schema_builders as sb
+        out = sb.escape_jsonld({"name": "</script><script>alert(1)"})
+        self.assertNotIn("<", out["name"])
+
+    def test_assemble_honours_full_manual_override(self):
+        from api import schema_builders as sb
+        raw = {"@context": "https://schema.org", "@type": "WebPage", "name": "manual"}
+        out = sb.assemble("x", page_seo_data={"schema": {"data": raw}}, site_data={})
+        self.assertEqual(out, raw)
+
+    def test_validate_schema_flags_missing_required(self):
+        from api import schema_builders as sb
+        issues = sb.validate_schema({"@type": "Product"})
+        self.assertTrue(any(i["level"] == "error" and "name" in i["message"] for i in issues))
+
+    def test_validate_schema_endpoint(self):
+        r = self.admin_client.post(
+            "/api/seo/validate-schema/",
+            {"schema": {"@context": "https://schema.org", "@type": "Organization", "name": "A"}},
+            format="json",
+        )
+        self.assertTrue(r.data["valid"])
+        r2 = self.admin_client.post(
+            "/api/seo/validate-schema/", {"schema": "{bad json"}, format="json"
+        )
+        self.assertFalse(r2.data["valid"])
+
+    def test_validate_schema_requires_admin(self):
+        self.assertEqual(
+            self.client.post("/api/seo/validate-schema/", {}, format="json").status_code, 401
+        )
+
+
 class RobotsSitemapTests(AdminAuthMixin, APITestCase):
     def test_robots_txt_has_sitemap_and_default_disallows(self):
         r = self.client.get("/robots.txt")

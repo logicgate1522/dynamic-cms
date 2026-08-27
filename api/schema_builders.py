@@ -13,6 +13,7 @@ endpoint does).
 """
 
 import json
+import re
 
 
 def escape_jsonld(obj):
@@ -389,6 +390,101 @@ def assemble(path, page_seo_data=None, site_data=None, article_ctx=None, base_ur
         graph.extend(raw_page)
 
     return {"@context": "https://schema.org", "@graph": graph}
+
+
+_REQUIRED_PROPS = {
+    "Organization": ["name"],
+    "LocalBusiness": ["name", "address"],
+    "WebSite": ["url"],
+    "Article": ["headline", "datePublished", "author"],
+    "BlogPosting": ["headline", "datePublished", "author"],
+    "NewsArticle": ["headline", "datePublished", "author"],
+    "Product": ["name"],
+    "Offer": ["price", "priceCurrency"],
+    "FAQPage": ["mainEntity"],
+    "BreadcrumbList": ["itemListElement"],
+    "Person": ["name"],
+    "Event": ["name", "startDate"],
+    "HowTo": ["name", "step"],
+    "VideoObject": ["name", "thumbnailUrl", "uploadDate"],
+    "Recipe": ["name", "recipeIngredient", "recipeInstructions"],
+    "Course": ["name", "description", "provider"],
+    "JobPosting": ["title", "description", "datePosted", "hiringOrganization"],
+}
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T[\d:.\-+Z]+)?$")
+
+
+def validate_schema(obj):
+    """Structural JSON-LD validation. Returns a list of
+    {level: 'error'|'warning', path, message}. Used by the audit engine and
+    POST seo/validate-schema/."""
+    issues = []
+    if isinstance(obj, str):
+        try:
+            obj = json.loads(obj)
+        except ValueError as e:
+            return [{"level": "error", "path": "", "message": f"Invalid JSON: {e}"}]
+
+    if isinstance(obj, dict) and "@context" not in obj and "@graph" not in obj and "@type" not in obj:
+        issues.append({"level": "warning", "path": "", "message": "No @context / @type at the root."})
+
+    if isinstance(obj, dict) and "@context" in obj:
+        ctx = obj["@context"]
+        if not (isinstance(ctx, str) and "schema.org" in ctx):
+            issues.append({"level": "warning", "path": "@context",
+                           "message": "@context is not schema.org."})
+
+    nodes = []
+    if isinstance(obj, dict) and isinstance(obj.get("@graph"), list):
+        nodes = obj["@graph"]
+    elif isinstance(obj, list):
+        nodes = obj
+    elif isinstance(obj, dict):
+        nodes = [obj]
+
+    seen_types = []
+    for i, node in enumerate(nodes):
+        p = f"@graph[{i}]" if len(nodes) > 1 else ""
+        if not isinstance(node, dict):
+            issues.append({"level": "error", "path": p, "message": "Node is not an object."})
+            continue
+        t = node.get("@type")
+        if not t:
+            issues.append({"level": "error", "path": p, "message": "Node has no @type."})
+            continue
+        seen_types.append(t)
+        req = _REQUIRED_PROPS.get(t)
+        if req:
+            for prop in req:
+                if not node.get(prop):
+                    issues.append({"level": "error", "path": f"{p}.{prop}".lstrip("."),
+                                   "message": f"{t} requires '{prop}'."})
+        for date_key in ("datePublished", "dateModified", "startDate", "endDate", "uploadDate"):
+            v = node.get(date_key)
+            if isinstance(v, str) and v and not _ISO_DATE.match(v):
+                issues.append({"level": "warning", "path": f"{p}.{date_key}".lstrip("."),
+                               "message": f"{date_key} is not ISO-8601."})
+        for img_key in ("image", "logo", "thumbnailUrl", "contentUrl"):
+            v = node.get(img_key)
+            urls = v if isinstance(v, list) else [v]
+            for u in urls:
+                if isinstance(u, str) and u and not u.startswith(("http://", "https://")):
+                    issues.append({"level": "warning", "path": f"{p}.{img_key}".lstrip("."),
+                                   "message": f"{img_key} should be an absolute URL."})
+        if t == "BreadcrumbList":
+            items = node.get("itemListElement") or []
+            positions = [it.get("position") for it in items if isinstance(it, dict)]
+            if positions != list(range(1, len(positions) + 1)):
+                issues.append({"level": "warning", "path": f"{p}.itemListElement".lstrip("."),
+                               "message": "ListItem positions are not 1..n in order."})
+
+    if len(set(seen_types)) != len(seen_types):
+        dupes = [t for t in set(seen_types) if seen_types.count(t) > 1]
+        issues.append({"level": "warning", "path": "@graph",
+                       "message": f"Repeated @type(s): {', '.join(dupes)}."})
+
+    return issues
 
 
 def to_script_json(graph):

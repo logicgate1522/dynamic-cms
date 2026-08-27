@@ -483,6 +483,20 @@ def _grade(score):
     return "F"
 
 
+class SchemaValidateView(APIView):
+    """POST seo/validate-schema/ {schema: <obj|string>} — structural JSON-LD
+    validation for pasted markup (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        payload = request.data.get("schema", request.data)
+        issues = schema_builders.validate_schema(payload)
+        return Response({
+            "valid": not any(i["level"] == "error" for i in issues),
+            "issues": issues,
+        })
+
+
 class SEOResolveView(APIView):
     """GET seo/resolve/<path>/ — fully-resolved, frontend-ready metadata +
     assembled JSON-LD @graph. Public, cached, rate-limited."""
