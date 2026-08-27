@@ -131,6 +131,21 @@ class PageSEO(models.Model):
         return self.path
 
 
+class SEOChangeHistory(models.Model):
+    """Old->new snapshot of a PageSEO.data on every admin PATCH. Revert
+    restores an old_data as a new PATCH (non-destructive)."""
+    page = models.ForeignKey(PageSEO, on_delete=models.CASCADE, related_name="history")
+    changed_by = models.ForeignKey(
+        "CustomUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    old_data = models.JSONField(default=dict)
+    new_data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class BlogPost(models.Model):
     STATUS_CHOICES = [
         ("draft", "Draft"),

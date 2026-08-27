@@ -15,7 +15,10 @@ from .views import (
     FormSubmitView,
     OrganizationSchemaView,
     PageSEODetailView,
+    PageSEOHistoryView,
     PageSEOListView,
+    PageSEORevertView,
+    SEOResolveView,
     RedirectViewSet,
     RetrieveImage,
     SiteSettingsView,
@@ -44,6 +47,11 @@ urlpatterns = [
     path('settings/site/', SiteSettingsView.as_view(), name='site-settings'),
 
     path('seo/', PageSEOListView.as_view(), name='seo-list'),
+    # Specific routes MUST precede the greedy seo/<path:path>/ catch-all —
+    # otherwise <path:path> swallows ".../history/", "resolve/...", etc.
+    path('seo/resolve/<path:path>/', SEOResolveView.as_view(), name='seo-resolve'),
+    path('seo/<path:path>/history/', PageSEOHistoryView.as_view(), name='seo-history'),
+    path('seo/<path:path>/revert/<int:history_id>/', PageSEORevertView.as_view(), name='seo-revert'),
     path('seo/<path:path>/', PageSEODetailView.as_view(), name='seo-detail'),
 
     path('forms/<slug:name>/submit/', FormSubmitView.as_view(), name='form-submit'),

@@ -21,10 +21,12 @@ from .models import (
     FormSubmission,
     PageSEO,
     Redirect,
+    SEOChangeHistory,
     SiteSettings,
     UploadedImage,
 )
 from . import schema_builders
+from .seo_resolve import resolve_seo
 from .schema_validation import validate_against_schema
 from .settings_validation import validate_site_settings
 from .serializers import (
@@ -348,14 +350,79 @@ class PageSEODetailView(APIView):
 
     def patch(self, request, *args, **kwargs):
         path = kwargs.get('path')
+        user = request.user if request.user.is_authenticated else None
         with transaction.atomic():
             row, created = PageSEO.objects.select_for_update().get_or_create(
                 path=path, defaults={"data": request.data}
             )
+            old_data = {} if created else dict(row.data or {})
             if not created:
                 row.data = deep_merge(row.data or {}, request.data)
                 row.save()
+            SEOChangeHistory.objects.create(
+                page=row, changed_by=user, old_data=old_data, new_data=row.data,
+            )
         return Response(row.data)
+
+
+class PageSEOHistoryView(APIView):
+    """GET seo/<path>/history/ — last N change snapshots (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        row = PageSEO.objects.filter(path=kwargs.get("path")).first()
+        if row is None:
+            return Response({"detail": "No SEO row for this path."}, status=404)
+        history = row.history.all()[:REVISION_HISTORY_LIMIT]
+        return Response([
+            {"id": h.id, "old_data": h.old_data, "new_data": h.new_data,
+             "changed_by": str(h.changed_by) if h.changed_by else None,
+             "created_at": h.created_at}
+            for h in history
+        ])
+
+
+class PageSEORevertView(APIView):
+    """POST seo/<path>/revert/<history_id>/ — restore old_data as a new
+    change (non-destructive, admin)."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        user = request.user if request.user.is_authenticated else None
+        with transaction.atomic():
+            row = PageSEO.objects.select_for_update().filter(path=kwargs.get("path")).first()
+            if row is None:
+                return Response({"detail": "No SEO row for this path."}, status=404)
+            entry = row.history.filter(pk=kwargs.get("history_id")).first()
+            if entry is None:
+                return Response({"detail": "No such history entry."}, status=404)
+            old_data = dict(row.data or {})
+            row.data = entry.old_data
+            row.save()
+            SEOChangeHistory.objects.create(
+                page=row, changed_by=user, old_data=old_data, new_data=row.data,
+            )
+        return Response(row.data)
+
+
+class SEOResolveView(APIView):
+    """GET seo/resolve/<path>/ — fully-resolved, frontend-ready metadata +
+    assembled JSON-LD @graph. Public, cached, rate-limited."""
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "resolve"
+
+    def get(self, request, *args, **kwargs):
+        from django.core.cache import cache
+
+        path = (kwargs.get("path") or "").strip("/")
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        cache_key = f"seo-resolve:{base_url}:{path}"
+        cached = cache.get(cache_key)
+        if cached is None:
+            cached = resolve_seo(path, base_url=base_url)
+            cache.set(cache_key, cached, 300)
+        return Response(cached)
 
 
 # ==================== BLOG ====================

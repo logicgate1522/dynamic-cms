@@ -371,6 +371,49 @@ class PageSEOTests(AdminAuthMixin, APITestCase):
         self.assertEqual(response.data["count"], 2)
 
 
+class PageSEOHistoryResolveTests(AdminAuthMixin, APITestCase):
+    def test_greedy_route_does_not_swallow_history_segment(self):
+        # Regression: seo/<path:path>/ must not capture ".../history/".
+        self.admin_client.patch("/api/seo/guides/x/", {"seoTitle": "X"}, format="json")
+        r = self.admin_client.get("/api/seo/guides/x/history/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 1)
+        self.assertFalse(PageSEO.objects.filter(path="guides/x/history").exists())
+
+    def test_history_snapshots_and_revert(self):
+        self.admin_client.patch("/api/seo/about/", {"seoTitle": "v1"}, format="json")
+        self.admin_client.patch("/api/seo/about/", {"seoTitle": "v2"}, format="json")
+        hist = self.admin_client.get("/api/seo/about/history/").data
+        self.assertEqual(len(hist), 2)
+        # revert the most recent change (v1 -> v2): restores old_data = v1
+        r = self.admin_client.post(f"/api/seo/about/revert/{hist[0]['id']}/")
+        self.assertEqual(r.data["seoTitle"], "v1")
+        self.assertEqual(PageSEO.objects.get(path="about").history.count(), 3)
+
+    def test_history_requires_admin(self):
+        PageSEO.objects.create(path="about", data={})
+        self.assertEqual(self.client.get("/api/seo/about/history/").status_code, 401)
+
+    def test_resolve_merges_page_over_site_defaults(self):
+        self.admin_client.patch(
+            "/api/settings/site/",
+            {"seoDefaults": {"siteUrl": "https://acme.test", "titleTemplate": "%s | Acme",
+                             "defaultDescription": "Default desc"}},
+            format="json",
+        )
+        self.admin_client.patch("/api/seo/pricing/", {"seoTitle": "Pricing"}, format="json")
+        r = self.client.get("/api/seo/resolve/pricing/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["fullTitle"], "Pricing | Acme")
+        self.assertEqual(r.data["description"], "Default desc")
+        self.assertEqual(r.data["canonical"], "https://acme.test/pricing")
+        self.assertIn("@graph", r.data["jsonLd"])
+
+    def test_resolve_unknown_path_still_200(self):
+        r = self.client.get("/api/seo/resolve/nope/")
+        self.assertEqual(r.status_code, 200)
+
+
 # ==================== BlogPost ====================
 
 class BlogPostTests(AdminAuthMixin, APITestCase):
