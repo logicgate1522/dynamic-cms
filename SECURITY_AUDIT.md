@@ -3,6 +3,11 @@
 Living document. Updated at the end of every upgrade phase. Severity: **High**
 (exploitable now), **Medium** (hardening / defence-in-depth), **Low** (note).
 
+**Status after full upgrade (phases 1–13):** 110 tests pass;
+`manage.py check --deploy` clean with prod env vars; `makemigrations --check`
+clean; every write endpoint admin-gated (enforced by `PermissionAuditTests`
+walking the URLconf on every run); no new deploy warnings introduced.
+
 ## Posture summary
 
 - Every write endpoint is `IsAdminUser` (`is_staff`). The only unauthenticated
@@ -34,6 +39,19 @@ Living document. Updated at the end of every upgrade phase. Severity: **High**
 | 9 | Low | `SECRET_KEY` raises `KeyError` at startup when `DEBUG=False` and unset. | **OK** — verified. |
 | 10 | Low | SQL: everything is ORM. No `.raw()`, `.extra()`, or f-string queries anywhere in `api/`. | **OK** |
 | 11 | Low | `db.sqlite3`, `.env`, `media/*`, `logs/*.log`, `staticfiles/`, `.venv/` are git-ignored; `.env.example` holds placeholders only. | **OK** |
+
+## Upgrade surface (phases 2–13)
+
+| # | Sev | Finding | Status |
+|---|-----|---------|--------|
+| 12 | Low | New write endpoints (component publish/revert, SEO history/revert/audit/validate-schema, paste-to-build, section CRUD/reorder/media, content pages, form submission export/toggle, redirect io) — all explicitly `IsAdminUser`. | **OK** — covered by `PermissionAuditTests`. |
+| 13 | Low | New public reads: `home/schemas/`, `settings/site/schema/organization/`, `seo/resolve/`, `ai/section-schema/`, `content/pages/` + sections, `redirects/resolve/`. None expose secrets; injected-script fields only via the pre-existing (intentional) `settings/site/` GET. | **OK** |
+| 14 | Med | `seo/resolve/` and `redirects/resolve/` are public and do per-request work → rate-limited (`resolve` scope, 60/min) + 5-min cache. | **Fixed** P4/P11 |
+| 15 | Med | `content/paste-to-build/` parses attacker-influenced JSON. Parser is stdlib `json` (no eval), rejects raw HTML in text fields, enforces the video-host allowlist, validates every section against `SECTION_SCHEMA`, and is fully atomic (no partial create). | **OK** by design |
+| 16 | Med | `SectionMedia` upload reuses `UploadedImageSerializer` → same magic-byte / size / SVG-gate validation as `images/`. | **OK** |
+| 17 | Low | `form-<name>` submissions store a **salted sha256 of the IP**, never the raw IP (`ip_hash = sha256(ip + SECRET_KEY)`). | **OK** |
+| 18 | Low | Redirect CSV import is admin-only and `update_or_create` by `source`; the loop/self serializer validation is bypassed on bulk import — a malformed CSV could introduce a chain, but the resolver only follows one hop and the model still can't self-reference at the DB level. | **Noted** — `?broken=1` surfaces chained targets for cleanup. |
+| 19 | Low | `sitemaps.get_sources()` imports dotted paths from `SITEMAP_SOURCES` (settings/env, not user input) — deployment-controlled, wrapped in try/except. | **OK** |
 
 ## `manage.py check --deploy`
 

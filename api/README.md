@@ -53,31 +53,43 @@ squash-and-fake-apply approach instead of a reset.
 
 ## Models
 
-| Model | Purpose |
-|---|---|
-| `CustomUser` | the project's user model — `AbstractUser` + optional `phone_number`. `is_staff` is the entire admin contract. |
-| `ComponentData` | generic named JSON blob — inline-editable page/component content and form *definitions*. GET never 404s (upsert-safe); admin PATCH deep-merges. |
-| `SiteSettings` | singleton — org identity, default SEO, injected scripts (GTM/pixels/analytics). |
-| `PageSEO` | per-page SEO fields, keyed by path (supports nested paths like `services/x`). |
-| `BlogPost` | slug-based, draft/published + scheduled `published_at`, block-structured `content` JSON. |
-| `Redirect` | source → destination mappings; rejects self-redirects and loops on save. |
-| `FormSubmission` | write side of any `ComponentData`-defined form; public submit endpoint is throttled + honeypot-protected, optionally emails `FORM_NOTIFICATION_EMAIL`. |
-| `UploadedImage` | shared image upload/store for all of the above. |
+| Model | Key/REST | Purpose |
+|---|---|---|
+| `CustomUser` | — | `AbstractUser` + optional `phone_number`. `is_staff` is the entire admin contract. |
+| `ComponentData` | **name-keyed, upsert** | Inline-editable content + form definitions. `data` (live), `draft_data` (working copy, `?mode=draft`), `status`, `schema_key`, `updated_by`. GET unknown → `200 {}`. PATCH deep-merges objects, replaces arrays. |
+| `ComponentRevision` | REST (read) | Snapshot on every admin PATCH/PUT/publish/revert. `home/<name>/history/`. |
+| `ComponentSchema` | `key`-keyed | Reusable field contract per component class. 22 builtin schemas seeded (migration 0003). `home/schemas/` (public). Optional PATCH validation when `schema_key` set. |
+| `SiteSettings` | **singleton, upsert** | Canonical shape (organization / contact / locations / seoDefaults / verification / analytics / schema / navigation / brand / robotsTxt). Validated on PATCH. Injected-script fields are admin-write, public-read (deliberate trust boundary). |
+| `PageSEO` | **path-keyed, upsert** | Canonical SEO blob (title, description, canonical, robots directives, social, schema builders, sitemap, hreflang, pagination). |
+| `SEOChangeHistory` | REST (read) | old→new snapshot per PATCH. `seo/<path>/history/` + revert. |
+| `SEOAuditResult` | REST (read) | Persisted `seo_analyzer.analyze_page` runs. |
+| `BlogPost` | slug REST | draft/published + scheduled `published_at`; `body_mode` legacy/dynamic; auto-slug. |
+| `ContentPage` | path REST (`content/pages/`) | Generic host: `page_type`, `body_mode`, scheduled visibility, legacy blob or dynamic sections. |
+| `DynamicSection` | REST | Ordered typed section, **generic FK** to `ContentPage` OR `BlogPost`. Type validated against `dynamic_pages.SECTION_SCHEMA`. |
+| `SectionMedia` | REST | Named image slot (`image`, `items[0].image`). `required` slots block publish until filled. |
+| `Redirect` | source REST | `status_code` (301/302/307/308), `is_active`, `hit_count`, `last_hit_at`; loop/self rejection; `redirects/resolve/`. |
+| `FormSubmission` | REST | `is_read`/`is_spam`, salted `ip_hash`, `user_agent`, `referer`. Server-validated against `home/form-<name>/`. |
+| `UploadedImage` | REST | alt/title/caption/description/credit/license, width/height/size/mime/format, sha256 `checksum` (dedupe), focal point, `usage[]`. |
+
+## Modules
+
+- `dynamic_pages.py` — `SECTION_SCHEMA` (single source of truth), `build_ai_prompt`, `build_copy_structure_prompt`, `parse_and_validate`.
+- `schema_builders.py` — pure JSON-LD builders + `assemble(path)` @graph composer + `validate_schema` + `escape_jsonld`.
+- `seo_analyzer.py` — `analyze_page(path, html?)` technical/content/metadata/schema checks.
+- `seo_resolve.py` — `resolve_seo(path)` — the `seo/resolve/` precedence engine.
+- `sitemaps.py` — `robots.txt`, `sitemap*.xml`, `SITEMAP_SOURCES` registry.
+- `settings_validation.py`, `schema_validation.py`, `form_validation.py`, `image_validation.py` — input guards.
+- `builtin_schemas.py` — the 22 seeded `ComponentSchema` definitions.
 
 ## URL surface
 
-See `api/urls.py` — every route is generic (`home/<name>/`, `seo/<path>/`,
-`blog/<slug>/`, `forms/<name>/submit/`, `auth/login/`, etc.), none of it is
-business-specific.
+See `api/urls.py`. Every route is generic. URL-shape rule per endpoint is
+documented in `FRONTEND_INTEGRATION_PROMPT.md` §13.6 (the full endpoint table).
+`/robots.txt` + `/sitemap*.xml` are served at the **project** root
+(`backend/urls.py`), not under `/api/`.
 
 ## Tests
 
-`api/tests.py` — 38 tests covering permission gates, upsert semantics,
-deep-merge behavior, scheduled publishing, redirect-loop rejection, admin
-login (case-insensitivity, wrong password, non-staff rejection, token
-stability), and a regression test for a throttle-scope bug found during
-audit. Run with:
-
-```
-python manage.py test api
-```
+`api/tests.py` — 110 tests. Run with `python manage.py test api`.
+`python manage.py makemigrations --check` is clean; migrations `0001`–`0009`
+are forward-only and additive.

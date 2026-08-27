@@ -7,16 +7,31 @@ admin app, nothing project-specific. One Django app (`api`) is the entire
 backend.
 
 **What this gives you, out of the box:**
-- Inline-editable content sections (headlines, buttons, images, repeating
-  cards) — an admin edits directly on the live page, no CMS dashboard
-- Per-page SEO metadata (title, description, canonical, OG image, robots,
-  focus keyword)
-- A blog (draft/scheduled/published, block-structured content)
-- Forms with admin-configurable fields and a public submit endpoint
-  (throttled, honeypot-protected, optional email notification)
-- Redirects (with loop detection)
-- Image uploads
+- Inline-editable content sections with **draft/publish + revision history +
+  revert**, and 22 reusable field-contract schemas an AI or frontend can discover
+- Per-page SEO: canonical blob + **change history/revert**, a
+  **`seo/resolve/<path>/`** endpoint that returns fully-resolved metadata +
+  a composed JSON-LD `@graph` (so `generateMetadata()` is a thin mapping)
+- **SEO audit engine** (`seo/analyze/`) — technical/content/metadata/schema
+  checks + a site-wide roll-up
+- **Server-side structured-data builders** (Organization/LocalBusiness, WebSite,
+  Breadcrumb, Article, FAQ, Product, Service, Person, Event, HowTo, Video) +
+  a JSON-LD validator
+- **Dynamic Page / Section system** — `SECTION_SCHEMA`, AI-prompt generator,
+  `content/paste-to-build/`, per-slot image upload, publish guard on missing
+  images; works for `ContentPage` *and* `BlogPost`
+- A blog (draft/scheduled/published, legacy blob or dynamic sections)
+- Forms with **server-side validation from the field definition**, 18 field
+  types, submission metadata, CSV/JSON export, spam/read toggles
+- Redirects with `status_code`, hit tracking, `redirects/resolve/`, CSV import/export
+- `robots.txt` + `sitemap*.xml` with a pluggable content-source registry
+- Image management: dimensions, checksum dedupe, alt/SEO metadata, usage refs,
+  SVG gate + magic-byte validation
 - Admin login (email + password → token), no third-party auth provider
+
+See `UPGRADE_NOTES.md` for what changed and `SECURITY_AUDIT.md` for the
+security posture. `FRONTEND_INTEGRATION_PROMPT.md` is the self-contained
+frontend build agent.
 
 **What it deliberately doesn't have:** a dashboard UI, social login, JWT,
 role-based permissions beyond `is_staff`, or anything specific to one
@@ -47,7 +62,7 @@ curl http://127.0.0.1:8000/api/home/anything/
 # -> {}  (never 404s — see "Upsert semantics" below)
 ```
 
-Run the test suite (38 tests, no external services required):
+Run the test suite (110 tests, no external services required):
 
 ```bash
 python manage.py test api
