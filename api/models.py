@@ -90,23 +90,88 @@ class UploadedImage(models.Model):
     image = models.FileField(upload_to="uploaded_images/")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
+    # Image SEO metadata
+    alt_text = models.CharField(max_length=255, blank=True)
+    title = models.CharField(max_length=255, blank=True)
+    caption = models.CharField(max_length=500, blank=True)
+    description = models.TextField(blank=True)
+    credit = models.CharField(max_length=255, blank=True)
+    license = models.CharField(max_length=255, blank=True)
+
+    # Technical metadata (filled on save)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    file_size = models.PositiveIntegerField(null=True, blank=True)
+    mime_type = models.CharField(max_length=100, blank=True)
+    format = models.CharField(max_length=20, blank=True)
+    checksum = models.CharField(max_length=64, blank=True, db_index=True)
+
+    # Art-directed cropping focal point (0..1)
+    focal_x = models.FloatField(default=0.5)
+    focal_y = models.FloatField(default=0.5)
+
+    # Best-effort back-references: [{"type": "...", "ref": "..."}]
+    usage = models.JSONField(default=list, blank=True)
+
     class Meta:
         ordering = ["-uploaded_at"]
 
     def __str__(self):
         return f"{self.image.name} - {self.category}"
 
+    def _seo_stem(self):
+        """Priority chain: alt -> title -> category+rand -> original stem -> random."""
+        import secrets
+        stem, _ = os.path.splitext(os.path.basename(self.image.name or ""))
+        for candidate in (self.alt_text, self.title):
+            if candidate and candidate.strip():
+                return slugify(candidate)[:100]
+        if self.category:
+            return f"{slugify(self.category)[:80]}-{secrets.token_hex(3)}"
+        if stem:
+            return slugify(stem)[:100] or secrets.token_hex(6)
+        return secrets.token_hex(6)
+
     def save(self, *args, **kwargs):
-        base_filename, ext = os.path.splitext(self.image.name)
-        max_filename_length = 100
+        _, ext = os.path.splitext(self.image.name or "")
+        ext = ext.lower() or ".jpg"
+        self.image.name = f"uploaded_images/{self._seo_stem()}{ext}"
 
-        if len(base_filename) > max_filename_length:
-            base_filename = base_filename[:max_filename_length]
-
-        new_filename = f"{slugify(base_filename)}{ext}"
-        self.image.name = f"uploaded_images/{new_filename}"
+        f = getattr(self.image, "file", None)
+        if f is not None and not self.checksum:
+            self._fill_metadata(f)
 
         super().save(*args, **kwargs)
+
+    def _fill_metadata(self, f):
+        import hashlib
+        try:
+            pos = f.tell()
+        except (OSError, AttributeError):
+            pos = None
+        try:
+            f.seek(0)
+            raw = f.read()
+        except OSError:
+            raw = b""
+        finally:
+            if pos is not None:
+                try:
+                    f.seek(pos)
+                except OSError:
+                    pass
+        if raw:
+            self.checksum = hashlib.sha256(raw).hexdigest()
+            self.file_size = len(raw)
+        try:
+            from PIL import Image
+            import io
+            with Image.open(io.BytesIO(raw)) as img:
+                self.width, self.height = img.size
+                self.format = (img.format or "").upper()
+                self.mime_type = Image.MIME.get(img.format, "")
+        except Exception:
+            pass
 
 
 class SiteSettings(models.Model):

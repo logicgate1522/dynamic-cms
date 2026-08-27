@@ -33,6 +33,11 @@ class UploadedImageSerializer(serializers.ModelSerializer):
         validate_upload(value)
         return value
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.setdefault("duplicate", False)
+        return data
+
 
 class BlogPostSerializer(serializers.ModelSerializer):
     class Meta:

@@ -39,6 +39,7 @@ from .views import (
     SEOAuditView,
     SEOResolveView,
     RedirectViewSet,
+    ImageUsageView,
     RetrieveImage,
     SiteSettingsView,
     UploadedImageViewSet,
@@ -60,6 +61,7 @@ urlpatterns = [
     path('home/<slug:name>/', ComponentDataView.as_view(), name='home-component'),
 
     path('images/', UploadedImageViewSet.as_view(), name='image-list-create'),
+    path('images/<int:pk>/usage/', ImageUsageView.as_view(), name='image-usage'),
     path('images/<int:pk>/', RetrieveImage.as_view(), name='image-retrieve'),
 
     path('settings/site/schema/organization/', OrganizationSchemaView.as_view(), name='site-org-schema'),

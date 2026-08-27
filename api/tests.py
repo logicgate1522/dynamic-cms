@@ -964,6 +964,37 @@ class ImageUploadValidationTests(AdminAuthMixin, APITestCase):
             )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_checksum_dedupe_returns_existing(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        raw = b"\x89PNG\r\n\x1a\n" + b"dedupe" * 8
+        a = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": SimpleUploadedFile("a.png", raw)},
+            format="multipart",
+        )
+        b = self.admin_client.post(
+            "/api/images/", {"category": "y", "image": SimpleUploadedFile("b.png", raw)},
+            format="multipart",
+        )
+        self.assertEqual(a.status_code, 201)
+        self.assertEqual(b.status_code, 200)
+        self.assertTrue(b.data["duplicate"])
+        self.assertEqual(a.data["id"], b.data["id"])
+
+    def test_missing_alt_filter(self):
+        self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png("noalt.png")}, format="multipart"
+        )
+        r = self.client.get("/api/images/?missing_alt=1")
+        self.assertGreaterEqual(r.data["count"], 1)
+
+    def test_usage_endpoint_scans_section_media(self):
+        img = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png("u.png")}, format="multipart"
+        ).data
+        r = self.admin_client.get(f"/api/images/{img['id']}/usage/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["in_use"], False)
+
     def test_serializer_exposes_absolute_url(self):
         self.admin_client.post(
             "/api/images/", {"category": "x", "image": self._png("abs.png")}, format="multipart"

@@ -261,13 +261,60 @@ class ComponentRevertView(APIView):
 # ==================== IMAGE UPLOADS ====================
 
 class UploadedImageViewSet(ListCreateAPIView):
-    queryset = UploadedImage.objects.all()
     serializer_class = UploadedImageSerializer
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [AllowAny()]
         return [IsAdminUser()]
+
+    def get_queryset(self):
+        qs = UploadedImage.objects.all()
+        params = self.request.query_params
+        if params.get("category"):
+            qs = qs.filter(category=params["category"])
+        if params.get("missing_alt") == "1":
+            qs = qs.filter(alt_text="")
+        if params.get("unused") == "1":
+            qs = qs.filter(usage=[])
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # checksum dedupe: identical bytes -> return the existing row
+        upload = request.FILES.get("image")
+        if upload is not None:
+            import hashlib
+            pos = upload.tell()
+            digest = hashlib.sha256(upload.read()).hexdigest()
+            upload.seek(pos)
+            existing = UploadedImage.objects.filter(checksum=digest).first()
+            if existing is not None:
+                data = self.get_serializer(existing).data
+                data["duplicate"] = True
+                return Response(data, status=status.HTTP_200_OK)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ImageUsageView(APIView):
+    """GET images/<id>/usage/ — best-effort back-references (admin)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        img = UploadedImage.objects.filter(pk=kwargs.get("pk")).first()
+        if img is None:
+            return Response({"detail": "Not found."}, status=404)
+        refs = list(img.usage or [])
+        # live scan of SectionMedia
+        from .models import SectionMedia
+        for m in SectionMedia.objects.filter(image=img).select_related("section"):
+            entry = {"type": "section_media",
+                     "ref": f"{m.section.section_type}#{m.section_id}:{m.slot}"}
+            if entry not in refs:
+                refs.append(entry)
+        return Response({"id": img.id, "usage": refs, "in_use": bool(refs)})
 
 
 class RetrieveImage(generics.RetrieveUpdateDestroyAPIView):
