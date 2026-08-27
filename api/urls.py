@@ -13,6 +13,7 @@ from .views import (
     ComponentSchemaListView,
     FormSubmissionListView,
     FormSubmitView,
+    OrganizationSchemaView,
     PageSEODetailView,
     PageSEOListView,
     RedirectViewSet,
@@ -39,6 +40,7 @@ urlpatterns = [
     path('images/', UploadedImageViewSet.as_view(), name='image-list-create'),
     path('images/<int:pk>/', RetrieveImage.as_view(), name='image-retrieve'),
 
+    path('settings/site/schema/organization/', OrganizationSchemaView.as_view(), name='site-org-schema'),
     path('settings/site/', SiteSettingsView.as_view(), name='site-settings'),
 
     path('seo/', PageSEOListView.as_view(), name='seo-list'),

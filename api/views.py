@@ -24,7 +24,9 @@ from .models import (
     SiteSettings,
     UploadedImage,
 )
+from . import schema_builders
 from .schema_validation import validate_against_schema
+from .settings_validation import validate_site_settings
 from .serializers import (
     BlogPostSerializer,
     ComponentRevisionSerializer,
@@ -288,6 +290,9 @@ class SiteSettingsView(APIView):
         return Response(settings_row.data if settings_row else {})
 
     def patch(self, request, *args, **kwargs):
+        errors = validate_site_settings(request.data)
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             settings_row, created = SiteSettings.objects.select_for_update().get_or_create(
                 pk=1, defaults={"data": request.data}
@@ -296,6 +301,24 @@ class SiteSettingsView(APIView):
                 settings_row.data = deep_merge(settings_row.data or {}, request.data)
                 settings_row.save()
         return Response(settings_row.data)
+
+
+class OrganizationSchemaView(APIView):
+    """GET settings/site/schema/organization/ — the computed Organization /
+    LocalBusiness JSON-LD, ready to inject. Public (same trust boundary as
+    settings/site/ itself)."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        row = SiteSettings.objects.filter(pk=1).first()
+        data = row.data if row else {}
+        node = schema_builders.organization(data)
+        graph = [node] if node.get("name") else []
+        web = schema_builders.website(data)
+        if web:
+            graph.append(web)
+        doc = {"@context": "https://schema.org", "@graph": graph}
+        return Response(schema_builders.escape_jsonld(doc))
 
 
 # ==================== PAGE SEO ====================

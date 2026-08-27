@@ -301,6 +301,51 @@ class SiteSettingsTests(AdminAuthMixin, APITestCase):
         self.assertEqual(response.data["siteName"], "Acme")
 
 
+class SiteSettingsValidationTests(AdminAuthMixin, APITestCase):
+    def test_customhead_must_be_string_array(self):
+        r = self.admin_client.patch(
+            "/api/settings/site/", {"analytics": {"customHead": "oops"}}, format="json"
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("analytics.customHead", r.data)
+
+    def test_location_coordinates_must_be_numeric(self):
+        r = self.admin_client.patch(
+            "/api/settings/site/",
+            {"locations": [{"name": "HQ", "latitude": "abc"}]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_valid_canonical_shape_is_accepted(self):
+        r = self.admin_client.patch(
+            "/api/settings/site/",
+            {
+                "organization": {"name": "Acme", "sameAs": ["https://x.com/acme"]},
+                "locations": [{"name": "HQ", "latitude": 1.5, "longitude": 2.0,
+                               "openingHours": [{"days": ["Monday"], "opens": "09:00", "closes": "17:00"}]}],
+                "analytics": {"customHead": ["<meta name='x'>"]},
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_org_schema_endpoint_returns_jsonld(self):
+        self.admin_client.patch(
+            "/api/settings/site/",
+            {"organization": {"name": "Acme", "logo": "/logo.png"},
+             "seoDefaults": {"siteUrl": "https://acme.test"},
+             "schema": {"organizationType": "LocalBusiness"},
+             "locations": [{"name": "HQ", "streetAddress": "1 Main St", "latitude": 1.0, "longitude": 2.0}]},
+            format="json",
+        )
+        r = self.client.get("/api/settings/site/schema/organization/")
+        self.assertEqual(r.status_code, 200)
+        graph = r.data["@graph"]
+        self.assertEqual(graph[0]["@type"], "LocalBusiness")
+        self.assertEqual(graph[0]["name"], "Acme")
+
+
 # ==================== PageSEO ====================
 
 class PageSEOTests(AdminAuthMixin, APITestCase):
