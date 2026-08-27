@@ -1,14 +1,29 @@
 from rest_framework import serializers
 
+from .image_validation import validate_upload
 from .models import BlogPost, FormSubmission, PageSEO, Redirect, UploadedImage
 
 MAX_REDIRECT_CHAIN_DEPTH = 20
 
 
 class UploadedImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = UploadedImage
         fields = "__all__"
+
+    def get_image_url(self, obj):
+        """Always-absolute URL so the frontend never has to guess the origin."""
+        if not obj.image:
+            return None
+        request = self.context.get("request")
+        url = obj.image.url
+        return request.build_absolute_uri(url) if request is not None else url
+
+    def validate_image(self, value):
+        validate_upload(value)
+        return value
 
 
 class BlogPostSerializer(serializers.ModelSerializer):

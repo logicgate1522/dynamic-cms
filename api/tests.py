@@ -369,6 +369,127 @@ class FormSubmitTests(AdminAuthMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
+class PermissionAuditTests(APITestCase):
+    """Iterate the whole API URLconf and assert every write method is either
+    admin-gated or on the tiny explicit public-write allowlist. This is the
+    permanent guard against the reference repo's unguarded-portal mistake."""
+
+    # url name -> reason it may accept unauthenticated writes
+    PUBLIC_WRITE_ALLOWLIST = {
+        "admin-login": "credential exchange, throttled (login scope)",
+        "form-submit": "public form endpoint, throttled (form_submit) + honeypot",
+    }
+
+    def _permission_instances(self, view_cls, method):
+        from rest_framework.test import APIRequestFactory
+
+        request = getattr(APIRequestFactory(), method.lower())("/")
+        view = view_cls()
+        view.request = request
+        view.kwargs = {}
+        view.format_kwarg = None
+        try:
+            return view.get_permissions()
+        except Exception:
+            return [p() for p in getattr(view_cls, "permission_classes", [])]
+
+    def test_every_write_endpoint_is_admin_gated(self):
+        from rest_framework.permissions import IsAdminUser
+        from rest_framework.routers import APIRootView
+
+        from backend.urls import urlpatterns as root_patterns
+
+        def walk(patterns, prefix=""):
+            for p in patterns:
+                if hasattr(p, "url_patterns"):
+                    yield from walk(p.url_patterns, prefix + str(p.pattern))
+                else:
+                    yield prefix + str(p.pattern), p
+
+        offenders = []
+        for full, pattern in walk(root_patterns):
+            if not full.startswith("api/"):
+                continue
+            callback = pattern.callback
+            view_cls = getattr(callback, "cls", getattr(callback, "view_class", None))
+            if view_cls is None or issubclass(view_cls, APIRootView):
+                continue
+            name = pattern.name
+            actions = getattr(callback, "actions", None)  # router viewsets
+            for method in ("POST", "PUT", "PATCH", "DELETE"):
+                if actions is not None:
+                    if method.lower() not in actions:
+                        continue
+                elif not hasattr(view_cls, method.lower()):
+                    continue
+                perms = self._permission_instances(view_cls, method)
+                has_admin = any(isinstance(x, IsAdminUser) for x in perms)
+                if not has_admin and name not in self.PUBLIC_WRITE_ALLOWLIST:
+                    offenders.append(f"{name or full} [{method}] -> {[type(x).__name__ for x in perms]}")
+
+        self.assertEqual(offenders, [], f"Un-gated write endpoints: {offenders}")
+
+
+class SecurityHeaderTests(APITestCase):
+    def test_nosniff_and_frame_headers_present(self):
+        resp = self.client.get("/api/seo/")
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(resp.headers.get("X-Frame-Options"), "DENY")
+
+
+class ImageUploadValidationTests(AdminAuthMixin, APITestCase):
+    def _png(self, name="ok.png"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        return SimpleUploadedFile(name, data, content_type="image/png")
+
+    def test_valid_png_is_accepted(self):
+        resp = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png()}, format="multipart"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_disguised_non_image_is_rejected_by_magic_bytes(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        bad = SimpleUploadedFile("evil.png", b"<?php echo 1; ?>", content_type="image/png")
+        resp = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": bad}, format="multipart"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_svg_is_rejected_by_default(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        svg = SimpleUploadedFile("logo.svg", b"<svg></svg>", content_type="image/svg+xml")
+        resp = self.admin_client.post(
+            "/api/images/", {"category": "x", "image": svg}, format="multipart"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_oversize_file_is_rejected(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        big = SimpleUploadedFile(
+            "big.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 5000, content_type="image/png"
+        )
+        with override_settings(MAX_IMAGE_BYTES=1000):
+            resp = self.admin_client.post(
+                "/api/images/", {"category": "x", "image": big}, format="multipart"
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_serializer_exposes_absolute_url(self):
+        self.admin_client.post(
+            "/api/images/", {"category": "x", "image": self._png("abs.png")}, format="multipart"
+        )
+        resp = self.client.get("/api/images/")
+        row = resp.data["results"][0]
+        self.assertTrue(row["image_url"].startswith("http"))
+
+
 class FormSubmitThrottleTests(AdminAuthMixin, APITestCase):
     def test_throttle_actually_blocks_after_the_configured_rate(self):
         # Regression test for the bug found during audit: a custom

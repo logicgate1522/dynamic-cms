@@ -43,6 +43,17 @@ SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'False') == 'True'
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False') == 'True'
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False') == 'True'
 
+# Always-on hardening — these have no dev downside so they are not env-gated.
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS = 'DENY'
+
+# Behind a TLS-terminating proxy (Heroku/Railway/Nginx), let Django know the
+# original request was HTTPS so SECURE_SSL_REDIRECT and secure-cookie logic
+# behave. Only trusted when the env var is set — never assume a proxy.
+if os.getenv('SECURE_PROXY_SSL_HEADER', 'False') == 'True':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # ==================== APPLICATION DEFINITION ====================
 
 INSTALLED_APPS = [
@@ -252,6 +263,10 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
+        # ScopedRateThrottle must be in the default list for any view that
+        # sets `throttle_scope` to actually be rate-limited. It is a no-op
+        # for views without a scope, so adding it here is safe globally.
+        'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
         'anon': os.getenv('THROTTLE_RATE_ANON', '120/minute'),
@@ -259,6 +274,10 @@ REST_FRAMEWORK = {
         # Public, unauthenticated write endpoints (form submissions, inquiries)
         # get a much tighter rate on top of the anon default above.
         'form_submit': os.getenv('THROTTLE_RATE_FORM_SUBMIT', '5/minute'),
+        # Admin login — brute-force resistance independent of form_submit.
+        'login': os.getenv('THROTTLE_RATE_LOGIN', '10/minute'),
+        # Public cached resolver endpoints (seo/resolve, redirects/resolve).
+        'resolve': os.getenv('THROTTLE_RATE_RESOLVE', '60/minute'),
     },
 }
 
@@ -365,6 +384,13 @@ if not DEBUG:
 
 # Max file upload size (10MB)
 MAX_UPLOAD_SIZE = 10485760  # 10 MB in bytes
+
+# Image upload guard rails (api.image_validation).
+MAX_IMAGE_BYTES = int(os.getenv('MAX_IMAGE_BYTES', str(10 * 1024 * 1024)))
+MAX_IMAGE_DIMENSION = int(os.getenv('MAX_IMAGE_DIMENSION', '12000'))
+# SVGs are an executable/script vector (embedded <script>, foreignObject).
+# Off by default; a project that genuinely needs SVG logos opts in.
+ALLOW_SVG_UPLOAD = os.getenv('ALLOW_SVG_UPLOAD', 'False') == 'True'
 
 # API Version
 API_VERSION = 'v1'

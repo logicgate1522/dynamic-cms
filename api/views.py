@@ -39,7 +39,7 @@ class AdminLoginView(APIView):
     """
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'form_submit'  # same tight rate as other public write paths
+    throttle_scope = 'login'  # dedicated brute-force budget, separate from form_submit
 
     def post(self, request, *args, **kwargs):
         email = (request.data.get('email') or '').strip()
