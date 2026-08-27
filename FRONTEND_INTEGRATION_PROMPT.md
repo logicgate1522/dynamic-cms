@@ -1,1437 +1,659 @@
-# Frontend Integration Prompt — Universal CMS + SEO Backend
+# Frontend Integration Prompt — Universal Dynamic CMS + SEO Backend
 
-**Purpose:** paste this whole file (or point an agent at it) along with ONE input —
-a page, a section/component, a form, a list page, or a blog post page — and the
-target will be rewritten to be fully dynamic, inline-editable by an admin, and
-SEO-wired against this backend, with the existing design, layout, animation, and
-content preserved exactly.
-
-This document is written against the actual, current backend in `api/` — every
-endpoint, field name, and header below is real, not aspirational. Do not invent
-endpoints, headers, or field names that aren't in this document.
-
-Two ways to use it:
-
-- **Need one component, right now?** Copy the single self-contained block in
-  **§A** below, fill in the two blanks, paste it as your entire prompt. It
-  needs nothing else from this file.
-- **Building a full page, form, list page, or blog post?** Those have more
-  moving parts than one block can hold — use §1–§9 instead, which cover the
-  backend contract once and then one worked pattern per target type.
-
-### Build order — what to wire up first on a fresh project
-
-Doing these out of order works, but doing them in order means nothing you
-build early has to be revisited later. Each step only depends on the ones
-before it:
-
-1. **`app/layout.jsx`** — site-wide, once, first. Reads `settings/site/`
-   (org name, default OG image, injected analytics/GTM scripts, default
-   robots). Nothing else can meaningfully inherit sane defaults until this
-   exists. See §5a for the metadata half of this; the `SiteSettings` fetch
-   itself is the same server-side pattern, just pointed at
-   `settings/site/` instead of `seo/<path>/`.
-2. **`app/robots.js` and `app/sitemap.js`** — also site-wide, also early,
-   also cheap: they only need `seo/` (list) and `blog/` to exist as
-   endpoints, which they already do. Get these right once and never revisit.
-3. **One `page.jsx` per route**, starting with the homepage. Each page needs
-   §5a (`generateMetadata()`, server-side) before its sections are built —
-   an SEO-blank page is a worse starting point than an unstyled one.
-4. **Sections/components inside each page** — this is where §A (the
-   copy-paste prompt) is used, once per section, repeatedly, for the bulk of
-   the actual build. Do this after the page shell + metadata exist, not
-   before — a section fetching from `home/hero/` is only useful once the
-   page rendering it is real.
-5. **Forms** (§6) — after the pages that host them exist, since a form is
-   always embedded inside a page/section, never standalone.
-6. **List pages + detail pages** (§7, §8) — blog index and blog post,
-   product/service listings, etc. — after the simpler section-based pages
-   are working, since these introduce real pagination and dynamic routing
-   on top of everything above.
-7. **Redirects** (`redirects/`) — last, and only reactively, once a URL
-   actually needs to move. Nothing else depends on this existing.
-
-If you're integrating one existing static component rather than building
-from scratch, skip straight to §A — the build order above is for planning a
-whole project, not a prerequisite for using §A on its own.
+You are an autonomous frontend implementation agent. This file is self-contained:
+every endpoint, header, field name, precedence rule, and code pattern you need is
+below. Do not invent anything not in this document.
 
 ---
 
-## A. The Universal Copy-Paste Prompt (self-contained — start here for any component)
+## §13.0 — How this document behaves
 
-Fill in the two blanks, paste everything in the box below as your entire
-prompt, nothing else required.
+Decide your mode from what was attached alongside this file:
 
+| Attached with… | Do this |
+|---|---|
+| A whole frontend repo / codebase, no other instruction | **Autonomous mode — §13.1**. Run the 10 phases in order. Stop after each phase, report, wait. |
+| One or more specific files (`layout.js`, a `page.js`, a component, a form, a blog page, a listing page) | **Input router — §13.2**, once per file, in dependency order: layout → pages → sections → forms → lists → blog → redirects. |
+| A natural-language request ("build this landing page", "make this editable") or pasted screenshot / markup | **Paste to Build — §13.3** (from a brief) or **Copy Structure — §13.4** (from an existing reference). |
+| A single phase heading from §13.1 | Execute only that phase, end green, stop. |
+
+**Never ask clarifying questions unless the action is destructive or irreversible.**
+Prefer sensible defaults and state them in your report.
+
+**Framework assumption:** Next.js App Router (`app/`). If the repo is Pages Router,
+Vite/React, Remix, SvelteKit, etc., map the concepts (server-side metadata,
+server components, route params) to that framework's equivalents and say so.
+
+---
+
+## §13.6 — Backend contract (verbatim, self-contained)
+
+### Base URL & auth
+
+- API base: `process.env.NEXT_PUBLIC_API_URL` + `/api/` (e.g. `https://cms.example.com/api/`).
+- Auth header is literally **`Authorization: Token <key>`** — **never `Bearer`**.
+- Get a token: `POST auth/login/` `{email, password}` → `{"key": "<token>"}`.
+  Only `is_staff` accounts succeed. Throttled (`login` scope, 10/min).
+- **`isAdmin` = `!!localStorage.getItem("authToken")`**, and it **must be read
+  inside `useEffect` only** — never during render or SSR (hydration mismatch).
+- Store the token as `localStorage.authToken` after login.
+
+```js
+// lib/api.js
+export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/api";
+
+export function authHeaders() {
+  const t = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+  return t ? { Authorization: `Token ${t}` } : {};
+}
+
+export async function apiGet(path, opts = {}) {
+  const r = await fetch(`${API}/${path}`, { cache: "no-store", ...opts });
+  if (!r.ok && r.status !== 404) throw new Error(`${path} -> ${r.status}`);
+  return r.status === 404 ? {} : r.json();
+}
 ```
-COMPONENT TO IMPLEMENT = 
-COMPONENT DATA NAME (used in the API URL) = 
 
-Build this as a Next.js App Router client component ("use client"), no
-TypeScript, inline Tailwind CSS classes only. Keep 100% of the existing
-design, layout, spacing, animation, and copy from the reference/target —
-only change how data is sourced, edited, and saved.
+### Two URL-shape rules
 
-BACKEND CONTRACT (this is real — do not deviate from it)
-- apiUrl = process.env.NEXT_PUBLIC_API_URL
-- Fetch data with: GET `${apiUrl}/home/COMPONENT_DATA_NAME/`
-  This endpoint never 404s — an unknown name returns `200 {}`. If the
-  response is an empty object, render sensible built-in default content
-  instead of blank/loading forever. Nothing needs to be pre-created in the
-  database — the first save creates it.
-- Save changes with: PATCH `${apiUrl}/home/COMPONENT_DATA_NAME/`
-  Body = the full data object (partial nested updates are fine — the
-  backend deep-merges objects; arrays you send fully replace the old array,
-  so always send the complete array, not a diff).
-- Never append an id, pk, or slug to this URL for GET/PATCH/PUT/DELETE —
-  it is name-keyed, not id-keyed. Always the exact same base URL every time.
-- Every write (PATCH) must include this header:
-  `Authorization: Token ${localStorage.getItem("authToken")}`
-  This is a DRF TokenAuthentication header — the literal word is "Token",
-  NOT "Bearer". Getting this word wrong makes every save silently fail
-  with a 401.
-- Admin mode = `!!localStorage.getItem("authToken")`. That local variable,
-  checked in a `useEffect` after mount (never read `localStorage` during
-  render/SSR), is the ONLY gate for showing edit affordances. No role
-  check, no separate admin API call.
-- Images: never let the admin type a raw image URL. Upload first:
-  ```js
-  const formData = new FormData();
-  formData.append("image", file);
-  formData.append("category", "SOME-DESCRIPTIVE-CATEGORY"); // e.g. "hero-background"
-  const res = await fetch(`${apiUrl}/images/`, {
+1. **Name/path-keyed, upsert-safe** — `home/<name>/`, `settings/site/`,
+   `seo/<path>/`. `GET` on an unknown key returns **`200 {}`** (never 404).
+   First `PATCH` creates the row. `PATCH` **deep-merges objects key-by-key;
+   arrays replace wholesale.**
+2. **Normal REST collections** — `blog/`, `redirects/`, `images/`,
+   `content/pages/`, sections, form submissions. Standard `id`/`slug`
+   semantics, `{count, next, previous, results}` pagination on lists.
+
+### Full endpoint table
+
+| Method | Path | Auth | Shape | Purpose |
+|---|---|---|---|---|
+| POST | `auth/login/` | public | — | `{email,password}` → `{key}` |
+| GET | `home/<name>/` | public | keyed | Component JSON; `{}` if unset. `?mode=draft` for the working copy (admin) |
+| PATCH/PUT/DELETE | `home/<name>/` | admin | keyed | Upsert content. `?mode=draft` writes `draft_data`. Body may include `schema_key` |
+| GET | `home/schemas/` | public | — | All `ComponentSchema` field contracts |
+| GET | `home/<name>/history/` | admin | — | Last 20 revisions |
+| POST | `home/<name>/publish/` | admin | — | Copy `draft_data` → live `data` |
+| POST | `home/<name>/revert/<revId>/` | admin | — | Restore a revision (non-destructive) |
+| GET | `settings/site/` | public | keyed | Site-wide identity, SEO defaults, analytics, verification |
+| PATCH | `settings/site/` | admin | keyed | Deep-merged; validated (see §13.6 shape) |
+| GET | `settings/site/schema/organization/` | public | — | Computed Organization/LocalBusiness + WebSite JSON-LD |
+| GET | `seo/` | public | list | All `PageSEO` rows (sitemaps, audits) |
+| GET/PATCH | `seo/<path>/` | public / admin | keyed | Per-page SEO blob |
+| GET | `seo/<path>/history/` | admin | — | Last 20 SEO change snapshots |
+| POST | `seo/<path>/revert/<histId>/` | admin | — | Restore an SEO snapshot |
+| GET | `seo/resolve/<path>/` | public (cached) | — | **Fully-resolved metadata + JSON-LD @graph. Use this in `generateMetadata()`.** |
+| GET/POST | `seo/analyze/<path>/` | admin | — | Run + persist an SEO audit. POST `{html, url}` adds live-DOM checks |
+| GET | `seo/analyze/` | admin | — | Site-wide roll-up, worst pages first |
+| POST | `seo/validate-schema/` | admin | — | `{schema}` → `{valid, issues}` for pasted JSON-LD |
+| GET | `ai/section-schema/` | public | — | `SECTION_SCHEMA` — sync your `SECTION_REGISTRY` against this |
+| GET | `ai/dynamic-page-prompt/?sections=hero,faq` | admin | — | Copy-paste AI prompt to generate page JSON |
+| GET | `ai/copy-structure-prompt/` | admin | — | Copy-paste AI prompt to reproduce a pasted page |
+| POST | `content/paste-to-build/` | admin | — | `{raw, path?, page_type?}` → creates host + sections + pending media |
+| GET | `content/pages/` | public | list | Visible `ContentPage`s |
+| POST | `content/pages/` | admin | REST | Create a `ContentPage` |
+| GET/PATCH/DELETE | `content/pages/<path>/` | public / admin | REST | One page (+ its `sections` on GET). PATCH `status:"published"` enforces the publish guard |
+| GET | `content/<path>/sections/` | public | list | Ordered published sections |
+| POST | `content/<path>/sections/` | admin | — | Replace the whole section list (atomic, validated) |
+| PATCH/DELETE | `content/<path>/sections/<id>/` | admin | REST | One section |
+| POST | `content/<path>/sections/reorder/` | admin | — | `{order:[id,…]}` — must be exactly this page's ids |
+| POST | `content/<path>/sections/<id>/media/<slot>/` | admin | multipart | Upload one image into a slot |
+| GET/POST/PATCH/DELETE | `blog/` , `blog/<slug>/` | public / admin | REST | Blog posts. Drafts + future `published_at` hidden from non-admins |
+| GET…POST | `blog/<slug>/sections/…` | same as `content/…/sections/` | — | Identical section surface bound to a `BlogPost` |
+| GET | `images/?category=&unused=1&missing_alt=1` | public | list | Image library + SEO-cleanup filters |
+| POST | `images/` | admin | multipart | Upload. Returns existing row + `duplicate:true` on checksum match |
+| GET/PATCH/DELETE | `images/<id>/` | public / admin | REST | One image |
+| GET | `images/<id>/usage/` | admin | — | Back-references |
+| GET | `forms/<name>/submit/` … POST | public | — | Submit. Validated against `home/form-<name>/`. `{errors:{field}}` on 400 |
+| GET | `forms/<name>/submissions/?is_read=&is_spam=&since=` | admin | list | Submissions |
+| GET | `forms/<name>/submissions/export/?format=csv\|json` | admin | — | Export |
+| PATCH | `forms/<name>/submissions/<id>/` | admin | — | Toggle `is_read` / `is_spam` |
+| GET | `redirects/`, `redirects/<id>/` | public / admin | REST | Redirect rules |
+| GET | `redirects/resolve/?path=/old` | public (cached) | — | `{to, status}` or 404 — call from middleware / not-found |
+| GET/POST | `redirects/io/?format=csv` | admin | — | CSV export / import |
+| GET | `/robots.txt`, `/sitemap.xml`, `/sitemap-index.xml`, `/sitemap-<section>.xml` | public | — | Served by the backend at its own root (proxy or link to them) |
+
+### Image upload snippet (the only correct way)
+
+```js
+async function uploadImage(file, category = "content") {
+  const fd = new FormData();
+  fd.append("image", file);
+  fd.append("category", category);
+  const r = await fetch(`${API}/images/`, {
     method: "POST",
-    headers: { Authorization: `Token ${localStorage.getItem("authToken")}` },
-    // no Content-Type header — let the browser set the multipart boundary
-    body: formData,
+    headers: authHeaders(),          // NO Content-Type — the browser sets the multipart boundary
+    body: fd,
   });
-  const { image } = await res.json(); // absolute URL string
-  ```
-  Then set `image` as the value of whatever image field you just uploaded
-  for. Show a spinner/disabled state on the specific image being replaced
-  while `uploading` is true, not the whole component.
-
-EDITING BEHAVIOR
-- Two states: view mode (default) and edit mode (admin only, toggled by an
-  Edit button that only renders when admin mode is true).
-- In edit mode, every text field becomes a controlled `<input>` or
-  `<textarea>` bound to a `tempData` copy of the fetched data — never
-  mutate the live `data` state directly, and never use real
-  `contentEditable`.
-- A Save button PATCHes `tempData` to the backend, then sets `data` to the
-  server's response (not just to `tempData` — always trust what the server
-  actually persisted) and exits edit mode.
-- A Cancel button resets `tempData = data` and exits edit mode without
-  saving.
-- Any repeating group in the data (cards, list items, buttons, testimonials,
-  gallery images — anything that is an array) must be, in edit mode:
-  individually editable, individually removable (a small delete control on
-  each item), and have an "Add new" affordance at the end of the list that
-  appends a sensible blank/placeholder item. Never make a repeating group
-  editable-in-place only — always addable/removable too.
-- Use `structuredClone(prev)` (or an equivalent deep copy) when updating
-  nested fields in `tempData` — never mutate nested objects/arrays in
-  place before calling `setTempData`, or React won't re-render correctly
-  and the deep-merge-on-save can behave unexpectedly.
-
-Now, using the component below as your structural and stylistic reference
-(same edit-mode pattern, same button placement, same background-image
-upload affordance if the target has a background image), implement
-COMPONENT_TO_IMPLEMENT, fetching from COMPONENT_DATA_NAME, and give me:
-1. The full component code.
-2. A sample JSON response shape for `GET /home/COMPONENT_DATA_NAME/`.
-
-REFERENCE COMPONENT (CallToActions — correct backend usage, copy this
-pattern exactly, adapt the fields/JSX to the new component):
-
-"use client";
-import { ArrowRight, Briefcase, PlayCircle, Edit, Save, X, Plus, Upload } from "lucide-react";
-import { useEffect, useState } from "react";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-const ENDPOINT = `${apiUrl}/home/cta/`; // <-- COMPONENT_DATA_NAME goes here
-
-const defaultData = {
-  badgeIcon: "Briefcase",
-  badgeText: "Get Started",
-  title: "Ready to get started?",
-  description: "Join thousands of satisfied customers today.",
-  buttons: [{ text: "Get Started", link: "#", variant: "primary", icon: "ArrowRight" }],
-  backgroundPattern: "",
-};
-
-export default function CallToActions() {
-  const [data, setData] = useState(null);
-  const [tempData, setTempData] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  useEffect(() => {
-    setIsAdmin(!!localStorage.getItem("authToken"));
-  }, []);
-
-  useEffect(() => {
-    fetch(ENDPOINT)
-      .then((r) => r.json())
-      .then((json) => {
-        const resolved = json && Object.keys(json).length ? json : defaultData;
-        setData(resolved);
-        setTempData(resolved);
-      })
-      .catch(() => {
-        setData(defaultData);
-        setTempData(defaultData);
-      });
-  }, []);
-
-  const toggleEdit = () => {
-    if (!localStorage.getItem("authToken")) return;
-    if (editMode) setTempData(data);
-    setEditMode(!editMode);
-  };
-
-  const setField = (key, value) =>
-    setTempData((prev) => ({ ...structuredClone(prev), [key]: value }));
-
-  const setButtonField = (index, field, value) =>
-    setTempData((prev) => {
-      const next = structuredClone(prev);
-      next.buttons[index][field] = value;
-      return next;
-    });
-
-  const addButton = () =>
-    setTempData((prev) => ({
-      ...prev,
-      buttons: [...prev.buttons, { text: "New Button", link: "#", variant: "secondary", icon: "ArrowRight" }],
-    }));
-
-  const removeButton = (index) =>
-    setTempData((prev) => ({ ...prev, buttons: prev.buttons.filter((_, i) => i !== index) }));
-
-  const handleBackgroundUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("image", file);
-      formData.append("category", "cta-background");
-      const res = await fetch(`${apiUrl}/images/`, {
-        method: "POST",
-        headers: { Authorization: `Token ${localStorage.getItem("authToken")}` },
-        body: formData,
-      });
-      const result = await res.json();
-      setField("backgroundPattern", result.image);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const save = async () => {
-    setIsSaving(true);
-    try {
-      const res = await fetch(ENDPOINT, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Token ${localStorage.getItem("authToken")}`,
-        },
-        body: JSON.stringify(tempData),
-      });
-      const updated = await res.json();
-      setData(updated);
-      setTempData(updated);
-      setEditMode(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!data) return null;
-
-  return (
-    <section className="bg-gradient-to-r from-red-700 to-red-900 text-white py-20 relative overflow-hidden">
-      {isAdmin && (
-        <div className="absolute top-4 right-4 z-20 flex gap-2">
-          {editMode ? (
-            <>
-              <button onClick={save} disabled={isSaving} className="bg-green-600 text-white p-2 rounded-full shadow-lg hover:bg-green-700 disabled:opacity-50">
-                <Save size={20} />
-              </button>
-              <button onClick={toggleEdit} className="bg-gray-600 text-white p-2 rounded-full shadow-lg hover:bg-gray-700">
-                <X size={20} />
-              </button>
-            </>
-          ) : (
-            <button onClick={toggleEdit} className="bg-white text-red-700 p-2 rounded-full shadow-lg hover:bg-gray-100">
-              <Edit size={20} />
-            </button>
-          )}
-        </div>
-      )}
-
-      {editMode && (
-        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-10">
-          <label className="bg-white p-4 rounded-lg shadow-lg cursor-pointer flex flex-col items-center">
-            {uploading ? "Uploading..." : (
-              <>
-                <Upload size={24} className="text-red-700 mb-2" />
-                <span className="text-red-700 font-medium">Change background</span>
-                <input type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
-              </>
-            )}
-          </label>
-        </div>
-      )}
-
-      <div
-        className="absolute inset-0 opacity-10"
-        style={data.backgroundPattern ? { backgroundImage: `url(${data.backgroundPattern})`, backgroundSize: "cover" } : undefined}
-      />
-
-      <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm rounded-full px-4 py-2 mb-6">
-          {editMode ? (
-            <input value={tempData.badgeText} onChange={(e) => setField("badgeText", e.target.value)} className="bg-white/30 text-white rounded px-2 py-1 text-sm" />
-          ) : (
-            <>
-              <Briefcase className="w-5 h-5 text-red-300" />
-              <span className="text-sm font-medium">{data.badgeText}</span>
-            </>
-          )}
-        </div>
-
-        {editMode ? (
-          <input
-            value={tempData.title}
-            onChange={(e) => setField("title", e.target.value)}
-            className="text-4xl md:text-5xl font-bold mb-6 w-full bg-transparent text-white border-b border-white/30 focus:outline-none text-center"
-          />
-        ) : (
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">{data.title}</h2>
-        )}
-
-        {editMode ? (
-          <textarea
-            value={tempData.description}
-            onChange={(e) => setField("description", e.target.value)}
-            rows={3}
-            className="text-xl text-red-100 mb-12 leading-relaxed w-full bg-transparent border-b border-white/30 focus:outline-none text-center resize-none"
-          />
-        ) : (
-          <p className="text-xl text-red-100 mb-12 leading-relaxed">{data.description}</p>
-        )}
-
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          {(editMode ? tempData : data).buttons.map((button, index) => (
-            <div key={index} className="relative">
-              {editMode && (
-                <button onClick={() => removeButton(index)} className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full z-10">
-                  <X size={14} />
-                </button>
-              )}
-              {editMode ? (
-                <div className="bg-white/10 p-4 rounded-2xl space-y-2">
-                  <input value={button.text} onChange={(e) => setButtonField(index, "text", e.target.value)} placeholder="Button text" className="w-full bg-white/20 text-white placeholder-white/70 rounded px-3 py-2" />
-                  <input value={button.link} onChange={(e) => setButtonField(index, "link", e.target.value)} placeholder="Link" className="w-full bg-white/20 text-white placeholder-white/70 rounded px-3 py-2" />
-                </div>
-              ) : (
-                <a
-                  href={button.link}
-                  className={`${button.variant === "primary" ? "bg-white hover:bg-gray-100 text-red-700" : "border-2 border-white/30 hover:border-white hover:bg-white/10 text-white"} px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-2 justify-center transform hover:scale-105 transition-all duration-300 shadow-lg`}
-                >
-                  {button.icon === "PlayCircle" && <PlayCircle className="w-5 h-5" />}
-                  {button.icon === "ArrowRight" && <ArrowRight className="w-5 h-5" />}
-                  {button.text}
-                </a>
-              )}
-            </div>
-          ))}
-          {editMode && (
-            <button onClick={addButton} className="border-2 border-dashed border-white/50 hover:border-white text-white/70 hover:text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-2 justify-center">
-              <Plus size={20} /> Add Button
-            </button>
-          )}
-        </div>
-      </div>
-    </section>
-  );
+  const data = await r.json();       // { id, image_url, width, height, duplicate, ... }
+  return data.image_url;             // always absolute
 }
 ```
 
-**If the target has a repeating grid of items that each have their OWN
-image** (team members, testimonial cards, a gallery, pricing tiers with
-icons) — the single whole-section background-image pattern above isn't the
-right shape. Use this second reference instead, which shows per-item image
-upload (each card gets its own upload spinner and file input, tracked by
-index):
+Never give an admin a raw image-URL text field. Upload first, store the returned
+`image_url`.
 
-```jsx
-"use client";
-import { UserCheck, ChevronRight, MapPin, Edit, Save, X, Plus, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-const ENDPOINT = `${apiUrl}/home/testimonials/`; // <-- COMPONENT_DATA_NAME goes here
-
-const defaultData = {
-  preTitle: "Success Stories",
-  title: "Our Alumni Network",
-  description: "Hear from people who worked with us.",
-  stories: [
-    { name: "Jane Doe", role: "Position", location: "City, Country", quote: "Great experience.", image: "", buttonText: "Read more" },
-  ],
-};
-
-export default function SuccessStoriesSection() {
-  const [data, setData] = useState(null);
-  const [tempData, setTempData] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [uploadingIndex, setUploadingIndex] = useState(null); // which card is uploading, or null
-  const fileInputRefs = useRef({});
-
-  useEffect(() => {
-    setIsAdmin(!!localStorage.getItem("authToken"));
-  }, []);
-
-  useEffect(() => {
-    fetch(ENDPOINT)
-      .then((r) => r.json())
-      .then((json) => {
-        const resolved = json && Object.keys(json).length ? json : defaultData;
-        setData(resolved);
-        setTempData(resolved);
-      })
-      .catch(() => {
-        setData(defaultData);
-        setTempData(defaultData);
-      });
-  }, []);
-
-  const toggleEdit = () => {
-    if (!localStorage.getItem("authToken")) return;
-    if (editMode) setTempData(data);
-    setEditMode(!editMode);
-  };
-
-  const setField = (key, value) =>
-    setTempData((prev) => ({ ...structuredClone(prev), [key]: value }));
-
-  const setStoryField = (index, field, value) =>
-    setTempData((prev) => {
-      const next = structuredClone(prev);
-      next.stories[index][field] = value;
-      return next;
-    });
-
-  const addStory = () =>
-    setTempData((prev) => ({
-      ...prev,
-      stories: [...prev.stories, { name: "New Person", role: "Role", location: "Location", quote: "Quote", image: "", buttonText: "Read more" }],
-    }));
-
-  const removeStory = (index) =>
-    setTempData((prev) => ({ ...prev, stories: prev.stories.filter((_, i) => i !== index) }));
-
-  // Per-item upload: `index` identifies which card's image field to fill in.
-  const handleImageUpload = async (event, index) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    setUploadingIndex(index);
-    try {
-      const formData = new FormData();
-      formData.append("image", file);
-      formData.append("category", "testimonial-images");
-      const res = await fetch(`${apiUrl}/images/`, {
-        method: "POST",
-        headers: { Authorization: `Token ${localStorage.getItem("authToken")}` },
-        body: formData,
-      });
-      const result = await res.json();
-      setStoryField(index, "image", result.image);
-    } finally {
-      setUploadingIndex(null);
-    }
-  };
-
-  const save = async () => {
-    setIsSaving(true);
-    try {
-      const res = await fetch(ENDPOINT, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Token ${localStorage.getItem("authToken")}`,
-        },
-        body: JSON.stringify(tempData),
-      });
-      const updated = await res.json();
-      setData(updated);
-      setTempData(updated);
-      setEditMode(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!data) return null;
-  const stories = (editMode ? tempData : data).stories;
-
-  return (
-    <section className="py-20 bg-white relative">
-      {isAdmin && (
-        <div className="absolute top-4 right-4 z-20 flex gap-2">
-          {editMode ? (
-            <>
-              <button onClick={save} disabled={isSaving} className="bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow-lg disabled:opacity-50">
-                <Save className="w-5 h-5" />
-              </button>
-              <button onClick={toggleEdit} className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded-full shadow-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </>
-          ) : (
-            <button onClick={toggleEdit} className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg">
-              <Edit className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      )}
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 bg-red-100 text-red-800 rounded-full px-4 py-2 mb-4">
-            <UserCheck className="w-5 h-5" />
-            {editMode ? (
-              <input value={tempData.preTitle} onChange={(e) => setField("preTitle", e.target.value)} className="bg-transparent text-sm font-medium" />
-            ) : (
-              <span className="text-sm font-medium">{data.preTitle}</span>
-            )}
-          </div>
-          {editMode ? (
-            <input value={tempData.title} onChange={(e) => setField("title", e.target.value)} className="text-3xl md:text-4xl font-bold text-gray-900 mb-4 w-full text-center bg-transparent" />
-          ) : (
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">{data.title}</h2>
-          )}
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-8">
-          {stories.map((story, index) => (
-            <div key={index} className="bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 relative">
-              {editMode && (
-                <button onClick={() => removeStory(index)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 z-10">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-
-              <div className="relative h-64 bg-gray-100">
-                {editMode ? (
-                  uploadingIndex === index ? (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-red-600" />
-                    </div>
-                  ) : (
-                    <>
-                      {story.image && <img src={story.image} alt={story.name} className="object-cover w-full h-full" />}
-                      <button
-                        onClick={() => fileInputRefs.current[index]?.click()}
-                        className="absolute bottom-2 right-2 bg-blue-500 text-white rounded-full p-2"
-                      >
-                        <Upload className="w-4 h-4" />
-                      </button>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        ref={(el) => (fileInputRefs.current[index] = el)}
-                        onChange={(e) => handleImageUpload(e, index)}
-                      />
-                    </>
-                  )
-                ) : (
-                  story.image && <img src={story.image} alt={story.name} className="object-cover w-full h-full" />
-                )}
-              </div>
-
-              <div className="p-6">
-                {editMode ? (
-                  <>
-                    <input value={story.name} onChange={(e) => setStoryField(index, "name", e.target.value)} className="text-xl font-bold text-gray-900 w-full mb-1 bg-transparent" />
-                    <input value={story.role} onChange={(e) => setStoryField(index, "role", e.target.value)} className="text-gray-600 w-full mb-3 bg-transparent" />
-                  </>
-                ) : (
-                  <>
-                    <h3 className="text-xl font-bold text-gray-900">{story.name}</h3>
-                    <p className="text-gray-600 mb-3">{story.role}</p>
-                  </>
-                )}
-
-                <div className="flex items-center gap-1 text-red-600 mb-3">
-                  <MapPin className="w-4 h-4" />
-                  {editMode ? (
-                    <input value={story.location} onChange={(e) => setStoryField(index, "location", e.target.value)} className="text-sm bg-transparent" />
-                  ) : (
-                    <span className="text-sm">{story.location}</span>
-                  )}
-                </div>
-
-                {editMode ? (
-                  <textarea value={story.quote} onChange={(e) => setStoryField(index, "quote", e.target.value)} rows={3} className="text-gray-700 italic mb-6 w-full bg-transparent" />
-                ) : (
-                  <p className="text-gray-700 italic mb-6">"{story.quote}"</p>
-                )}
-
-                {editMode ? (
-                  <input value={story.buttonText} onChange={(e) => setStoryField(index, "buttonText", e.target.value)} className="text-red-600 font-medium bg-transparent" />
-                ) : (
-                  <button className="text-red-600 font-medium flex items-center gap-2 hover:gap-3 transition-all group">
-                    {story.buttonText}
-                    <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {editMode && (
-            <div
-              onClick={addStory}
-              className="bg-white rounded-2xl shadow-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer min-h-[400px]"
-            >
-              <Plus className="w-12 h-12 text-gray-400 mb-4" />
-              <span className="text-gray-600 font-medium">Add New</span>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-```
-
-That block is complete on its own. Everything below (§1 onward) is the
-deeper reference for full pages, forms, list pages, and blog posts, where
-more than one endpoint and more than one file are involved.
-
----
-
-## 0. How to use this file
-
-At the bottom of this document is **§9 — The Prompt Template**. Fill in:
+### `seo/resolve/<path>/` precedence — HARD RULE
 
 ```
-TARGET TYPE = component | page | form | list-page | blog-post
-TARGET      = <file path or description>
-NAME        = <the ComponentData / SEO path / form name to use>
+PageSEO.data  >  BlogPost.seo_*  (blog/<slug> paths only)  >  SiteSettings.data.seoDefaults  >  built-in default
 ```
 
-Everything above §9 is reference material the agent executing the prompt should
-already treat as ground truth: the backend contract (§1), the auth contract (§2),
-the image upload contract (§3), and one worked pattern per target type (§4–§8).
-The agent should read the section matching `TARGET TYPE` and follow it exactly.
+`generateMetadata()` must be a **thin mapping** of the resolve response — never
+re-implement this precedence per project. Response shape:
 
----
-
-## 1. Backend contract — the only endpoints that exist
-
-Base URL: `process.env.NEXT_PUBLIC_API_URL` (e.g. `http://localhost:8000/api` in
-dev). Every path below is relative to that base.
-
-| Purpose | Method | Path | Auth |
-|---|---|---|---|
-| Admin login | POST | `/auth/login/` | public |
-| Get/set a named content block | GET | `/home/<name>/` | public |
-| " | PATCH | `/home/<name>/` | admin |
-| " | PUT | `/home/<name>/` | admin |
-| " | DELETE | `/home/<name>/` | admin |
-| Get/set site-wide settings (singleton) | GET / PATCH | `/settings/site/` | GET public, PATCH admin |
-| List all page SEO rows | GET | `/seo/` | public (paginated) |
-| Get/set one page's SEO fields | GET / PATCH | `/seo/<path>/` | GET public, PATCH admin |
-| List/create blog posts | GET / POST | `/blog/` | GET public (published only), POST admin |
-| Get/update/delete one blog post | GET / PATCH / DELETE | `/blog/<slug>/` | GET public if published, write admin |
-| List/create redirects | GET / POST | `/redirects/` | GET public, POST admin |
-| Update/delete one redirect | PATCH / DELETE | `/redirects/<id>/` | admin |
-| Submit a form | POST | `/forms/<name>/submit/` | public, throttled |
-| List a form's submissions | GET | `/forms/<name>/submissions/` | admin |
-| Upload an image | POST | `/images/` | admin |
-| List images | GET | `/images/` | public |
-| Get/update/delete one image | GET / PATCH / DELETE | `/images/<id>/` | GET public, write admin |
-
-**Rules that must never be broken:**
-
-- `home/<name>/`, `settings/site/`, and `seo/<path>/` are **name/path-keyed, not
-  id-keyed** — never append an id to these three. `GET` on an unknown name/path
-  returns `200 {}`, not `404` — nothing needs to be pre-seeded in the database
-  before the frontend can use it. `PATCH` **creates the row if it doesn't exist**
-  (upsert) and **deep-merges** into what's already there (nested objects merge
-  key-by-key; arrays are replaced wholesale, not merged item-by-item).
-- `blog/`, `redirects/`, and `images/` ARE real resource collections — they use
-  their own id/slug in the URL for anything but list/create, exactly like any
-  normal REST API. Do not apply the "no id" rule to these three.
-- `seo/<path>/` accepts slashes in `<path>` (e.g. `seo/services/web-development/`)
-  — it is not a single URL segment.
-
----
-
-## 2. Auth contract
-
-```js
-const isAdmin = typeof window !== "undefined" && !!localStorage.getItem("authToken");
-```
-
-That single check is the **entire** admin-gate on the frontend. If `isAdmin` is
-true, render edit affordances; if false, render the plain public view.
-
-**Login** (already implemented in `app/login/page.js` — do not rebuild this
-unless explicitly asked to):
-
-```js
-const response = await fetch(`${apiUrl}/auth/login/`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ email, password }),
-});
-const data = await response.json();
-const token = data.key; // backend returns { "key": "<token>" }
-localStorage.setItem("authToken", token);
-```
-
-**Every authenticated write** (PATCH/PUT/DELETE/POST to admin-gated endpoints)
-must send:
-
-```js
-headers: {
-  "Content-Type": "application/json",
-  Authorization: `Token ${localStorage.getItem("authToken")}`,
-}
-```
-
-> ⚠️ The header scheme is **`Token <key>`**, not `Bearer <key>`. This backend
-> uses DRF's `TokenAuthentication`, which requires the literal word `Token`.
-> Older prompts/components in this codebase used `Bearer` — that is wrong
-> against this backend and must be corrected wherever it appears.
-
-For `multipart/form-data` requests (image upload), do **not** set
-`Content-Type` manually — let the browser set the multipart boundary. Still
-send the `Authorization` header.
-
----
-
-## 3. Image upload contract (used everywhere an image field exists)
-
-```js
-async function uploadImage(file, category) {
-  const formData = new FormData();
-  formData.append("image", file);
-  formData.append("category", category); // e.g. "hero-background", "blog-cover"
-
-  const response = await fetch(`${apiUrl}/images/`, {
-    method: "POST",
-    headers: { Authorization: `Token ${localStorage.getItem("authToken")}` },
-    body: formData,
-  });
-  if (!response.ok) throw new Error("Image upload failed");
-  const result = await response.json();
-  return result.image; // absolute URL string — set this directly as the image src
-}
-```
-
-Every editable image field in every pattern below (§4–§8) uses this exact
-function. Never let an admin type a raw image URL by hand when an upload
-control is available.
-
----
-
-## 4. TARGET TYPE = `component` (a section, e.g. Navbar, CTA, Testimonials, Hero)
-
-**When to use:** the target is one self-contained section rendered inside a
-page, following the same shape as the existing `CallToActions` /
-`SuccessStoriesSection` components in this codebase.
-
-**Backend:** `home/<NAME>/` where `NAME` is a short kebab-case identifier for
-this section (e.g. `cta`, `hero`, `testimonials`, `navbar`).
-
-**Pattern (full worked example):**
-
-```jsx
-"use client";
-import { useEffect, useState, useRef } from "react";
-import { Edit, Save, X, Plus, Trash2, Upload } from "lucide-react";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-const ENDPOINT = `${apiUrl}/home/cta/`; // <-- NAME goes here
-
-const defaultData = {
-  title: "Ready to get started?",
-  description: "Join thousands of satisfied customers today.",
-  buttons: [{ text: "Get Started", link: "#", variant: "primary" }],
-  backgroundImage: "",
-};
-
-export default function CallToActionSection() {
-  const [data, setData] = useState(null);
-  const [tempData, setTempData] = useState(null);
-  const [editMode, setEditMode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    setIsAdmin(!!localStorage.getItem("authToken"));
-  }, []);
-
-  useEffect(() => {
-    fetch(ENDPOINT)
-      .then((r) => r.json())
-      .then((json) => {
-        // GET never 404s — an empty {} means nothing has been saved yet,
-        // so fall back to defaultData rather than rendering blank.
-        const resolved = json && Object.keys(json).length ? json : defaultData;
-        setData(resolved);
-        setTempData(resolved);
-      })
-      .catch(() => {
-        setData(defaultData);
-        setTempData(defaultData);
-      });
-  }, []);
-
-  const toggleEdit = () => {
-    if (!localStorage.getItem("authToken")) return;
-    if (editMode) setTempData(data); // cancel resets
-    setEditMode(!editMode);
-  };
-
-  const setField = (path, value) => {
-    setTempData((prev) => {
-      const next = structuredClone(prev);
-      const keys = path.split(".");
-      let cur = next;
-      for (let i = 0; i < keys.length - 1; i++) cur = cur[keys[i]];
-      cur[keys[keys.length - 1]] = value;
-      return next;
-    });
-  };
-
-  const setButtonField = (index, field, value) => {
-    setTempData((prev) => {
-      const next = structuredClone(prev);
-      next.buttons[index][field] = value;
-      return next;
-    });
-  };
-
-  const addButton = () =>
-    setTempData((prev) => ({
-      ...prev,
-      buttons: [...(prev.buttons || []), { text: "New Button", link: "#", variant: "secondary" }],
-    }));
-
-  const removeButton = (index) =>
-    setTempData((prev) => ({ ...prev, buttons: prev.buttons.filter((_, i) => i !== index) }));
-
-  const handleBackgroundUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("image", file);
-      formData.append("category", "cta-background");
-      const response = await fetch(`${apiUrl}/images/`, {
-        method: "POST",
-        headers: { Authorization: `Token ${localStorage.getItem("authToken")}` },
-        body: formData,
-      });
-      const result = await response.json();
-      setField("backgroundImage", result.image);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const save = async () => {
-    setIsSaving(true);
-    try {
-      const response = await fetch(ENDPOINT, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Token ${localStorage.getItem("authToken")}`,
-        },
-        body: JSON.stringify(tempData),
-      });
-      const updated = await response.json();
-      setData(updated);
-      setTempData(updated);
-      setEditMode(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!data) return null;
-
-  return (
-    <section className="relative py-20 bg-gradient-to-r from-red-700 to-red-900 text-white overflow-hidden">
-      {isAdmin && (
-        <div className="absolute top-4 right-4 z-20 flex gap-2">
-          {editMode ? (
-            <>
-              <button onClick={save} disabled={isSaving} className="bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow-lg">
-                <Save className="w-5 h-5" />
-              </button>
-              <button onClick={toggleEdit} className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded-full shadow-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </>
-          ) : (
-            <button onClick={toggleEdit} className="bg-white text-red-700 p-2 rounded-full shadow-lg">
-              <Edit className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      )}
-
-      {editMode && (
-        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-10">
-          <label className="bg-white p-4 rounded-lg shadow-lg cursor-pointer flex flex-col items-center">
-            {uploading ? "Uploading..." : (
-              <>
-                <Upload className="w-6 h-6 text-red-700 mb-2" />
-                <span className="text-red-700 font-medium">Change background</span>
-                <input type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
-              </>
-            )}
-          </label>
-        </div>
-      )}
-
-      {data.backgroundImage && (
-        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: `url(${data.backgroundImage})`, backgroundSize: "cover" }} />
-      )}
-
-      <div className="relative max-w-4xl mx-auto px-4 text-center">
-        {editMode ? (
-          <input
-            value={tempData.title}
-            onChange={(e) => setField("title", e.target.value)}
-            className="text-4xl md:text-5xl font-bold mb-6 w-full bg-transparent border-b border-white/30 text-center focus:outline-none"
-          />
-        ) : (
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">{data.title}</h2>
-        )}
-
-        {editMode ? (
-          <textarea
-            value={tempData.description}
-            onChange={(e) => setField("description", e.target.value)}
-            className="text-xl mb-12 w-full bg-transparent border-b border-white/30 text-center resize-none"
-            rows={3}
-          />
-        ) : (
-          <p className="text-xl mb-12">{data.description}</p>
-        )}
-
-        <div className="flex flex-wrap gap-4 justify-center">
-          {(editMode ? tempData : data).buttons.map((button, index) => (
-            <div key={index} className="relative">
-              {editMode && (
-                <button onClick={() => removeButton(index)} className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full z-10">
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-              {editMode ? (
-                <div className="bg-white/10 p-3 rounded-xl space-y-2">
-                  <input value={button.text} onChange={(e) => setButtonField(index, "text", e.target.value)} className="w-full bg-white/20 rounded px-3 py-2" placeholder="Button text" />
-                  <input value={button.link} onChange={(e) => setButtonField(index, "link", e.target.value)} className="w-full bg-white/20 rounded px-3 py-2" placeholder="Link" />
-                </div>
-              ) : (
-                <a href={button.link} className="bg-white text-red-700 px-8 py-4 rounded-full font-semibold shadow-lg hover:scale-105 transition-transform">
-                  {button.text}
-                </a>
-              )}
-            </div>
-          ))}
-          {editMode && (
-            <button onClick={addButton} className="border-2 border-dashed border-white/50 text-white/70 px-8 py-4 rounded-full flex items-center gap-2">
-              <Plus className="w-5 h-5" /> Add button
-            </button>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-```
-
-**What to preserve from the original component when applying this pattern:**
-every visual class name, animation, and layout structure — only the data
-source, edit affordances, and save/upload wiring change.
-
----
-
-## 5. TARGET TYPE = `page` (a full route, e.g. `app/about/page.jsx`)
-
-**When to use:** the target is an entire Next.js route, made of multiple
-sections plus page-level SEO.
-
-**Backend:** each section on the page uses its own `home/<name>/` (§4). The
-**page itself** additionally uses `seo/<path>/`, where `<path>` is the route's
-identifier (e.g. `home`, `about`, `services/web-development` — matches the
-route, not the URL slug of any single section).
-
-**Two things must exist for a page**, in two different files:
-
-### 5a. `generateMetadata()` — server-side, in `page.jsx` itself
-
-This is what actually puts `<title>`/`<meta>` tags in the HTML crawlers see.
-It must run server-side — never rely on the client-side SEO panel below for
-this.
-
-```jsx
-// app/about/page.jsx
-async function getPageSEO(path) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/seo/${path}/`, {
-    cache: "no-store", // or { next: { revalidate: 60 } } if you want ISR
-  });
-  return res.ok ? res.json() : {};
-}
-
-export async function generateMetadata() {
-  const seo = await getPageSEO("about");
-  return {
-    title: seo.seoTitle || "About Us",
-    description: seo.metaDescription || "Default fallback description.",
-    alternates: { canonical: seo.canonicalUrl || "/about" },
-    robots: {
-      index: seo.robotsIndex !== false,
-      follow: seo.robotsFollow !== false,
-    },
-    openGraph: {
-      title: seo.ogTitle || seo.seoTitle || "About Us",
-      description: seo.ogDescription || seo.metaDescription,
-      images: seo.ogImage ? [{ url: seo.ogImage, width: 1200, height: 630 }] : undefined,
-    },
-  };
-}
-
-export default function AboutPage() {
-  return (
-    <main>
-      {/* section components, each self-contained per §4 */}
-    </main>
-  );
-}
-```
-
-### 5b. `SeoEditPanel` — client-side, admin-only, rendered inside the page body
-
-A floating, collapsed-by-default panel that lets an admin edit the same
-`seo/<path>/` row. This is a UI convenience for editing; it is **not** what
-puts tags in the HTML — that's §5a.
-
-```jsx
-"use client";
-import { useEffect, useState } from "react";
-import { Search, Save, X, ChevronDown } from "lucide-react";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-export default function SeoEditPanel({ path }) {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [data, setData] = useState({});
-  const [saving, setSaving] = useState(false);
-  const ENDPOINT = `${apiUrl}/seo/${path}/`;
-
-  useEffect(() => {
-    setIsAdmin(!!localStorage.getItem("authToken"));
-    fetch(ENDPOINT).then((r) => r.json()).then(setData);
-  }, [path]);
-
-  if (!isAdmin) return null;
-
-  const setField = (key, value) => setData((prev) => ({ ...prev, [key]: value }));
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch(ENDPOINT, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Token ${localStorage.getItem("authToken")}`,
-        },
-        body: JSON.stringify(data),
-      });
-      setData(await response.json());
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Pure client-side audit checklist — no external calls, runs against
-  // the data already fetched above.
-  const checks = [
-    { label: "Title 50–60 chars", pass: (data.seoTitle || "").length >= 50 && (data.seoTitle || "").length <= 60 },
-    { label: "Description 120–160 chars", pass: (data.metaDescription || "").length >= 120 && (data.metaDescription || "").length <= 160 },
-    { label: "Canonical set", pass: !!data.canonicalUrl },
-    { label: "OG image set", pass: !!data.ogImage },
-    { label: "Focus keyword set", pass: !!data.focusKeyword },
-  ];
-  const passCount = checks.filter((c) => c.pass).length;
-
-  return (
-    <div className="fixed bottom-4 right-4 z-50 w-96 bg-white rounded-xl shadow-2xl border border-gray-200">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between p-4">
-        <span className="flex items-center gap-2 font-semibold text-gray-800">
-          <Search className="w-4 h-4" /> SEO — {passCount}/{checks.length}
-        </span>
-        <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="p-4 border-t border-gray-100 space-y-3">
-          <input value={data.seoTitle || ""} onChange={(e) => setField("seoTitle", e.target.value)} placeholder="SEO title" className="w-full border rounded px-3 py-2 text-sm" />
-          <textarea value={data.metaDescription || ""} onChange={(e) => setField("metaDescription", e.target.value)} placeholder="Meta description" rows={3} className="w-full border rounded px-3 py-2 text-sm" />
-          <input value={data.canonicalUrl || ""} onChange={(e) => setField("canonicalUrl", e.target.value)} placeholder="Canonical URL" className="w-full border rounded px-3 py-2 text-sm" />
-          <input value={data.focusKeyword || ""} onChange={(e) => setField("focusKeyword", e.target.value)} placeholder="Focus keyword" className="w-full border rounded px-3 py-2 text-sm" />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={data.robotsIndex !== false} onChange={(e) => setField("robotsIndex", e.target.checked)} />
-            Indexable
-          </label>
-          <ul className="text-xs space-y-1">
-            {checks.map((c) => (
-              <li key={c.label} className={c.pass ? "text-green-600" : "text-amber-600"}>
-                {c.pass ? "✓" : "○"} {c.label}
-              </li>
-            ))}
-          </ul>
-          <button onClick={save} disabled={saving} className="w-full bg-blue-600 text-white rounded py-2 text-sm font-medium flex items-center justify-center gap-2">
-            <Save className="w-4 h-4" /> {saving ? "Saving..." : "Save SEO"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-```
-
-Render `<SeoEditPanel path="about" />` once, near the bottom of the page's
-JSX — it's fixed-positioned and only renders anything for an admin.
-
----
-
-## 6. TARGET TYPE = `form` (booking, contact, quote request, newsletter, etc.)
-
-**When to use:** the target collects user input and needs to notify an admin
-— it is fundamentally different from a `component`: its state lives in
-`FormSubmission` rows (write side), not in the `ComponentData` row that
-defines its fields (definition side).
-
-**Backend:**
-- Field definition lives in `home/form-<NAME>/` (a `ComponentData` row, edited
-  like any section — admin can add/remove/relabel fields with zero code
-  changes).
-- Submissions go to `forms/<NAME>/submit/` (public, POST, throttled).
-- Admin views submissions via `forms/<NAME>/submissions/` (admin GET, not
-  built into the public form component — that's a separate admin-only view if
-  needed).
-
-**Field definition shape** (what a `home/form-booking/` `PATCH` looks like):
-
-```json
+```jsonc
 {
-  "title": "Book a Consultation",
-  "fields": [
-    { "name": "fullName", "label": "Full Name", "type": "text", "required": true },
-    { "name": "email", "label": "Email", "type": "email", "required": true },
-    { "name": "date", "label": "Preferred Date", "type": "date", "required": true },
-    { "name": "notes", "label": "Notes", "type": "textarea", "required": false }
-  ],
-  "submitLabel": "Request Booking",
-  "successMessage": "Thanks — we'll confirm by email."
+  "path": "pricing",
+  "fullTitle": "Pricing | Acme",        // titleTemplate already applied
+  "title": "Pricing",
+  "description": "...",
+  "canonical": "https://acme.test/pricing",
+  "robots": { "index": true, "follow": true, "maxImagePreview": "large", ... },
+  "social": { "ogTitle", "ogDescription", "ogImage", "ogImageAlt", "ogType",
+              "twitterCard", "twitterTitle", "twitterDescription", "twitterImage", "twitterHandle" },
+  "hreflang": [{ "lang": "en", "href": "..." }],
+  "alternates": { "amp": "", "rss": "" },
+  "prev": "", "next": "",
+  "locale": "en_US",
+  "themeColor": "#0b0b0b",
+  "verification": { "google": "", "bing": "", ... },
+  "jsonLd": { "@context": "https://schema.org", "@graph": [ ... ] }   // '<' already escaped
 }
 ```
 
-**Component:**
+### Error shapes
 
-```jsx
-"use client";
-import { useEffect, useState } from "react";
+- Field validation: `400 { "<field>": "message" }` (settings, component schema)
+  or `400 { "errors": { "<field>": "message" } }` (forms) or
+  `400 { "errors": [ { "section_index": 0, "message": "…" } ] }` (paste-to-build).
+- Publish guard: `400 { "detail": "...", "missing": [ { section_id, slot, image_prompt } ] }`.
+- Auth: `401` (no/invalid token), `403` (valid token, not staff).
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+### Section schema & the publish guard
 
-export default function DynamicForm({ name }) {
-  const [definition, setDefinition] = useState(null);
-  const [values, setValues] = useState({});
-  const [status, setStatus] = useState("idle"); // idle | submitting | success | error
+- `GET ai/section-schema/` returns `{ section_schema, single_image_types,
+  per_item_image_types, recommended_sizes }`. `section_schema` maps every
+  section `type` → `{ field: "required" | "optional" | "required_list" }`.
+- Your `SECTION_REGISTRY` keys **must exactly equal** `Object.keys(section_schema)`.
+  On build, fetch it and assert — fail loudly on drift.
+- A `ContentPage`/`BlogPost` cannot be set `status:"published"` while any
+  `required` `SectionMedia` slot has no image. The 400 lists the missing slots.
+- Video URLs must match `^https://(www\.)?(youtube\.com/embed/|youtu\.be/|player\.vimeo\.com/video/)` — backend rejects others; your renderer must allowlist the same.
+- Rich text (`rich_text`, `image_text` `content`) is **plain paragraphs split on
+  blank lines**. Render as JSX `<p>` nodes. **Never `dangerouslySetInnerHTML`
+  for any CMS or AI-authored text.**
 
-  useEffect(() => {
-    fetch(`${apiUrl}/home/form-${name}/`).then((r) => r.json()).then((json) => {
-      setDefinition(Object.keys(json).length ? json : null);
-    });
-  }, [name]);
+### `SiteSettings.data` canonical shape
 
-  if (!definition) return null;
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    setStatus("submitting");
-    try {
-      const response = await fetch(`${apiUrl}/forms/${name}/submit/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // "website" is a honeypot field the backend silently discards —
-        // include it hidden so bots that auto-fill every field get dropped.
-        body: JSON.stringify({ ...values, website: "" }),
-      });
-      setStatus(response.ok ? "success" : "error");
-    } catch {
-      setStatus("error");
-    }
-  };
-
-  if (status === "success") {
-    return <p className="text-green-700 font-medium">{definition.successMessage || "Thank you!"}</p>;
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
-      <h3 className="text-2xl font-bold text-gray-900">{definition.title}</h3>
-
-      {/* Honeypot — real users never see or fill this in. */}
-      <input
-        type="text"
-        name="website"
-        tabIndex={-1}
-        autoComplete="off"
-        className="absolute -left-[9999px]"
-        aria-hidden="true"
-      />
-
-      {definition.fields.map((field) => (
-        <div key={field.name}>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {field.label}{field.required && " *"}
-          </label>
-          {field.type === "textarea" ? (
-            <textarea
-              required={field.required}
-              rows={4}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              onChange={(e) => setValues((v) => ({ ...v, [field.name]: e.target.value }))}
-            />
-          ) : (
-            <input
-              type={field.type}
-              required={field.required}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              onChange={(e) => setValues((v) => ({ ...v, [field.name]: e.target.value }))}
-            />
-          )}
-        </div>
-      ))}
-
-      <button
-        type="submit"
-        disabled={status === "submitting"}
-        className="bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-lg disabled:opacity-50"
-      >
-        {status === "submitting" ? "Sending..." : definition.submitLabel || "Submit"}
-      </button>
-      {status === "error" && <p className="text-red-600 text-sm">Something went wrong — please try again.</p>}
-    </form>
-  );
-}
-```
-
-The **field definition itself** (title, field list, labels) is admin-editable
-using the exact same edit-mode pattern from §4, pointed at
-`home/form-<name>/` instead of a content section — add a thin
-`FormFieldEditor` wrapper only if the admin needs to edit field structure
-in-place; otherwise editing that JSON via the general CMS admin surface is
-sufficient.
-
----
-
-## 7. TARGET TYPE = `list-page` (blog index, services list, etc.)
-
-**When to use:** the target lists many items of one kind with a link into
-each detail page.
-
-**Backend:** `blog/` (or any future list-backed resource) — a real paginated
-DRF list, not a `ComponentData` row.
-
-```jsx
-// app/blog/page.jsx
-async function getPosts() {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/blog/`, {
-    next: { revalidate: 60 },
-  });
-  const json = await res.json();
-  return json.results || []; // paginated: { count, next, previous, results }
-}
-
-export async function generateMetadata() {
-  return { title: "Blog", description: "Latest articles and updates." };
-}
-
-export default async function BlogIndexPage() {
-  const posts = await getPosts();
-  return (
-    <main className="max-w-5xl mx-auto px-4 py-16">
-      <h1 className="text-4xl font-bold mb-10">Blog</h1>
-      <div className="grid md:grid-cols-2 gap-8">
-        {posts.map((post) => (
-          <a key={post.slug} href={`/blog/${post.slug}`} className="block rounded-xl overflow-hidden shadow hover:shadow-lg transition-shadow">
-            {post.content?.coverImage && (
-              <img src={post.content.coverImage} alt={post.content.coverImageAlt || post.title} className="w-full h-48 object-cover" />
-            )}
-            <div className="p-5">
-              <h2 className="text-xl font-bold text-gray-900">{post.title}</h2>
-              <p className="text-gray-600 mt-2">{post.excerpt}</p>
-            </div>
-          </a>
-        ))}
-      </div>
-    </main>
-  );
-}
-```
-
-Admin create/delete controls for a list page (new post button, delete-in-place)
-follow the same `isAdmin` gate as §4, but call `POST /blog/` and
-`DELETE /blog/<slug>/` — real REST semantics, not the upsert pattern.
-
----
-
-## 8. TARGET TYPE = `blog-post` (a single detailed post, `blog/[slug]/page.jsx`)
-
-**Backend:** `blog/<slug>/` — `GET` for content, `PATCH` for admin edits.
-Content is **block-structured JSON**, not a single HTML/markdown string:
-
-```json
+```jsonc
 {
-  "coverImage": "https://.../cover.jpg",
-  "coverImageAlt": "Team meeting in the new office",
-  "sections": [
-    { "type": "text", "heading": "Why this matters", "body": "..." },
-    { "type": "image", "image": "https://...", "alt": "...", "caption": "..." },
-    { "type": "text", "heading": "The approach", "body": "..." }
-  ]
+  "organization": { "name", "legalName", "logo", "logoAlt", "foundingDate", "description", "sameAs": [] },
+  "contact": { "email", "phone", "contactType", "availableLanguages": [] },
+  "locations": [ { "name","streetAddress","addressLocality","addressRegion","postalCode","addressCountry",
+                   "latitude": null, "longitude": null,
+                   "openingHours": [ { "days": ["Monday"], "opens": "09:00", "closes": "17:00" } ],
+                   "priceRange", "telephone" } ],
+  "seoDefaults": { "siteUrl", "titleTemplate": "%s", "defaultTitle", "defaultDescription",
+                   "defaultOgImage", "defaultOgImageAlt", "twitterHandle", "twitterCard",
+                   "robots": { "index": true, "follow": true }, "themeColor", "locale": "en_US",
+                   "searchUrl": "https://site/search?q={query}" },
+  "verification": { "google", "bing", "yandex", "pinterest", "facebookDomain" },
+  "analytics": { "gtmId", "ga4Id", "metaPixelId", "clarityId", "hotjarId", "linkedinPartnerId",
+                 "customHead": [], "customBodyStart": [], "customBodyEnd": [] },   // raw strings, admin-only, injected verbatim
+  "schema": { "organizationType": "Organization", "enabled": true, "raw": null },
+  "navigation": { "primary": [], "footer": [] },
+  "brand": { "primaryColor", "secondaryColor", "fontHeading", "fontBody" },
+  "robotsTxt": { "disallow": ["/api/"], "allow": [] }
 }
 ```
-
-```jsx
-// app/blog/[slug]/page.jsx
-import { notFound } from "next/navigation";
-
-async function getPost(slug) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/blog/${slug}/`, { cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-export async function generateMetadata({ params }) {
-  const { slug } = await params;
-  const post = await getPost(slug);
-  if (!post) return { title: "Post not found", robots: { index: false } };
-  return {
-    title: post.seo_title || post.title,
-    description: post.meta_description || post.excerpt,
-    alternates: { canonical: `/blog/${post.slug}` },
-    openGraph: {
-      title: post.seo_title || post.title,
-      images: post.og_image ? [{ url: post.og_image, width: 1200, height: 630 }] : undefined,
-    },
-  };
-}
-
-export default async function BlogPostPage({ params }) {
-  const { slug } = await params;
-  const post = await getPost(slug);
-  if (!post) notFound();
-
-  return (
-    <article className="max-w-3xl mx-auto px-4 py-16">
-      {post.content.coverImage && (
-        <img src={post.content.coverImage} alt={post.content.coverImageAlt || post.title} className="w-full rounded-xl mb-8" />
-      )}
-      <h1 className="text-4xl font-bold text-gray-900 mb-6">{post.title}</h1>
-      {post.content.sections.map((section, i) =>
-        section.type === "image" ? (
-          <figure key={i} className="my-8">
-            <img src={section.image} alt={section.alt || ""} className="w-full rounded-lg" />
-            {section.caption && <figcaption className="text-sm text-gray-500 mt-2">{section.caption}</figcaption>}
-          </figure>
-        ) : (
-          <section key={i} className="mb-8">
-            {section.heading && <h2 className="text-2xl font-bold mb-3">{section.heading}</h2>}
-            <p className="text-gray-700 leading-relaxed whitespace-pre-line">{section.body}</p>
-          </section>
-        )
-      )}
-    </article>
-  );
-}
-```
-
-The **admin edit surface** for a blog post's sections (add/remove/reorder
-text and image blocks) follows the exact repeating-group pattern from §4's
-`buttons` array — a `BlogPostEditor` client component fetching
-`blog/<slug>/`, PATCHing back the whole `content` object, with per-section
-add/remove/image-upload controls. Build it as a variant of §4 with
-`sections` in place of `buttons`, not as a new pattern.
 
 ---
 
-## 9. The Prompt Template
+## §13.1 — Autonomous mode (whole frontend repo)
 
-Copy everything below the line into a fresh request, fill in the blanks, and
-attach the target file (if editing an existing component) or a description
-of the new page/section/form.
+Ten pasteable phases. Each ends green (build passes, no hydration warnings,
+admin round-trip works, public view unchanged). Stop and report after each.
+
+**Phase F0 — Audit.** Inventory: framework + version, routing style, styling
+system, i18n, every route, every section/component, existing data sources,
+existing SEO/metadata, existing analytics. Output one table:
+`file → current state → target state → phase`. No code changes.
+
+**Phase F1 — Global wiring.** `lib/api.js`; `AdminProvider`/`useAdmin`
+(`!!localStorage.authToken`, read in `useEffect`); `app/layout` (§13.2 layout
+rules); `app/robots.js` + `app/sitemap.js` (proxy or mirror the backend's, or
+generate from `seo/` + `blog/` + `content/pages/`); analytics injection;
+`<html lang>`; `themeColor`; mount `<SeoEditPanel>` and an admin login affordance.
+
+**Phase F2 — Per-page metadata.** `generateMetadata()` for every route from
+`GET seo/resolve/<path>/`. `<script type="application/ld+json">` from
+`resolved.jsonLd`. `<Breadcrumbs>` + the `BreadcrumbList` is already in the
+graph. Canonical, robots, hreflang, `rel=prev/next` from the resolve response.
+
+**Phase F3 — Section conversion.** Every static section → CMS-wired editable
+component (§13.2 component rules). One per commit. Design/animation/copy 100%
+preserved.
+
+**Phase F4 — Forms.** Every form → `GET home/form-<name>/` definition +
+`POST forms/<name>/submit/` with server-trusted `{errors}` (§13.2 form rules).
+
+**Phase F5 — Lists & detail.** Blog index / product / service lists →
+paginated CMS reads. Detail pages → `body_mode` branch → `<DynamicPageRenderer>`.
+
+**Phase F6 — Dynamic Page Builder UI.** Admin panel: "Generate AI Prompt"
+(`ai/dynamic-page-prompt/`), "Paste to Build" (`content/paste-to-build/`),
+"Copy Structure" (`ai/copy-structure-prompt/`), per-slot media upload, the
+pending-images review screen, the publish-guard error surface.
+
+**Phase F7 — Redirects.** `redirects/resolve/?path=` in `middleware.js` (or the
+404 handler), issuing the returned `status`.
+
+**Phase F8 — Performance.** `next/image` with real `sizes`/`priority`; lazy
+non-critical sections; `next/font` with `display: swap`; reserved space for
+embeds; revalidate tuning; no CLS; Lighthouse ≥ 90 mobile.
+
+**Phase F9 — Accessibility & semantics.** One H1/route; heading order with no
+gaps; alt text from `UploadedImage.alt_text`; visible focus; skip link;
+`prefers-reduced-motion`; breadcrumb UI matches the markup.
+
+**Phase F10 — Verification.** `next build` clean, no hydration warnings; admin
+round-trip (login → edit → save → server response reflected in the UI); public
+view unaffected; metadata visible in view-source; JSON-LD validates
+(schema.org + Google Rich Results); the per-page checklist (§13.5 end) passes
+for every route.
+
+---
+
+## §13.2 — Input router (exact behaviour per file type)
+
+### `layout.js` / `layout.jsx` / `layout.tsx`
+
+1. Fetch `settings/site/` **server-side**. Build the default `metadata` export:
+   `title.template` = `seoDefaults.titleTemplate`, `title.default` =
+   `defaultTitle`, `metadataBase` = `new URL(seoDefaults.siteUrl)`, `description`,
+   `openGraph` (siteName, locale, default image w/ 1200×630 + alt),
+   `twitter` (card, site = `twitterHandle`), `robots` (from `seoDefaults.robots`),
+   `icons`, `themeColor`, `verification` (google/bing/yandex/other:
+   `[{name:"msvalidate.01",content:bing}, …]`).
+2. Inject `analytics.customHead` strings into `<head>`; `customBodyStart` right
+   after `<body>`; `customBodyEnd` before `</body>`. Build GTM/GA4/Meta
+   Pixel/Clarity/Hotjar/LinkedIn tags from their IDs using
+   `next/script` (`strategy="afterInteractive"`, GTM `beforeInteractive` only
+   if consent model requires it).
+3. Emit Organization/LocalBusiness + WebSite JSON-LD from
+   `GET settings/site/schema/organization/` (or the `jsonLd` from any
+   `seo/resolve`) as a single `<script type="application/ld+json">`.
+4. `<html lang={seoDefaults.locale.split("_")[0]}>`. Preserve every existing
+   provider, wrapper, class, font setup. Mount `<SeoEditPanel>` and the admin
+   affordance provider.
+
+### `page.js` for a route
+
+- Add/replace `generateMetadata()` reading `GET seo/resolve/<path>/`. Merge any
+  existing good metadata as fallback; never delete it.
+- Emit `<script type="application/ld+json">{JSON.stringify(resolved.jsonLd)}</script>`.
+- Add `<Breadcrumbs>` UI (data from `resolved.jsonLd["@graph"]` BreadcrumbList).
+- Render `<SeoEditPanel path="<path>" />` once near the end (admin-only).
+- Leave section components to their own conversion.
+- **Listing page:** paginated fetch (`{count,next,previous,results}`), admin
+  "New" / "Delete" with real REST semantics, empty state, `rel=prev/next`.
+- **Dynamic detail page:** branch `body_mode === "dynamic"` →
+  `<DynamicPageRenderer sections={sections} />`; legacy path untouched.
+
+### A component / section (`.jsx`)
+
+- Keep 100% of markup, classes, animation, copy.
+- `"use client"`. Fetch `GET home/<NAME>/`. On `{}` render built-in
+  `defaultData` (never blank, never an infinite loader). Choose `NAME` as the
+  component's purpose in kebab-case (`hero`, `pricing-table`, `footer`) — state it.
+- View/edit modes; edit only when `isAdmin`. Copy to `tempData` — never mutate
+  live `data`. `structuredClone` for nested updates.
+- Save → `PATCH home/<NAME>/` with `authHeaders()`. Set state to the **server
+  response**, not `tempData`. Cancel resets.
+- Every array is add / remove / reorder in edit mode — not edit-in-place only.
+- Images: `uploadImage()` (§13.6) → store the returned URL. Per-item spinner.
+- If the purpose matches a `home/schemas/` key, follow that field shape and
+  include `schema_key` in the first PATCH.
+- Output: the full component + a sample `GET home/<NAME>/` JSON + the one-line
+  `NAME` note. Nothing needs pre-seeding.
+
+### A form component
+
+- Fetch the definition from `GET home/form-<NAME>/`. Render fields from
+  `definition.fields` (types: text, textarea, email, tel, url, number, date,
+  time, datetime, select, multiselect, radio, checkbox, checkboxes, file,
+  hidden, rating, range). Honour `width`, `placeholder`, `help`, `options`,
+  `validation`.
+- Hidden honeypot input named `definition.honeypotField || "website"`.
+- Submit → `POST forms/<NAME>/submit/`. Client-validate for UX, then **trust
+  the server** `{errors:{field}}`. Success / error text from the definition
+  (`successMessage` / `errorMessage`). Consent checkbox when
+  `definition.consent.required`.
+- Provide the definition JSON to seed + the admin note.
+
+### A blog / article page
+
+- `GET blog/<slug>/`. `generateMetadata()` from `seo/resolve/blog/<slug>/`
+  (BlogPost `seo_*` already folded in as fallback by the backend).
+- JSON-LD: use `resolved.jsonLd` (already a `BlogPosting` + `BreadcrumbList`
+  graph; `FAQPage` too if the page's `seo` config lists it).
+- `body_mode === "dynamic"` → `<DynamicPageRenderer>`; legacy block content →
+  existing pipeline, untouched.
+- Reading time, related posts, TOC from sections.
+- Mount the Paste-to-Build / Copy-Structure admin panel on the blog **index**.
+
+### A blog / list index
+
+- Paginated `GET blog/`. Card grid preserved. Admin "New post" → Paste-to-Build
+  flow. Note sitemap inclusion is automatic (backend `sitemap-blog.xml`).
+
+---
+
+## §13.2 (cont.) — The renderer contract
+
+```js
+// components/dynamic/registry.js
+import Hero from "./sections/Hero";
+import RichText from "./sections/RichText";
+// … one per section type …
+
+export const SECTION_REGISTRY = {
+  hero: Hero, rich_text: RichText, image_text: ImageText, cards: Cards,
+  features: Features, statistics: Statistics, testimonials: Testimonials,
+  faq: Faq, gallery: Gallery, team: Team, timeline: Timeline, pricing: Pricing,
+  logos: Logos, steps: Steps, cta: Cta, banner: Banner, video: Video,
+  contact_block: ContactBlock, map_block: MapBlock, newsletter: Newsletter,
+};
+
+// On build / in a test: assert Object.keys(SECTION_REGISTRY) matches
+// (await fetch(`${API}/ai/section-schema/`)).section_schema keys.
+```
+
+```jsx
+// components/dynamic/DynamicPageRenderer.jsx
+export default function DynamicPageRenderer({ sections }) {
+  return [...sections].sort((a, b) => a.order - b.order).map((s) => {
+    const Cmp = SECTION_REGISTRY[s.section_type];
+    if (!Cmp) {
+      return (
+        <div key={s.id} style={{ border: "1px dashed #c00", padding: 16, margin: 8 }}>
+          Unsupported section type: <code>{s.section_type}</code>
+        </div>
+      );
+    }
+    return <Cmp key={s.id} {...s.content} media={s.media} />;
+  });
+}
+```
+
+Rules the renderer and its section adapters must follow:
+
+- Unknown type → the dashed-box fallback above. **Never drop content, never
+  crash the route.**
+- Rich text → `content.split(/\n\s*\n/).map((p, i) => <p key={i}>{p}</p>)`.
+- Video → sandboxed iframe, `src` allowlisted to the YouTube/Vimeo embed regex;
+  reject anything else (render the fallback box).
+- Images: an origin-normalising resolver — if `media[i].image.url` is relative,
+  prefix `NEXT_PUBLIC_API_URL`; use `alt_override || image.alt_text` for `alt`.
+- Thin adapter component per type; keep all visual design in those adapters.
+
+---
+
+## §13.3 — Paste to Build
+
+User pastes a brief (or markup) + this file. You:
+
+1. Infer the sequence of sections from the catalogue in `ai/section-schema/`.
+2. `GET ai/dynamic-page-prompt/?sections=<the ones you'll use>` for the exact
+   schema, or build the JSON directly against `section_schema`.
+3. Produce `SECTION_SCHEMA`-valid JSON: `{ page_type, title, seo, sections: [...] }`.
+   Every image → `"image_required": true` + a concrete `"image_prompt"`.
+4. `POST content/paste-to-build/ { raw: <that JSON as a string>, path?, page_type? }`.
+5. From the response: generate the route (`app/<path>/page.jsx`),
+   `generateMetadata()` from `seo/resolve`, and
+   `<DynamicPageRenderer sections={...} />` wiring.
+6. List `response.pending_images` for the admin — each `{ section_id, slot,
+   image_prompt, recommended_size }` uploads via
+   `POST content/<path>/sections/<id>/media/<slot>/`.
+7. The page stays `draft` until every required image is uploaded (publish guard).
+
+## §13.4 — Copy Structure
+
+User pastes an existing component/page as a **reference**. You:
+
+1. `GET ai/copy-structure-prompt/` and follow it, OR directly:
+2. Walk the reference top to bottom. Emit one section per visual block,
+   preserving headings, body copy, list items, order, and CTAs **verbatim**.
+3. Map each block to the closest `section_schema` type. Flag every image with
+   `image_required` + `image_prompt`.
+4. Round-trip through `POST content/paste-to-build/`.
+5. Build adapter components that reproduce the reference's **exact** design,
+   animation, and responsive behaviour — visuals byte-identical.
+6. If the target is a single reusable component (not a page), instead produce a
+   `ComponentSchema` (`PATCH home/schemas/`… is admin; or just wire the
+   component to `home/<name>/` with a matching `schema_key`).
+
+---
+
+## §13.5 — Exhaustive SEO reference
+
+Every item below has concrete Next App Router code expectations. When you build
+a page, you are responsible for all of these.
+
+### Metadata API
+
+- `metadata` (static) vs `generateMetadata()` (dynamic, always used here since
+  data comes from `seo/resolve`).
+- `metadataBase` — set once in `layout` to `seoDefaults.siteUrl`; all relative
+  OG/canonical URLs resolve against it.
+- `title`: `{ template: "%s | Site", default: "Site" }` in layout;
+  `{ absolute: resolved.fullTitle }` per page (the backend already applied the
+  template, so use `absolute`).
+- `alternates`: `{ canonical: resolved.canonical, languages: fromHreflang(resolved.hreflang),
+  types: { "application/rss+xml": resolved.alternates.rss } }`. `x-default` in
+  `languages` when present.
+- `robots`: map every directive — `index`, `follow`, `nocache`, `googleBot:
+  { index, follow, "max-snippet": resolved.robots.maxSnippet,
+  "max-image-preview": resolved.robots.maxImagePreview,
+  "max-video-preview": resolved.robots.maxVideoPreview }`,
+  `unavailable_after` from `robots.unavailableAfter`.
+- `openGraph`: `type` (`website` / `article` — from `resolved.social.ogType`),
+  `locale`, `siteName`, `url` = canonical, `images: [{ url, width: 1200,
+  height: 630, alt }]`; for articles add `publishedTime`, `modifiedTime`,
+  `authors`, `section`, `tags`.
+- `twitter`: `card` (`summary_large_image`), `site`, `creator`, `images`,
+  `title`, `description`.
+- `icons` / `manifest` / `appleWebApp`; `themeColor` + `colorScheme`;
+  `verification` (google, other for bing/yandex/pinterest); `formatDetection:
+  { telephone: false }` unless a phone CTA; `referrer`; `authors`/`creator`/
+  `publisher`; `category`; pagination via `alternates` `prev`/`next` (App Router:
+  emit `<link rel="prev/next">` manually in the page since `metadata` has no
+  first-class field — use `other` or a raw `<link>`).
+
+### Canonical strategy
+
+Self-canonical by default (`canonicalSelf: true` in `PageSEO.data`).
+Cross-domain, param, pagination, faceted-nav, trailing-slash, www/non-www,
+http/https, uppercase, session-id: all normalise to one lowercased, no-param,
+trailing-slash-consistent `https://` URL. The backend's `resolved.canonical`
+already does this when `seoDefaults.siteUrl` is set — just render it.
+
+### Structured data
+
+Use `resolved.jsonLd` (`@graph`). It already composes: Organization/
+LocalBusiness (+ multi-location + `openingHoursSpecification` + `geo` +
+`areaServed`), WebSite (+ `SearchAction` when `searchUrl` set), BreadcrumbList
+(matching URL depth), Article/BlogPosting family, Product+Offer+Review+
+AggregateRating, Service, FAQPage, HowTo, Event, VideoObject, Person, plus any
+raw JSON-LD from `PageSEO.data.schema.data` appended last. Nodes reference by
+`@id`. Validate with `POST seo/validate-schema/` and Google's Rich Results
+Test. `<` is already escaped. **Never mark up hidden or inaccurate content.**
+
+### robots.txt & sitemaps
+
+The backend serves `/robots.txt`, `/sitemap.xml`, `/sitemap-index.xml`,
+`/sitemap-<section>.xml`. Either reverse-proxy those paths to the backend, or
+mirror them in `app/robots.js` / `app/sitemap.js` from `seo/` + `blog/` +
+`content/pages/`. `noindex` / `sitemap.include:false` pages are auto-excluded
+by the backend. Respect the 50k-URL / 50MB split via the index. Staging: set
+`seoDefaults.robots.index:false` → backend returns a full `Disallow: /`.
+`X-Robots-Tag` header for non-HTML assets you control.
+
+### hreflang / i18n
+
+Reciprocal tags on every locale + `x-default`. Per-locale `generateMetadata`.
+`Content-Language` header. Locale-prefixed routes. `resolved.hreflang` feeds
+`alternates.languages`.
+
+### Core Web Vitals
+
+- **LCP**: `next/image` with `priority` on the hero, explicit `sizes`,
+  `preconnect` to the image origin, no CLS from late images/fonts.
+- **INP**: minimise client JS, `next/dynamic` for below-fold sections, avoid
+  long tasks, defer third-party scripts (`strategy="lazyOnload"`).
+- **CLS**: width/height on every image, `next/font` `display:"swap"` with a
+  matched fallback, reserved height for embeds/ads/banners.
+- **TTFB**: ISR (`revalidate`), edge where possible, streaming.
+- Bundle budget; `next/font` self-hosting; `next/script` strategies
+  (`beforeInteractive` / `afterInteractive` / `lazyOnload`).
+
+### Rendering & indexability
+
+SSG/ISR by default; `revalidate` per content type (site settings ~1h, pages
+~5m, blog ~5m). `notFound()` → real 404. `redirect()` with the right code.
+`loading.js` / `error.js` must not block the crawler from primary content.
+Infinite scroll must have crawlable paginated `<a>` links underneath. Avoid
+soft-404s (a "not found" body with a 200 status).
+
+### On-page
+
+One H1; logical heading outline, no skipped levels; `<title>` ~50–60;
+meta description ~120–160, unique per page; semantic landmarks
+(`<header><nav><main><footer>`); descriptive link text;
+`rel="nofollow ugc sponsored"` where appropriate; `alt` on every content
+image; `<figure>/<figcaption>`; tables with `<th scope>`; `lang`;
+breadcrumb UI parity with the markup; internal-link depth ≤ 3; related-content
+blocks; keyword in title/H1/first paragraph/URL/alt **without stuffing**;
+`dateModified` freshness; E-E-A-T (author `Person` + `sameAs`, citations,
+about/contact pages).
+
+### URL design
+
+Lowercase, hyphenated, shallow, stable, no dates unless semantically needed,
+no params for primary content. On any URL change, add a `Redirect` row.
+
+### Redirects
+
+301 permanent / 302–307 temporary / 308 permanent-no-method-change. Chains ≤ 1
+hop (backend rejects loops, walks ≤ 20). Update internal links after
+redirecting. `middleware.js` calls `redirects/resolve/?path=` and issues the
+returned `status`. Prefer `next.config` `redirects()` for build-time-known
+rules, the runtime resolver for CMS-managed ones.
+
+### Verification & analytics
+
+GSC + Bing Webmaster via `settings/site/verification`. GA4/GTM via IDs
+(`analytics`). Consent-mode note: gate non-essential tags behind consent.
+UTM hygiene; `referrerPolicy`.
+
+### Social / preview
+
+OG image 1200×630, < 8MB, text in the safe area; per-page `ogImage`;
+`og:image:alt` always; Twitter large card; LinkedIn/Slack/Discord unfurl uses
+OG. Dynamic OG images: `app/<route>/opengraph-image.jsx` with `next/og` (pull
+title/desc from `seo/resolve`).
+
+### Feeds & discovery
+
+RSS/Atom/JSON Feed route from `blog/`; declare in `alternates.types`.
+IndexNow / WebSub optional. Google News / Merchant feeds via extra
+`SITEMAP_SOURCES` on the backend.
+
+### Accessibility ↔ SEO overlap
+
+Contrast, focus order, ARIA only when native HTML can't express it, reduced
+motion, semantic HTML first.
+
+### Anti-patterns to actively remove
+
+Keyword stuffing, hidden text, doorway pages, cloaking, duplicate
+titles/descriptions, thin/auto content, orphan pages, broken canonicals,
+`noindex` leaking to prod, render-blocking JS for primary content, layout
+shift, intrusive interstitials, mixed content, infinite redirect chains,
+unclosed/invalid JSON-LD, marking up invisible content.
+
+### Per-page checklist (run before declaring a page done — mirrors `seo/analyze/`)
+
+- [ ] `generateMetadata()` sourced from `seo/resolve/<path>/`, no hand-rolled precedence
+- [ ] `<title>` present, 50–60 chars, unique across the site
+- [ ] meta description present, 120–160 chars, unique
+- [ ] canonical present, absolute, `https://`, self unless intentionally cross-page
+- [ ] `robots` correct — not accidentally `noindex`
+- [ ] exactly one H1; heading levels have no gaps
+- [ ] every content image has meaningful `alt`
+- [ ] OG title/description/image(1200×630)/image:alt all present; Twitter card valid
+- [ ] JSON-LD `@graph` emitted, valid (`seo/validate-schema/` + Rich Results Test), `@type` matches page
+- [ ] BreadcrumbList matches URL depth; breadcrumb UI parity
+- [ ] internal links present; link text descriptive
+- [ ] hreflang reciprocal + `x-default` (if multilingual)
+- [ ] `rel=prev/next` on paginated routes
+- [ ] no mixed content; no CLS; LCP image has `priority`
+- [ ] included in sitemap (or intentionally `sitemap.include:false`)
+- [ ] admin round-trip works; public view unchanged
+
+---
+
+## §13.7 — Fill-in-the-blanks prompt template
 
 ```
-TARGET TYPE = component | page | form | list-page | blog-post
-TARGET = <file path, or "new component for X">
-NAME = <ComponentData name, SEO path, or form name to use — kebab-case>
+You are the frontend integration agent. Attached: FRONTEND_INTEGRATION_PROMPT.md
+and <FILE(S)>.
 
-Follow FRONTEND_INTEGRATION_PROMPT.md in the backend/ root exactly:
-- Use the backend contract in §1 — no invented endpoints or field names.
-- Use the auth contract in §2 — Authorization: Token <key>, gate on
-  localStorage.authToken, never Bearer.
-- Use the image upload contract in §3 for every image field.
-- Follow the pattern matching TARGET TYPE from §4 (component), §5 (page),
-  §6 (form), §7 (list-page), or §8 (blog-post) as the structural template —
-  adapt field names and visual design to the target, but keep the data flow,
-  auth gating, save/cancel behavior, and upsert/REST semantics identical to
-  the worked example.
-- If TARGET TYPE = component or page-section: repeating groups (cards,
-  buttons, list items) must be individually addable/removable/reorderable
-  in edit mode, never just editable in place.
-- If TARGET TYPE = page: implement BOTH generateMetadata() (§5a, server-side,
-  required) AND the SeoEditPanel (§5b, client-side, admin UI) — do not skip
-  generateMetadata() even if it feels redundant with the panel; the panel
-  edits data, generateMetadata() is what actually emits the tags.
-- If TARGET TYPE = blog-post: content is block-structured JSON (§8), never a
-  single HTML or markdown string field.
-- Keep 100% of the existing design, animation, spacing, and copy from TARGET
-  as-is — only change how data is sourced, edited, and saved.
-- Next.js App Router, no TypeScript, inline Tailwind classes, no new
-  component libraries beyond what TARGET already imports (e.g. lucide-react
-  icons if already in use).
+Backend base URL: <NEXT_PUBLIC_API_URL>
+Framework: <Next.js App Router | other>
 
-Now implement TARGET per the above, and give me:
-1. The full component/page code.
-2. Sample JSON for every backend endpoint it reads from or writes to.
-3. A one-line note on what NAME to use if a ComponentData/SEO/form row needs
-   to be created for this to work (remember: nothing needs to be pre-seeded —
-   the first PATCH creates it).
+Do: <run Autonomous mode | run the Input router for each attached file |
+Paste to Build from this brief: "<brief>" | Copy Structure from the attached reference>
+
+Constraints: preserve 100% of existing design, animation, and copy. Token auth
+(not Bearer). isAdmin read in useEffect only. Never dangerouslySetInnerHTML for
+CMS/AI text. No clarifying questions unless an action is destructive.
+
+Report per phase/file: what changed, what was assumed, test result.
 ```
+
+---
+
+## §14 — MASTER CHECKLIST (frontend)
+
+- [ ] Self-contained (backend + auth + image contracts inline) — §13.6
+- [ ] Behaviour selector: whole-repo / per-file / natural-language — §13.0
+- [ ] Autonomous mode: 10 pasteable phases — §13.1
+- [ ] Input router: `layout.js` fully specified — §13.2
+- [ ] Input router: `page.js` (route / listing / dynamic detail) — §13.2
+- [ ] Input router: component / section (defaults, edit, arrays reorderable, image upload, `schema_key`) — §13.2
+- [ ] Input router: form (definition fetch, validated submit, states) — §13.2
+- [ ] Input router: blog page + blog index — §13.2
+- [ ] Paste to Build end-to-end — §13.3
+- [ ] Copy Structure end-to-end — §13.4
+- [ ] Dynamic Page Builder admin panel wiring — §13.1 F6
+- [ ] `seo/resolve` precedence stated as a hard rule — §13.6
+- [ ] `SECTION_REGISTRY` ↔ `ai/section-schema/` sync — §13.2 renderer
+- [ ] Exhaustive SEO reference — §13.5
+- [ ] Token not Bearer; `isAdmin` in `useEffect` only — §13.6
+- [ ] "never `dangerouslySetInnerHTML` for CMS/AI text"; video allowlist — §13.6 / §13.2
+- [ ] "preserve 100% of design/animation/copy" for every file type — throughout
+- [ ] Fill-in-the-blanks prompt template — §13.7
+- [ ] This checklist embedded — here
+
+### End-to-end acceptance
+
+- [ ] Repo + this file, no instructions → F0 audit produced
+- [ ] One phase heading pasted → only that phase runs, ends green
+- [ ] `layout.js` + this file → layout fully wired, nothing else asked
+- [ ] `page.js` + this file → metadata + JSON-LD + panel wired
+- [ ] A component + this file → CMS-wired, editable, design identical
+- [ ] A form + this file → dynamic + validated + notifying
+- [ ] A blog page + this file → CMS + schema + dynamic sections
+- [ ] Clone for a different vertical → nothing to strip or rename
