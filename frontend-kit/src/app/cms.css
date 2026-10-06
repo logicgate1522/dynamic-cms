@@ -1,0 +1,38 @@
+/* ===== CMS inline editing (admins only; classes never render for visitors) ===== */
+.cms-editable {
+    outline: 1px dashed rgb(15 158 134 / 0.55);
+    outline-offset: 2px;
+    border-radius: 2px;
+    cursor: text;
+    min-width: 1ch;
+    transition: outline-color 0.15s, background-color 0.15s;
+}
+.cms-editable:hover {
+    outline: 2px dashed #0f9e86;
+    background-color: rgb(15 158 134 / 0.06);
+}
+.cms-editable:focus {
+    outline: 2px solid #0f9e86;
+    background-color: rgb(15 158 134 / 0.08);
+}
+.cms-editable:empty::before {
+    content: attr(data-placeholder);
+    opacity: 0.45;
+    font-style: italic;
+}
+/* List-item tools show on hover / keyboard focus of their item only,
+   so they never cover the text being edited. */
+.cms-item-tools {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+:hover > .cms-item-tools,
+:focus-within > .cms-item-tools,
+.cms-item-tools:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+}
+@media (hover: none) {
+    .cms-item-tools { opacity: 1; pointer-events: auto; }
+}

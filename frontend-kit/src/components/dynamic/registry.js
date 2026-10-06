@@ -1,0 +1,46 @@
+import {
+    Banner,
+    Cards,
+    ContactBlock,
+    Cta,
+    Features,
+    Gallery,
+    Hero,
+    ImageText,
+    Logos,
+    MapBlock,
+    Pricing,
+    RichText,
+    Statistics,
+    Steps,
+    Team,
+    Testimonials,
+    Timeline,
+    Video,
+} from "@/components/dynamic/sections";
+import { Faq, Newsletter } from "@/components/dynamic/interactive";
+
+// Keys must exactly equal the backend's SECTION_SCHEMA keys
+// (GET ai/section-schema/). `npm run check:sections` asserts this.
+export const SECTION_REGISTRY = {
+    hero: Hero,
+    rich_text: RichText,
+    image_text: ImageText,
+    cards: Cards,
+    features: Features,
+    statistics: Statistics,
+    testimonials: Testimonials,
+    faq: Faq,
+    gallery: Gallery,
+    team: Team,
+    timeline: Timeline,
+    pricing: Pricing,
+    logos: Logos,
+    steps: Steps,
+    cta: Cta,
+    banner: Banner,
+    video: Video,
+    contact_block: ContactBlock,
+    map_block: MapBlock,
+    newsletter: Newsletter,
+};
