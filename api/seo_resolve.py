@@ -29,9 +29,33 @@ def _first(*values):
     return None
 
 
+HOME_KEYS = ("", "home")
+
+
+def cache_version(name):
+    """Version stamp folded into resolver cache keys; bumped on every write
+    that can change the answer (api/revalidation.py), so a save is visible
+    immediately instead of after the 5-minute cache window."""
+    from django.core.cache import cache
+    return cache.get(f"cms-cache-version:{name}") or 1
+
+
+def bump_cache_version(name):
+    from django.core.cache import cache
+    key = f"cms-cache-version:{name}"
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.set(key, 2, None)
+
+
 def resolve_seo(path, base_url=""):
     path = (path or "").strip("/")
-    page = PageSEO.objects.filter(path=path).first()
+    # The home page is stored under "home" but lives at "/": resolve both
+    # seo/resolve/ and seo/resolve/home/ to the same root answer.
+    if path in HOME_KEYS:
+        path = ""
+    page = PageSEO.objects.filter(path=path or "home").first()
     page_data = (page.data if page else {}) or {}
 
     site_row = SiteSettings.objects.filter(pk=1).first()

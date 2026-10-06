@@ -6,6 +6,7 @@ Combined from both settings files with proper organization.
 
 import os
 from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
 import dj_database_url
 from dotenv import load_dotenv
 
@@ -117,6 +118,12 @@ CORS_ALLOW_METHODS = [
 ]
 
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# Cache-refresh webhook (api/revalidation.py): every content write POSTs the
+# affected cache tags here, HMAC-signed with REVALIDATE_SECRET. The frontend
+# verifies the signature with the same secret. Empty URL = disabled.
+FRONTEND_REVALIDATE_URL = os.getenv('FRONTEND_REVALIDATE_URL', '')
+REVALIDATE_SECRET = os.getenv('REVALIDATE_SECRET', '')
 
 # ==================== MIDDLEWARE ====================
 
@@ -378,11 +385,26 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
+# The CSRF secret lives in the server-side session; the browser admin UI gets
+# its masked token from GET auth/csrf/ (api/auth_views.py), since a frontend on
+# another subdomain cannot read the API's cookies.
+CSRF_USE_SESSIONS = True
+SESSION_COOKIE_AGE = int(os.getenv('SESSION_COOKIE_AGE', str(60 * 60 * 12)))
 
-# For production, use Strict
+# For production, use Strict. That works when the API is on the same site as
+# the frontend (api.example.com + www.example.com). For an API on a different
+# registrable domain, set SESSION_COOKIE_SAMESITE=None (requires HTTPS and
+# SESSION_COOKIE_SECURE=True).
 if not DEBUG:
     SESSION_COOKIE_SAMESITE = 'Strict'
     CSRF_COOKIE_SAMESITE = 'Strict'
+_samesite_override = os.getenv('SESSION_COOKIE_SAMESITE', '').strip()
+if _samesite_override:
+    if _samesite_override not in ('Lax', 'Strict', 'None'):
+        raise ImproperlyConfigured("SESSION_COOKIE_SAMESITE must be Lax, Strict or None.")
+    if _samesite_override == 'None' and not SESSION_COOKIE_SECURE:
+        raise ImproperlyConfigured("SESSION_COOKIE_SAMESITE=None requires SESSION_COOKIE_SECURE=True.")
+    SESSION_COOKIE_SAMESITE = CSRF_COOKIE_SAMESITE = _samesite_override
 
 # ==================== APP SPECIFIC SETTINGS ====================
 
@@ -395,6 +417,10 @@ MAX_IMAGE_DIMENSION = int(os.getenv('MAX_IMAGE_DIMENSION', '12000'))
 # SVGs are an executable/script vector (embedded <script>, foreignObject).
 # Off by default; a project that genuinely needs SVG logos opts in.
 ALLOW_SVG_UPLOAD = os.getenv('ALLOW_SVG_UPLOAD', 'False') == 'True'
+# Re-encode raster uploads to WebP (api/image_optimize.py) when it saves bytes.
+IMAGE_OPTIMIZE = os.getenv('IMAGE_OPTIMIZE', 'True') == 'True'
+IMAGE_OPTIMIZE_MAX_DIMENSION = int(os.getenv('IMAGE_OPTIMIZE_MAX_DIMENSION', '2400'))
+IMAGE_OPTIMIZE_WEBP_QUALITY = int(os.getenv('IMAGE_OPTIMIZE_WEBP_QUALITY', '82'))
 
 # API Version
 API_VERSION = 'v1'

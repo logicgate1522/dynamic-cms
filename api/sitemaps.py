@@ -8,7 +8,14 @@ strings. Each callable takes no args and returns an iterable of dicts:
     {"path": "products/widget", "changefreq": "weekly",
      "priority": 0.7, "lastmod": "2026-08-01"}
 
-``pages`` and ``blog`` are always registered.
+``pages`` and ``blog`` are always registered, plus ``extra``: paths listed
+in SiteSettings.data.sitemap.extraPaths (routes that exist only in the
+frontend code, e.g. "about", "contact").
+
+Admins fine-tune any URL from any source with
+SiteSettings.data.sitemap.overrides = {"<path>": {"include", "priority",
+"changefreq"}}. GET api/sitemap/report/ lists every URL, included or not,
+with its source and effective settings (admin).
 """
 
 from datetime import datetime
@@ -55,7 +62,44 @@ def _blog_source():
         }
 
 
-BUILTIN_SOURCES = {"pages": _pages_source, "blog": _blog_source}
+def _extra_source():
+    sitemap_cfg = _site_data().get("sitemap") or {}
+    for path in sitemap_cfg.get("extraPaths") or []:
+        if isinstance(path, str):
+            yield {"path": path.strip("/"), "changefreq": "monthly", "priority": 0.7}
+
+
+BUILTIN_SOURCES = {"pages": _pages_source, "blog": _blog_source, "extra": _extra_source}
+
+
+def _normal(path):
+    clean = str(path or "").strip("/")
+    return "" if clean == "home" else clean
+
+
+def all_entries(include_excluded=False):
+    """Every URL from every source, de-duplicated (first source wins), with
+    admin overrides applied. Excluded entries are kept only on request."""
+    cfg = _site_data().get("sitemap") or {}
+    overrides = {_normal(k): v for k, v in (cfg.get("overrides") or {}).items() if isinstance(v, dict)}
+    seen = set()
+    for name, fn in get_sources().items():
+        for entry in fn():
+            path = _normal(entry.get("path"))
+            if path in seen:
+                continue
+            seen.add(path)
+            item = {**entry, "path": path, "source": name, "included": True, "overridden": False}
+            override = overrides.get(path)
+            if override:
+                item["overridden"] = True
+                for key in ("priority", "changefreq"):
+                    if override.get(key) not in (None, ""):
+                        item[key] = override[key]
+                if override.get("include") is False:
+                    item["included"] = False
+            if item["included"] or include_excluded:
+                yield item
 
 
 def get_sources():
@@ -118,8 +162,9 @@ def sitemap_section(request, section):
     base = _base_url(request)
     body = ['<?xml version="1.0" encoding="UTF-8"?>',
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    for entry in fn():
-        body.append(_url_xml(base, entry))
+    for entry in all_entries():
+        if entry["source"] == section:
+            body.append(_url_xml(base, entry))
     body.append("</urlset>")
     return HttpResponse("\n".join(body), content_type="application/xml")
 
@@ -130,9 +175,8 @@ def sitemap_all(request):
     base = _base_url(request)
     body = ['<?xml version="1.0" encoding="UTF-8"?>',
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    for fn in get_sources().values():
-        for entry in fn():
-            body.append(_url_xml(base, entry))
+    for entry in all_entries():
+        body.append(_url_xml(base, entry))
     body.append("</urlset>")
     return HttpResponse("\n".join(body), content_type="application/xml")
 
@@ -160,3 +204,25 @@ def robots_txt(request):
     lines.append("")
     lines.append(f"Sitemap: {base}/sitemap.xml")
     return HttpResponse("\n".join(lines), content_type="text/plain")
+
+
+# --------------------------------------------------------------- admin report
+
+from rest_framework.permissions import IsAdminUser  # noqa: E402
+from rest_framework.response import Response  # noqa: E402
+from rest_framework.views import APIView  # noqa: E402
+
+
+class SitemapReportView(APIView):
+    """GET sitemap/report/ — every URL the sitemap knows about (included or
+    excluded), its source and effective priority/changefreq. Edit with
+    PATCH settings/site/ {"sitemap": {"overrides": {...}, "extraPaths": [...]}}."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        rows = list(all_entries(include_excluded=True))
+        return Response({
+            "entries": rows,
+            "included": sum(1 for r in rows if r["included"]),
+            "sources": list(get_sources().keys()),
+        })

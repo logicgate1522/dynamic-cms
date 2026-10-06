@@ -64,64 +64,16 @@ class DynamicPageParseError(Exception):
         super().__init__("Dynamic page validation failed")
 
 
-def build_ai_prompt(section_types=None):
-    types = [t for t in (section_types or SECTION_TYPES) if t in SECTION_SCHEMA]
-    snippet = {t: SECTION_SCHEMA[t] for t in types}
-    return f"""You are creating a CMS dynamic page for this website.
-
-Return ONLY valid JSON. No markdown code fences, no commentary.
-
-Shape:
-
-{{
-  "page_type": "generic",
-  "title": "",
-  "seo": {{ "title": "", "description": "", "keywords": [] }},
-  "sections": [ ...one object per section... ]
-}}
-
-Available section types and their fields ("required"/"required_list" must be
-present; "optional" may be omitted):
-
-{json.dumps(snippet, indent=2)}
-
-Rules:
-- Every section object includes "type" set to one of: {", ".join(types)}.
-- A section needing an image includes "image_required": true and a concrete
-  "image_prompt" describing exactly what the image shows. This applies to
-  {", ".join(sorted(SINGLE_IMAGE_SECTION_TYPES))} (top-level), and to each
-  item in {", ".join(sorted(PER_ITEM_IMAGE_SECTION_TYPES))} sections.
-- Do not invent section types outside the list.
-- Keep rich_text / image_text "content" as plain paragraphs separated by
-  blank lines. No raw HTML, no markdown syntax.
-- "video" sections: "video_url" must be a YouTube or Vimeo embed URL.
-"""
+def build_ai_prompt(section_types=None, context=None):
+    """Page prompt — delegates to api/prompts.py (the single prompt source)."""
+    from .prompts import page_prompt
+    return page_prompt(section_types, context)
 
 
 def build_copy_structure_prompt():
-    return f"""You are given an existing web page or component (HTML/JSX/markup
-or a screenshot description). Reproduce its STRUCTURE and COPY as CMS dynamic
-page JSON — do not redesign it.
-
-Return ONLY valid JSON in this shape:
-
-{{
-  "page_type": "generic",
-  "title": "<the page's main heading>",
-  "sections": [ ... ]
-}}
-
-- Walk the page top to bottom. Emit one section per visual block, preserving
-  order, headings, body copy, list items, and CTAs verbatim.
-- Map each block to the closest available type: {", ".join(SECTION_TYPES)}.
-- For every image in the original, set "image_required": true and write an
-  "image_prompt" describing what that image shows so it can be re-uploaded.
-- Keep text as plain paragraphs. No HTML.
-
-Section field reference:
-
-{json.dumps(SECTION_SCHEMA, indent=2)}
-"""
+    """Copy-structure prompt — delegates to api/prompts.py."""
+    from .prompts import copy_structure_prompt
+    return copy_structure_prompt()
 
 
 def _validate_section_fields(section, schema):

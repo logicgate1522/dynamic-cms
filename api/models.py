@@ -141,12 +141,45 @@ class UploadedImage(models.Model):
         if is_new_file:
             _, ext = os.path.splitext(name)
             ext = ext.lower() or ".jpg"
-            self.image.name = f"uploaded_images/{self._seo_stem()}{ext}"
             f = getattr(self.image, "file", None)
             if f is not None:
+                # Checksum the ORIGINAL bytes so re-uploading the same file
+                # still dedupes after it has been re-encoded below.
                 self._fill_metadata(f)
+                original_checksum = self.checksum
+                ext = self._optimize(f, ext)
+                self._fill_metadata(self.image.file)
+                self.checksum = original_checksum
+            self.image.name = f"uploaded_images/{self._seo_stem()}{ext}"
 
         super().save(*args, **kwargs)
+
+    def _optimize(self, f, ext):
+        """Re-encode a new raster upload to WebP (smaller, capped at
+        IMAGE_OPTIMIZE_MAX_DIMENSION) when that actually saves bytes.
+        Returns the extension to use. Off with IMAGE_OPTIMIZE=False."""
+        from django.conf import settings
+        from django.core.files.base import ContentFile
+
+        from .image_optimize import optimize_to_webp
+
+        if not getattr(settings, "IMAGE_OPTIMIZE", True):
+            return ext
+        try:
+            f.seek(0)
+            raw = f.read()
+        except (OSError, AttributeError):
+            return ext
+        result = optimize_to_webp(raw, ext)
+        if result is None:
+            try:
+                f.seek(0)
+            except OSError:
+                pass
+            return ext
+        webp_bytes, new_ext = result
+        self.image.file = ContentFile(webp_bytes)
+        return new_ext
 
     def _fill_metadata(self, f):
         import hashlib
@@ -333,6 +366,9 @@ class DynamicSection(models.Model):
     section_type = models.CharField(max_length=40)
     order = models.PositiveIntegerField(default=0)
     content = models.JSONField(default=dict)
+    # Unpublished edit of `content` (PATCH ?mode=draft). Public reads always
+    # get `content`; POST drafts/publish/ copies this over and clears it.
+    draft_content = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="published")
 
     class Meta:

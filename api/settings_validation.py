@@ -46,6 +46,37 @@ def validate_site_settings(payload):
         if not (isinstance(org["sameAs"], list) and all(isinstance(x, str) for x in org["sameAs"])):
             errors["organization.sameAs"] = "Must be an array of URL strings."
 
+    ai = payload.get("ai")
+    if ai is not None:
+        if not isinstance(ai, dict):
+            errors["ai"] = "Must be an object."
+        else:
+            for key in ("brandVoice", "audience", "location"):
+                if key in ai and not isinstance(ai[key], str):
+                    errors[f"ai.{key}"] = "Must be a string."
+            if "extraRules" in ai and not (
+                isinstance(ai["extraRules"], list) and all(isinstance(x, str) for x in ai["extraRules"])
+            ):
+                errors["ai.extraRules"] = "Must be an array of strings."
+            if "pageKinds" in ai and not (
+                isinstance(ai["pageKinds"], dict) and all(isinstance(v, str) for v in ai["pageKinds"].values())
+            ):
+                errors["ai.pageKinds"] = 'Must be an object of {"path-prefix": "Label"}.'
+
+    sitemap = payload.get("sitemap")
+    if sitemap is not None:
+        if not isinstance(sitemap, dict):
+            errors["sitemap"] = "Must be an object."
+        else:
+            extra = sitemap.get("extraPaths")
+            if extra is not None and not (isinstance(extra, list) and all(isinstance(x, str) for x in extra)):
+                errors["sitemap.extraPaths"] = "Must be an array of path strings."
+            overrides = sitemap.get("overrides")
+            if overrides is not None and not (
+                isinstance(overrides, dict) and all(isinstance(v, dict) for v in overrides.values())
+            ):
+                errors["sitemap.overrides"] = 'Must be an object of {"path": {"include", "priority", "changefreq"}}.'
+
     seo = payload.get("seoDefaults")
     if isinstance(seo, dict) and "robots" in seo and not isinstance(seo["robots"], dict):
         errors["seoDefaults.robots"] = "Must be an object."

@@ -2,7 +2,7 @@ from collections import Counter
 from datetime import timedelta
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, login as django_login
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import F
@@ -10,7 +10,8 @@ from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
-from rest_framework import generics, permissions, status
+from rest_framework import exceptions, generics, permissions, status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.generics import ListCreateAPIView, ListAPIView
 from rest_framework.permissions import AllowAny, IsAdminUser
@@ -55,7 +56,7 @@ REVISION_HISTORY_LIMIT = 20
 
 class AdminLoginView(APIView):
     """
-    Self-contained email+password login for the CMS admin UI. Depends on
+    Self-contained email-or-username + password login for the CMS admin UI. Depends on
     nothing but Django's own auth (get_user_model) and DRF's built-in
     TokenAuthentication — no social login, no JWT, no third-party auth
     package. Returns {"key": "<token>"} on success, matching what the
@@ -63,23 +64,32 @@ class AdminLoginView(APIView):
 
     Only accounts with is_staff=True can obtain a token here — this is the
     same admin gate every write endpoint in this app checks.
+
+    Browser admin UIs send {"session": true} plus an X-CSRFToken header (from
+    GET auth/csrf/): the user is logged into a server-side session (HttpOnly
+    cookie) and NO token is returned, so nothing secret is ever readable by
+    page JavaScript. See api/auth_views.py.
     """
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'login'  # dedicated brute-force budget, separate from form_submit
 
     def post(self, request, *args, **kwargs):
-        email = (request.data.get('email') or '').strip()
+        email = (request.data.get('username') or request.data.get('email') or '').strip()
         password = request.data.get('password') or ''
 
         if not email or not password:
             return Response(
-                {"detail": "email and password are required."},
+                {"detail": "Email or username and password are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         User = get_user_model()
-        user = User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(username=email).first()
+        if user is None:
+            # Avoid choosing an arbitrary account when emails are duplicated.
+            matches = list(User.objects.filter(email__iexact=email)[:2])
+            user = matches[0] if len(matches) == 1 else None
 
         if user is None or not user.is_active or not user.check_password(password):
             return Response(
@@ -91,6 +101,17 @@ class AdminLoginView(APIView):
                 {"detail": "This account does not have admin access."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        if request.data.get("session") in (True, "true", "1", 1):
+            # Anonymous requests skip DRF's CSRF check; a session login must
+            # still prove it came from the real site (login-CSRF).
+            try:
+                SessionAuthentication().enforce_csrf(request._request)
+            except exceptions.PermissionDenied as exc:
+                return Response({"detail": str(exc.detail)}, status=status.HTTP_403_FORBIDDEN)
+            django_login(request._request, user)
+            from .auth_views import user_payload
+            return Response({"authenticated": True, "user": user_payload(user)})
 
         token, _ = Token.objects.get_or_create(user=user)
         return Response({"key": token.key})
@@ -124,9 +145,10 @@ class ComponentDataView(APIView):
             component = ComponentData.objects.get(name=self._name())
         except ComponentData.DoesNotExist:
             return Response({})
-        # ?mode=draft returns the working copy (admin editors); default GET
-        # is unchanged — the public/published payload.
-        if request.query_params.get("mode") == "draft":
+        # ?mode=draft returns the working copy — admins only. Everyone else
+        # always gets the published payload, so drafts never leak.
+        is_admin = bool(request.user and request.user.is_staff)
+        if request.query_params.get("mode") == "draft" and is_admin:
             return Response(component.draft_data or component.data)
         return Response(component.data)
 
@@ -285,7 +307,9 @@ class UploadedImageViewSet(ListCreateAPIView):
         if params.get("missing_alt") == "1":
             qs = qs.filter(alt_text="")
         if params.get("unused") == "1":
-            qs = qs.filter(usage=[])
+            from .image_usage import referenced_names
+            used = set(referenced_names())
+            qs = qs.exclude(image__in=used)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -315,18 +339,18 @@ class ImageUsageView(APIView):
         img = UploadedImage.objects.filter(pk=kwargs.get("pk")).first()
         if img is None:
             return Response({"detail": "Not found."}, status=404)
+        from .image_usage import usage_for
         refs = list(img.usage or [])
-        # live scan of SectionMedia
-        from .models import SectionMedia
-        for m in SectionMedia.objects.filter(image=img).select_related("section"):
-            entry = {"type": "section_media",
-                     "ref": f"{m.section.section_type}#{m.section_id}:{m.slot}"}
+        for where in usage_for(img):
+            entry = {"type": "reference", "ref": where}
             if entry not in refs:
                 refs.append(entry)
         return Response({"id": img.id, "usage": refs, "in_use": bool(refs)})
 
 
 class RetrieveImage(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PATCH/DELETE images/<id>/. DELETE refuses (409) while the image is
+    referenced anywhere (api/image_usage.py) unless ?force=1."""
     queryset = UploadedImage.objects.all()
     serializer_class = UploadedImageSerializer
 
@@ -334,6 +358,17 @@ class RetrieveImage(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method == 'GET':
             return [AllowAny()]
         return [IsAdminUser()]
+
+    def destroy(self, request, *args, **kwargs):
+        from .image_usage import usage_for
+        image = self.get_object()
+        where = usage_for(image)
+        if where and request.query_params.get("force") != "1":
+            return Response({"detail": "This image is in use.", "usage": where},
+                            status=status.HTTP_409_CONFLICT)
+        image.image.delete(save=False)
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ==================== SITE-WIDE SETTINGS (singleton) ====================
@@ -565,7 +600,8 @@ class SEOResolveView(APIView):
 
         path = (kwargs.get("path") or "").strip("/")
         base_url = request.build_absolute_uri("/").rstrip("/")
-        cache_key = f"seo-resolve:{base_url}:{path}"
+        from .seo_resolve import cache_version
+        cache_key = f"seo-resolve:v{cache_version('seo')}:{base_url}:{path}"
         cached = cache.get(cache_key)
         if cached is None:
             cached = resolve_seo(path, base_url=base_url)
@@ -637,7 +673,8 @@ class RedirectResolveView(APIView):
         path = request.query_params.get("path", "")
         if not path:
             return Response({"detail": "path query param required."}, status=400)
-        cache_key = f"redirect-resolve:{path}"
+        from .seo_resolve import cache_version
+        cache_key = f"redirect-resolve:v{cache_version('redirects')}:{path}"
         hit = cache.get(cache_key)
         if hit is None:
             row = Redirect.objects.filter(source=path, is_active=True).first()

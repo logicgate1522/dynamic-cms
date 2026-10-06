@@ -73,6 +73,37 @@ class AdminLoginTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+    def test_superuser_can_login_with_username(self):
+        user = User.objects.create_superuser(
+            username="superadmin", email="", password="super-password",
+        )
+        for field in ("email", "username"):
+            response = self.client.post(
+                "/api/auth/login/",
+                {field: "superadmin", "password": "super-password"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["key"], Token.objects.get(user=user).key)
+
+    def test_inactive_superuser_is_rejected(self):
+        User.objects.create_superuser(
+            username="inactive", password="super-password", is_active=False,
+        )
+        response = self.client.post(
+            "/api/auth/login/",
+            {"email": "inactive", "password": "super-password"}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_email_is_rejected(self):
+        User.objects.create_user(username="duplicate", email=self.staff.email, password="correct-horse", is_staff=True)
+        response = self.client.post(
+            "/api/auth/login/",
+            {"email": self.staff.email, "password": "correct-horse"}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_wrong_password_is_rejected(self):
         response = self.client.post(
             "/api/auth/login/",
@@ -915,6 +946,7 @@ class PermissionAuditTests(APITestCase):
     PUBLIC_WRITE_ALLOWLIST = {
         "admin-login": "credential exchange, throttled (login scope)",
         "form-submit": "public form endpoint, throttled (form_submit) + honeypot",
+        "auth-logout": "ends the caller's own session; a no-op when anonymous",
     }
 
     def _permission_instances(self, view_cls, method):
@@ -1183,3 +1215,480 @@ class FormSubmitThrottleTests(AdminAuthMixin, APITestCase):
         ]
         self.assertEqual(statuses[:5], [201, 201, 201, 201, 201])
         self.assertEqual(statuses[5], status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class SessionAuthTests(APITestCase):
+    """Browser admin flow: CSRF bootstrap -> session login -> CSRF-protected
+    writes -> logout. Uses a client that enforces CSRF like a real browser."""
+
+    def setUp(self):
+        cache.clear()
+        self.staff = User.objects.create_user(
+            username="editor", email="editor@example.com", password="correct-horse", is_staff=True,
+        )
+        self.client = self.client_class(enforce_csrf_checks=True)
+
+    def _csrf(self):
+        return self.client.get("/api/auth/csrf/").data["csrfToken"]
+
+    def test_session_status_anonymous(self):
+        self.assertEqual(self.client.get("/api/auth/session/").data, {"authenticated": False})
+
+    def test_session_login_requires_csrf(self):
+        response = self.client.post(
+            "/api/auth/login/",
+            {"username": "editor", "password": "correct-horse", "session": True}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_session_login_write_and_logout(self):
+        token = self._csrf()
+        response = self.client.post(
+            "/api/auth/login/",
+            {"username": "editor", "password": "correct-horse", "session": True},
+            format="json", HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("key", response.data)  # no token handed to the browser
+        self.assertTrue(response.data["authenticated"])
+
+        status_response = self.client.get("/api/auth/session/")
+        self.assertTrue(status_response.data["authenticated"])
+        self.assertEqual(status_response.data["user"]["username"], "editor")
+
+        # Login rotates the CSRF token; fetch the new one.
+        token = self._csrf()
+        blocked = self.client.patch("/api/home/hero/", {"title": "x"}, format="json")
+        self.assertEqual(blocked.status_code, status.HTTP_403_FORBIDDEN)
+        allowed = self.client.patch(
+            "/api/home/hero/", {"title": "Hello"}, format="json", HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(allowed.status_code, status.HTTP_200_OK)
+
+        self.client.post("/api/auth/logout/", HTTP_X_CSRFTOKEN=token)
+        self.assertFalse(self.client.get("/api/auth/session/").data["authenticated"])
+
+    def test_non_staff_session_is_not_admin(self):
+        User.objects.create_user(username="viewer", password="viewer-pass")
+        token = self._csrf()
+        response = self.client.post(
+            "/api/auth/login/",
+            {"username": "viewer", "password": "viewer-pass", "session": True},
+            format="json", HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(self.client.get("/api/auth/session/").data["authenticated"])
+
+    def test_token_login_still_works_for_scripts(self):
+        response = self.client.post(
+            "/api/auth/login/", {"email": "editor@example.com", "password": "correct-horse"}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("key", response.data)
+
+
+@override_settings(FRONTEND_REVALIDATE_URL="http://frontend.test/api/revalidate", REVALIDATE_SECRET="s3cret")
+class RevalidationWebhookTests(AdminAuthMixin, APITestCase):
+    """Writes queue the right cache tags after commit; delivery is signed."""
+
+    def capture(self, fn):
+        from unittest import mock
+        seen = set()
+        with mock.patch("api.revalidation._enqueue", side_effect=lambda tags: seen.update(tags)):
+            with self.captureOnCommitCallbacks(execute=True):
+                fn()
+        return seen
+
+    def test_component_save_tags(self):
+        tags = self.capture(lambda: self.admin_client.patch("/api/home/hero/", {"t": 1}, format="json"))
+        self.assertIn("cms:home:hero", tags)
+
+    def test_settings_and_seo_tags(self):
+        tags = self.capture(lambda: self.admin_client.patch("/api/settings/site/", {"organization": {"name": "X"}}, format="json"))
+        self.assertTrue({"cms", "cms:settings"} <= tags)
+        tags = self.capture(lambda: self.admin_client.patch("/api/seo/about/", {"seoTitle": "About"}, format="json"))
+        self.assertTrue({"cms:seo", "cms:seo:about"} <= tags)
+
+    def test_blog_and_page_tags(self):
+        tags = self.capture(lambda: self.admin_client.post(
+            "/api/blog/", {"title": "Hello", "slug": "hello", "status": "published"}, format="json"))
+        self.assertTrue({"cms:blog", "cms:blog:hello", "cms:seo:blog/hello"} <= tags)
+        tags = self.capture(lambda: self.admin_client.post(
+            "/api/content/pages/", {"path": "landing/x", "title": "X"}, format="json"))
+        self.assertTrue({"cms:pages", "cms:page:landing/x"} <= tags)
+
+    def test_rolled_back_write_does_not_notify(self):
+        from django.db import transaction
+        from unittest import mock
+        seen = set()
+        with mock.patch("api.revalidation._enqueue", side_effect=lambda tags: seen.update(tags)):
+            with self.captureOnCommitCallbacks(execute=True):
+                try:
+                    with transaction.atomic():
+                        ComponentData.objects.create(name="ghost", data={})
+                        raise RuntimeError("rollback")
+                except RuntimeError:
+                    pass
+        self.assertNotIn("cms:home:ghost", seen)
+
+    def test_delivery_is_signed(self):
+        from unittest import mock
+        from api import revalidation
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            revalidation._deliver({"cms:home:hero"})
+        request = urlopen.call_args[0][0]
+        body = request.data
+        timestamp = request.get_header("X-cms-timestamp")
+        self.assertEqual(request.get_header("X-cms-signature"), revalidation.sign(body, timestamp, "s3cret"))
+        self.assertEqual(json_loads(body), {"tags": ["cms:home:hero"]})
+
+
+def json_loads(raw):
+    import json
+    return json.loads(raw)
+
+
+class DraftWorkflowTests(AdminAuthMixin, APITestCase):
+    """Inline edits save as drafts; publish/discard across components and sections."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin_client.patch("/api/home/hero/", {"title": "Live"}, format="json")
+        self.admin_client.post("/api/content/pages/", {"path": "landing/a", "title": "A"}, format="json")
+        self.admin_client.post("/api/content/landing/a/sections/", {"sections": [
+            {"section_type": "rich_text", "content": {"content": "Live body"}}]}, format="json")
+        self.section_id = self.admin_client.get("/api/content/landing/a/sections/").data[0]["id"]
+
+    def test_component_draft_is_invisible_until_published(self):
+        self.admin_client.patch("/api/home/hero/?mode=draft", {"title": "Draft"}, format="json")
+        self.assertEqual(self.client.get("/api/home/hero/").data["title"], "Live")
+        self.assertEqual(self.admin_client.get("/api/home/hero/?mode=draft").data["title"], "Draft")
+        pending = self.admin_client.get("/api/drafts/").data
+        self.assertEqual([c["name"] for c in pending["components"]], ["hero"])
+        self.admin_client.post("/api/drafts/publish/", {"components": ["hero"]}, format="json")
+        self.assertEqual(self.client.get("/api/home/hero/").data["title"], "Draft")
+        self.assertEqual(self.admin_client.get("/api/drafts/").data["total"], 0)
+
+    def test_section_draft_publish(self):
+        url = f"/api/content/landing/a/sections/{self.section_id}/?mode=draft"
+        self.admin_client.patch(url, {"content": {"content": "Draft body"}}, format="json")
+        sections = self.admin_client.get("/api/content/landing/a/sections/").data
+        self.assertEqual(sections[0]["content"]["content"], "Live body")
+        self.assertEqual(sections[0]["draft_content"]["content"], "Draft body")
+        pending = self.admin_client.get("/api/drafts/").data
+        self.assertEqual(pending["hosts"], [{"kind": "content", "key": "landing/a", "title": "A", "sections": 1}])
+        result = self.admin_client.post("/api/drafts/publish/", {"hosts": [{"kind": "content", "key": "landing/a"}]}, format="json").data
+        self.assertEqual(result["sections"], 1)
+        sections = self.admin_client.get("/api/content/landing/a/sections/").data
+        self.assertEqual(sections[0]["content"]["content"], "Draft body")
+        self.assertIsNone(sections[0]["draft_content"])
+
+    def test_discard_everything(self):
+        self.admin_client.patch("/api/home/hero/?mode=draft", {"title": "Draft"}, format="json")
+        self.admin_client.patch(f"/api/content/landing/a/sections/{self.section_id}/?mode=draft",
+                                {"content": {"content": "Draft body"}}, format="json")
+        result = self.admin_client.post("/api/drafts/discard/", {}, format="json").data
+        self.assertEqual(result, {"components": ["hero"], "sections": 1})
+        self.assertEqual(self.admin_client.get("/api/home/hero/?mode=draft").data["title"], "Live")
+
+    def test_public_never_sees_draft_fields(self):
+        self.assertNotIn("draft_content", self.client.get("/api/content/landing/a/sections/").data[0])
+        self.assertEqual(self.client.get("/api/drafts/").status_code, 401)
+
+
+class DraftPrivacyTests(AdminAuthMixin, APITestCase):
+    def test_anonymous_cannot_read_component_draft(self):
+        self.admin_client.patch("/api/home/hero/", {"title": "Live"}, format="json")
+        self.admin_client.patch("/api/home/hero/?mode=draft", {"title": "Secret draft"}, format="json")
+        self.assertEqual(self.client.get("/api/home/hero/?mode=draft").data["title"], "Live")
+
+
+class KeywordMatchingTests(APITestCase):
+    def test_connector_words_ignored_order_kept(self):
+        from api.keywords import contains_keyword
+        self.assertTrue(contains_keyword("Accountant for Leeds businesses", "accountant leeds"))
+        self.assertTrue(contains_keyword("VAT RETURNS made simple", "vat returns"))
+        self.assertFalse(contains_keyword("Leeds accountant", "accountant leeds"))
+        self.assertFalse(contains_keyword("anything", ""))
+
+    def test_section_coverage_excludes_shared_blocks(self):
+        from api.keywords import section_coverage
+        result = section_coverage("vat returns", {
+            "hero": {"label": "Hero", "content": {"title": "VAT returns done right"}},
+            "faq": {"label": "FAQ", "content": {"items": [{"q": "Fees?"}]}},
+            "footer": {"label": "Footer", "content": {"t": "x"}, "excludeFromKeywordAudit": True},
+        })
+        self.assertEqual((result["withKeyword"], result["total"], result["percent"]), (1, 2, 50))
+
+
+class AiNormalizeTests(AdminAuthMixin, APITestCase):
+    def post(self, body):
+        return self.admin_client.post("/api/ai/normalize/", body, format="json")
+
+    def test_section_reply_with_prose_fences_links_and_wrapper(self):
+        raw = 'Here you go:\n```json\n{"content": {"title": "New", "image": "[https://x.jpg](https://x.jpg)"}}\n```\nDone.'
+        r = self.post({"kind": "section", "raw": raw, "current": {"title": "Old", "cta": "Call"}})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["content"], {"title": "New", "image": "https://x.jpg", "cta": "Call"})
+
+    def test_links_inside_prose_keep_only_the_label(self):
+        raw = '{"note": "Email [info@x.co.uk](mailto:info@x.co.uk) or see [our fees](/fees). [Keep] this."}'
+        r = self.post({"kind": "section", "raw": raw, "current": {"note": ""}})
+        self.assertEqual(r.data["content"]["note"], "Email info@x.co.uk or see our fees. [Keep] this.")
+
+    def test_shrinking_list_is_refused(self):
+        current = {"items": [{"q": 1}, {"q": 2}, {"q": 3}, {"q": 4}]}
+        r = self.post({"kind": "section", "raw": '{"items": [{"q": 1}]}', "current": current})
+        self.assertEqual(len(r.data["content"]["items"]), 4)
+        self.assertTrue(r.data["warnings"])
+
+    def test_page_assist_fanout(self):
+        raw = '{"hero": {"title": "Better"}, "ghost": {"x": 1}}'
+        r = self.post({"kind": "page_assist", "raw": raw, "current": {"hero": {"title": "Old", "sub": "s"}}})
+        self.assertEqual(r.data["applied"], {"hero": {"title": "Better", "sub": "s"}})
+        self.assertEqual(r.data["unmatched"], ["ghost"])
+
+    def test_seo_flat_keys_map_to_pageseo_shape(self):
+        raw = ('Audit text...\n```json\n{"seoTitle": "VAT Returns | Acme", "primaryKeyword": "vat returns", '
+               '"secondaryKeywords": "mtd vat, vat filing", "searchIntent": "commercial", "ogTitle": "OG", '
+               '"breadcrumbName": "VAT", "bogus": 1}\n```')
+        r = self.post({"kind": "seo", "raw": raw, "path": "services/vat"})
+        self.assertEqual(r.data["patch"], {
+            "seoTitle": "VAT Returns | Acme",
+            "keywords": {"primary": "vat returns", "secondary": ["mtd vat", "vat filing"]},
+            "searchIntent": "commercial",
+            "social": {"ogTitle": "OG"},
+            "breadcrumbLabels": {"services/vat": "VAT"},
+        })
+        self.assertEqual(r.data["unknown"], ["bogus"])
+
+    def test_invalid_intent_and_bad_json(self):
+        r = self.post({"kind": "seo", "raw": '{"searchIntent": "buy stuff"}'})
+        self.assertEqual(r.data["patch"], {})
+        self.assertEqual(self.post({"kind": "section", "raw": "{not json", "current": {}}).status_code, 400)
+
+    def test_page_kind_returns_validated_page(self):
+        raw = '{"title": "T", "sections": [{"type": "rich_text", "content": "Hello"}]}'
+        r = self.post({"kind": "page", "raw": raw})
+        self.assertEqual(r.data["page"]["sections"][0]["section_type"], "rich_text")
+        bad = self.post({"kind": "page", "raw": '{"title": "T", "sections": [{"type": "nope"}]}'})
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("errors", bad.data)
+
+    def test_admin_only(self):
+        self.assertEqual(self.client.post("/api/ai/normalize/", {"kind": "section", "raw": "{}"}, format="json").status_code, 401)
+
+
+class AiPromptTests(AdminAuthMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin_client.patch("/api/settings/site/", {
+            "organization": {"name": "Acme Accounts"},
+            "ai": {"brandVoice": "friendly", "location": "Leeds", "pageKinds": {"vat": "VAT guide"},
+                   "extraRules": ["Say 'accounts', never 'books'."]},
+        }, format="json")
+        self.admin_client.patch("/api/seo/services/vat/", {"keywords": {"primary": "vat returns leeds"}}, format="json")
+
+    def test_new_page_prompt_uses_settings_and_brief(self):
+        r = self.admin_client.get("/api/ai/new-page-prompt/?title=VAT&path=services/vat&keyword=vat+returns&audience=sole+traders")
+        prompt = r.data["prompt"]
+        for expected in ("Acme Accounts", "friendly", "Service page", "vat returns", "sole traders", "Leeds",
+                         "Say 'accounts', never 'books'.", "SEO RULES", '"sections"'):
+            self.assertIn(expected, prompt)
+
+    def test_custom_page_kind(self):
+        prompt = self.admin_client.get("/api/ai/new-page-prompt/?path=vat/guide").data["prompt"]
+        self.assertIn("VAT guide", prompt)
+
+    def test_build_prompt_edit_mode_includes_live_sections_and_seo_keyword(self):
+        self.admin_client.post("/api/content/pages/", {"path": "services/vat", "title": "VAT"}, format="json")
+        self.admin_client.post("/api/content/services/vat/sections/", {"sections": [
+            {"section_type": "rich_text", "content": {"content": "Current copy here"}}]}, format="json")
+        r = self.admin_client.get("/api/content/services/vat/build-prompt/?mode=edit&strategy=override&topic=add+pricing")
+        prompt = r.data["prompt"]
+        self.assertIn("Current copy here", prompt)
+        self.assertIn("override", prompt)
+        self.assertIn("add pricing", prompt)
+        self.assertIn("vat returns leeds", prompt)  # pulled from the page's SEO row
+        self.assertEqual(self.admin_client.get("/api/content/missing/build-prompt/").status_code, 404)
+
+    def test_section_prompt(self):
+        r = self.admin_client.post("/api/ai/section-prompt/", {
+            "content": {"heading": "Hi"}, "section_type": "cta", "path": "services/vat"}, format="json")
+        self.assertIn('"heading": "Hi"', r.data["prompt"])
+        self.assertIn("button_text", r.data["prompt"])  # field contract from SECTION_SCHEMA
+        self.assertEqual(r.data["keyword"], "vat returns leeds")
+
+    def test_page_assist_prompt_and_audit(self):
+        r = self.admin_client.post("/api/ai/page-assist-prompt/", {"path": "services/vat", "sections": {
+            "hero": {"label": "Hero", "content": {"title": "VAT returns for Leeds firms"}},
+            "faq": {"label": "FAQ", "content": {"items": []}},
+        }}, format="json")
+        self.assertEqual(r.data["audit"]["percent"], 50)
+        self.assertIn("faq (FAQ)", r.data["prompt"])
+        self.assertEqual(self.admin_client.post("/api/ai/page-assist-prompt/", {"sections": {}}, format="json").status_code, 400)
+
+    def test_seo_and_keyword_prompts(self):
+        r = self.admin_client.post("/api/ai/seo-prompt/", {"path": "services/vat", "page_text": "We file VAT."}, format="json")
+        self.assertIn("We file VAT.", r.data["prompt"])
+        self.assertIn("```json", r.data["prompt"])
+        self.assertTrue(any(c["id"] == "title-keyword" for c in r.data["checks"]))
+        k = self.admin_client.post("/api/ai/keyword-prompt/", {"path": "services/vat", "location": "York"}, format="json")
+        self.assertIn("York", k.data["prompt"])
+
+    def test_prompts_are_admin_only(self):
+        for url in ("/api/ai/new-page-prompt/", "/api/content/x/build-prompt/"):
+            self.assertEqual(self.client.get(url).status_code, 401)
+        for url in ("/api/ai/section-prompt/", "/api/ai/page-assist-prompt/", "/api/ai/seo-prompt/", "/api/ai/keyword-prompt/"):
+            self.assertEqual(self.client.post(url, {}, format="json").status_code, 401)
+
+    def test_ai_settings_validation(self):
+        r = self.admin_client.patch("/api/settings/site/", {"ai": {"extraRules": "nope"}}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("ai.extraRules", r.data)
+
+
+class PageEditToolsTests(AdminAuthMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin_client.post("/api/content/pages/", {"path": "landing/b", "title": "B"}, format="json")
+        self.admin_client.post("/api/content/landing/b/sections/", {"sections": [
+            {"section_type": "hero", "content": {"heading": "H", "description": "D"},
+             "media": [{"slot": "image", "required": False}]},
+            {"section_type": "rich_text", "content": {"content": "Old"}},
+            {"section_type": "cta", "content": {"heading": "Go", "button_text": "Buy"}},
+        ]}, format="json")
+
+    def sections(self):
+        return self.admin_client.get("/api/content/landing/b/sections/").data
+
+    def test_add_section_at_position(self):
+        r = self.admin_client.post("/api/content/landing/b/sections/add/",
+                                   {"section_type": "banner", "content": {"text": "Sale"}, "position": 1}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual([s["section_type"] for s in self.sections()], ["hero", "banner", "rich_text", "cta"])
+        bad = self.admin_client.post("/api/content/landing/b/sections/add/", {"section_type": "nope"}, format="json")
+        self.assertEqual(bad.status_code, 400)
+
+    def test_paste_to_edit_updates_in_place_keeps_media_and_trims(self):
+        hero_id = self.sections()[0]["id"]
+        raw = '[{"type": "hero", "heading": "New H", "description": "New D"}, {"type": "faq", "items": [{"question": "Q", "answer": "A"}]}]'
+        r = self.admin_client.post("/api/content/landing/b/paste-to-edit/", {"raw": raw}, format="json")
+        self.assertEqual(r.status_code, 200)
+        sections = self.sections()
+        self.assertEqual([s["section_type"] for s in sections], ["hero", "faq"])
+        self.assertEqual(sections[0]["id"], hero_id)  # same row, media kept
+        self.assertEqual(sections[0]["content"]["heading"], "New H")
+        self.assertEqual(len(sections[0]["media"]), 1)
+
+    def test_paste_to_edit_as_draft(self):
+        raw = '{"sections": [{"type": "hero", "heading": "Drafted", "description": "D"}, {"type": "rich_text", "content": "Old"}, {"type": "cta", "heading": "Go", "button_text": "Buy"}]}'
+        self.admin_client.post("/api/content/landing/b/paste-to-edit/", {"raw": raw, "as_draft": True}, format="json")
+        hero = self.sections()[0]
+        self.assertEqual(hero["content"]["heading"], "H")
+        self.assertEqual(hero["draft_content"]["heading"], "Drafted")
+
+
+class HomeSeoResolveTests(AdminAuthMixin, APITestCase):
+    def test_root_resolve_uses_home_row_and_root_canonical(self):
+        self.admin_client.patch("/api/settings/site/", {"seoDefaults": {"siteUrl": "https://acme.test"}}, format="json")
+        self.admin_client.patch("/api/seo/home/", {"seoTitle": "Acme Home"}, format="json")
+        for url in ("/api/seo/resolve/", "/api/seo/resolve/home/"):
+            data = self.client.get(url).data
+            self.assertEqual(data["title"], "Acme Home")
+            self.assertEqual(data["canonical"], "https://acme.test")
+            crumbs = [n for n in data["jsonLd"]["@graph"] if n["@type"] == "BreadcrumbList"][0]
+            self.assertEqual(len(crumbs["itemListElement"]), 1)
+
+    def test_resolve_cache_refreshes_after_write(self):
+        self.admin_client.patch("/api/seo/about/", {"seoTitle": "First"}, format="json")
+        self.assertEqual(self.client.get("/api/seo/resolve/about/").data["title"], "First")
+        self.admin_client.patch("/api/seo/about/", {"seoTitle": "Second"}, format="json")
+        self.assertEqual(self.client.get("/api/seo/resolve/about/").data["title"], "Second")
+
+
+class ImageOptimizeTests(AdminAuthMixin, APITestCase):
+    _cache = {}
+
+    def _png(self, size=(900, 600)):
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        if size not in self._cache:
+            buf = io.BytesIO()
+            Image.effect_noise(size, 60).convert("RGB").save(buf, format="PNG")
+            self._cache[size] = buf.getvalue()
+        return SimpleUploadedFile("photo.png", self._cache[size], content_type="image/png")
+
+    def test_png_becomes_webp_and_dedupe_still_works(self):
+        first = self.admin_client.post("/api/images/", {"image": self._png(), "category": "content"}, format="multipart")
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertTrue(first.data["image_url"].endswith(".webp"))
+        self.assertEqual(first.data["format"], "WEBP")
+        again = self.admin_client.post("/api/images/", {"image": self._png(), "category": "content"}, format="multipart")
+        self.assertTrue(again.data.get("duplicate"))
+
+    @override_settings(IMAGE_OPTIMIZE=False)
+    def test_can_be_disabled(self):
+        r = self.admin_client.post("/api/images/", {"image": self._png((300, 200)), "category": "content"}, format="multipart")
+        self.assertTrue(r.data["image_url"].endswith(".png"))
+
+
+class SitemapOverrideTests(AdminAuthMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin_client.patch("/api/settings/site/", {"seoDefaults": {"siteUrl": "https://acme.test"}}, format="json")
+        self.admin_client.patch("/api/seo/home/", {"seoTitle": "Home"}, format="json")
+        self.admin_client.patch("/api/seo/services/", {"seoTitle": "Services"}, format="json")
+
+    def test_extra_paths_and_overrides(self):
+        self.admin_client.patch("/api/settings/site/", {"sitemap": {
+            "extraPaths": ["about", "services"],
+            "overrides": {"services": {"priority": 0.9}, "about": {"include": False}},
+        }}, format="json")
+        xml = self.client.get("/sitemap.xml").content.decode()
+        self.assertIn("<loc>https://acme.test</loc>", xml)          # home at the root, once
+        self.assertEqual(xml.count("https://acme.test/services<"), 1)  # de-duplicated
+        self.assertIn("<priority>0.9</priority>", xml)
+        self.assertNotIn("https://acme.test/about<", xml)
+        report = self.admin_client.get("/api/sitemap/report/").data
+        about = [r for r in report["entries"] if r["path"] == "about"][0]
+        self.assertEqual((about["source"], about["included"]), ("extra", False))
+        self.assertEqual(self.client.get("/api/sitemap/report/").status_code, 401)
+
+
+class PasteToBuildSeoTests(AdminAuthMixin, APITestCase):
+    def test_content_page_gets_seo_from_reply(self):
+        raw = ('{"title": "VAT", "seo": {"title": "VAT Returns Leeds", "description": "Desc", '
+               '"keywords": ["vat returns leeds", "mtd vat"]}, "sections": [{"type": "rich_text", "content": "x"}]}')
+        r = self.admin_client.post("/api/content/paste-to-build/", {"raw": raw, "path": "services/vat"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        seo = self.admin_client.get("/api/seo/services/vat/").data
+        self.assertEqual(seo["seoTitle"], "VAT Returns Leeds")
+        self.assertEqual(seo["keywords"], {"primary": "vat returns leeds", "secondary": ["mtd vat"]})
+
+
+class ImageUsageTests(AdminAuthMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        import io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), (200, 10, 10)).save(buf, format="PNG")
+        r = self.admin_client.post("/api/images/", {"image": SimpleUploadedFile("a.png", buf.getvalue()), "category": "content"}, format="multipart")
+        self.image = r.data
+
+    def test_reference_in_component_counts_as_used(self):
+        self.assertEqual(self.admin_client.get("/api/images/?unused=1").data["count"], 1)
+        self.admin_client.patch("/api/home/hero/?mode=draft", {"image": self.image["image_url"]}, format="json")
+        usage = self.admin_client.get(f"/api/images/{self.image['id']}/usage/").data
+        self.assertTrue(usage["in_use"])
+        self.assertEqual(self.admin_client.get("/api/images/?unused=1").data["count"], 0)
+
+    def test_delete_in_use_needs_force(self):
+        self.admin_client.patch("/api/seo/about/", {"social": {"ogImage": self.image["image_url"]}}, format="json")
+        blocked = self.admin_client.delete(f"/api/images/{self.image['id']}/")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn("SEO for /about", blocked.data["usage"])
+        self.assertEqual(self.admin_client.delete(f"/api/images/{self.image['id']}/?force=1").status_code, 204)

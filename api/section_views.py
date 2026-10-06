@@ -53,12 +53,15 @@ def _sections_qs(host, published_only):
 
 
 def serialize_section(section, request=None):
+    is_admin = bool(request and getattr(request, "user", None) and request.user.is_staff)
     return {
         "id": section.id,
         "section_type": section.section_type,
         "order": section.order,
         "status": section.status,
         "content": section.content,
+        # Pending unpublished edit — admins only (null when there is none).
+        **({"draft_content": section.draft_content} if is_admin else {}),
         "media": [
             {
                 "id": m.id, "slot": m.slot, "required": m.required,
@@ -179,13 +182,14 @@ class SectionSchemaView(APIView):
 
 
 class DynamicPagePromptView(APIView):
-    """GET ai/dynamic-page-prompt/?sections=hero,faq — copy-paste AI prompt."""
+    """GET ai/dynamic-page-prompt/?sections=hero,faq — copy-paste AI prompt.
+    Kept for compatibility; same as ai/new-page-prompt/ (title, topic, path,
+    page_type and the brief fields are accepted too)."""
     permission_classes = [IsAdminUser]
 
     def get(self, request, *args, **kwargs):
-        raw = request.query_params.get("sections")
-        types = [s.strip() for s in raw.split(",")] if raw else None
-        return Response({"prompt": build_ai_prompt(types)})
+        from .ai_views import NewPagePromptView
+        return NewPagePromptView().get(request)
 
 
 class CopyStructurePromptView(APIView):
@@ -197,6 +201,30 @@ class CopyStructurePromptView(APIView):
 
 
 # --------------------------------------------------------------- paste to build
+
+def _seed_page_seo(path, seo):
+    """Store the AI's seo block as the new page's PageSEO (never overwrites
+    an existing row's fields — only fills what is empty)."""
+    from .models import PageSEO
+    seo = seo or {}
+    keywords = [str(k).strip() for k in (seo.get("keywords") or []) if str(k).strip()]
+    data = {}
+    if str(seo.get("title") or "").strip():
+        data["seoTitle"] = seo["title"].strip()
+    if str(seo.get("description") or "").strip():
+        data["metaDescription"] = seo["description"].strip()
+    if keywords:
+        data["keywords"] = {"primary": keywords[0], "secondary": keywords[1:]}
+    if not data:
+        return
+    row, created = PageSEO.objects.get_or_create(path=path, defaults={"data": data})
+    if not created:
+        merged = dict(row.data or {})
+        for key, value in data.items():
+            merged.setdefault(key, value)
+        row.data = merged
+        row.save()
+
 
 class PasteToBuildView(APIView):
     """POST content/paste-to-build/ {raw, path?, page_type?} — parse AI JSON,
@@ -229,6 +257,7 @@ class PasteToBuildView(APIView):
                     body_mode="dynamic", status="draft", updated_by=user,
                 )
                 host_kind, host_key = "content", host.path
+                _seed_page_seo(host.path, parsed["seo"])
             _create_sections(host, [
                 {**s, "status": "published"} for s in parsed["sections"]
             ])
@@ -241,6 +270,119 @@ class PasteToBuildView(APIView):
 
 
 # --------------------------------------------------------------- section CRUD
+
+# --------------------------------------------------------------- add / paste-to-edit
+
+class SectionAddView(APIView):
+    """POST content/<key>/sections/add/ {section_type, content, position?}
+    Insert ONE section (default: at the end) without touching the others."""
+    permission_classes = [IsAdminUser]
+    kind = "content"
+
+    def post(self, request, key):
+        host = _get_host(self.kind, key)
+        if host is None:
+            return Response({"detail": "No such page."}, status=404)
+        payload = request.data if isinstance(request.data, dict) else {}
+        validated, errors = _validate_section_payload([payload])
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        existing = list(_sections_qs(host, published_only=False))
+        try:
+            pos = len(existing) if payload.get("position") is None else int(payload["position"])
+        except (TypeError, ValueError):
+            pos = len(existing)
+        pos = max(0, min(pos, len(existing)))
+        with transaction.atomic():
+            for offset, row in enumerate(existing):
+                desired = offset if offset < pos else offset + 1
+                if row.order != desired:
+                    DynamicSection.objects.filter(pk=row.pk).update(order=desired)
+            entry = validated[0]
+            section = DynamicSection.objects.create(
+                content_type=_host_ct(host), object_id=host.pk,
+                section_type=entry["section_type"], order=pos,
+                content=entry["content"], status="published",
+            )
+            _sync_media(section, entry)
+        return Response(serialize_section(section, request), status=status.HTTP_201_CREATED)
+
+
+class BlogSectionAddView(SectionAddView):
+    kind = "blog"
+
+
+class PasteToEditView(APIView):
+    """POST content/<key>/paste-to-edit/ {raw, as_draft?}
+    Apply an AI "full page" reply to an EXISTING page: sections are matched
+    by position; same type -> content updated in place (images kept);
+    different type or extra -> replaced/created; surplus -> deleted.
+    With as_draft=true, matched sections get draft_content instead (nothing
+    goes live until drafts/publish/); structural changes still apply.
+    """
+    permission_classes = [IsAdminUser]
+    kind = "content"
+
+    def post(self, request, key):
+        import json as _json
+        import re as _re
+        host = _get_host(self.kind, key)
+        if host is None:
+            return Response({"detail": "No such page."}, status=404)
+        raw = request.data.get("raw")
+        as_draft = request.data.get("as_draft") in (True, "true", "1", 1)
+        # An edit reply may omit "title" or be a bare sections array.
+        try:
+            probe = _json.loads(_re.sub(r"^```(?:json)?\s*|\s*```$", "", (raw or "").strip()))
+            if isinstance(probe, list):
+                probe = {"sections": probe}
+            if isinstance(probe, dict) and not str(probe.get("title", "")).strip():
+                probe["title"] = getattr(host, "title", "") or "Untitled"
+            raw = _json.dumps(probe)
+        except (ValueError, TypeError):
+            pass
+        try:
+            parsed = parse_and_validate(raw)
+        except DynamicPageParseError as e:
+            return Response({"errors": e.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        incoming = parsed["sections"]
+        current = list(_sections_qs(host, published_only=False))
+        with transaction.atomic():
+            for i, entry in enumerate(incoming):
+                if i < len(current) and current[i].section_type == entry["section_type"]:
+                    row = current[i]
+                    if as_draft:
+                        row.draft_content = entry["content"]
+                    else:
+                        row.content = entry["content"]
+                        row.draft_content = None
+                    row.order = i
+                    row.save(update_fields=["content", "draft_content", "order"])
+                    _sync_media(row, entry)
+                else:
+                    if i < len(current):
+                        current[i].delete()
+                    row = DynamicSection.objects.create(
+                        content_type=_host_ct(host), object_id=host.pk,
+                        section_type=entry["section_type"], order=i,
+                        content=entry["content"], status="published",
+                    )
+                    _sync_media(row, entry)
+            for row in current[len(incoming):]:
+                row.delete()
+
+        return Response({
+            "sections": [serialize_section(s, request) for s in
+                         _sections_qs(host, published_only=False).prefetch_related("media__image")],
+            "pending_images": _pending_images(host),
+            "seo": parsed.get("seo") or {},
+        })
+
+
+class BlogPasteToEditView(PasteToEditView):
+    kind = "blog"
+
 
 class _SectionBase(APIView):
     kind = "content"
@@ -299,7 +441,12 @@ class SectionDetailView(_SectionBase):
         if section is None:
             return Response({"detail": "No such section."}, status=404)
         if "content" in request.data:
-            section.content = request.data["content"]
+            # ?mode=draft keeps the live content untouched until publish.
+            if request.query_params.get("mode") == "draft":
+                section.draft_content = request.data["content"]
+            else:
+                section.content = request.data["content"]
+                section.draft_content = None
         if "order" in request.data:
             section.order = request.data["order"]
         if "status" in request.data:
