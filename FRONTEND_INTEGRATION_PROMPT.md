@@ -1,442 +1,559 @@
-# Frontend Integration Prompt — Universal Dynamic CMS + SEO Backend
+# Frontend Integration Spec — dynamic-cms (v2)
 
-You are an autonomous frontend implementation agent. This file is self-contained:
-every endpoint, header, field name, precedence rule, and code pattern you need is
-below. Do not invent anything not in this document.
+You are the frontend integration agent for this CMS. This file is the whole
+contract. Follow it exactly. Do not invent endpoints, fields, flows or UI
+patterns that are not here, and do not "simplify" any rule. If something here
+conflicts with your habits or with older docs, this file wins.
+
+**Definition of done (no exceptions):** `next build` passes,
+`node scripts/check-inline.mjs src` passes, `node scripts/check-sections.mjs`
+passes, and `frontend-kit/acceptance/acceptance.mjs` passes **every** check
+against the running production build. Until all four are green, the work is not
+finished. Do not report success early.
 
 ---
 
-## §13.0 — How this document behaves
+## §0 — Non-negotiable rules
 
-Decide your mode from what was attached alongside this file:
+Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 
-| Attached with… | Do this |
+| # | Rule |
 |---|---|
-| A whole frontend repo / codebase, no other instruction | **Autonomous mode — §13.1**. Run the 10 phases in order. Stop after each phase, report, wait. |
-| One or more specific files (`layout.js`, a `page.js`, a component, a form, a blog page, a listing page) | **Input router — §13.2**, once per file, in dependency order: layout → pages → sections → forms → lists → blog → redirects. |
-| A natural-language request ("build this landing page", "make this editable") or pasted screenshot / markup | **Paste to Build — §13.3** (from a brief) or **Copy Structure — §13.4** (from an existing reference). |
-| A single phase heading from §13.1 | Execute only that phase, end green, stop. |
-
-**Never ask clarifying questions unless the action is destructive or irreversible.**
-Prefer sensible defaults and state them in your report.
-
-**Framework assumption:** Next.js App Router (`app/`). If the repo is Pages Router,
-Vite/React, Remix, SvelteKit, etc., map the concepts (server-side metadata,
-server components, route params) to that framework's equivalents and say so.
-
----
-
-## §13.6 — Backend contract (verbatim, self-contained)
-
-### Base URL & auth
-
-- API base: `process.env.NEXT_PUBLIC_API_URL` + `/api/` (e.g. `https://cms.example.com/api/`).
-- Auth header is literally **`Authorization: Token <key>`** — **never `Bearer`**.
-- Get a token: `POST auth/login/` `{email, password}` → `{"key": "<token>"}`.
-  Only `is_staff` accounts succeed. Throttled (`login` scope, 10/min).
-- **`isAdmin` = `!!localStorage.getItem("authToken")`**, and it **must be read
-  inside `useEffect` only** — never during render or SSR (hydration mismatch).
-- Store the token as `localStorage.authToken` after login.
-
-```js
-// lib/api.js
-export const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") + "/api";
-
-export function authHeaders() {
-  const t = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
-  return t ? { Authorization: `Token ${t}` } : {};
-}
-
-export async function apiGet(path, opts = {}) {
-  const r = await fetch(`${API}/${path}`, { cache: "no-store", ...opts });
-  if (!r.ok && r.status !== 404) throw new Error(`${path} -> ${r.status}`);
-  return r.status === 404 ? {} : r.json();
-}
-```
-
-### Two URL-shape rules
-
-1. **Name/path-keyed, upsert-safe** — `home/<name>/`, `settings/site/`,
-   `seo/<path>/`. `GET` on an unknown key returns **`200 {}`** (never 404).
-   First `PATCH` creates the row. `PATCH` **deep-merges objects key-by-key;
-   arrays replace wholesale.**
-2. **Normal REST collections** — `blog/`, `redirects/`, `images/`,
-   `content/pages/`, sections, form submissions. Standard `id`/`slug`
-   semantics, `{count, next, previous, results}` pagination on lists.
-
-### Full endpoint table
-
-| Method | Path | Auth | Shape | Purpose |
-|---|---|---|---|---|
-| POST | `auth/login/` | public | — | `{email,password}` → `{key}` |
-| GET | `home/<name>/` | public | keyed | Component JSON; `{}` if unset. `?mode=draft` for the working copy (admin) |
-| PATCH/PUT/DELETE | `home/<name>/` | admin | keyed | Upsert content. `?mode=draft` writes `draft_data`. Body may include `schema_key` |
-| GET | `home/schemas/` | public | — | All `ComponentSchema` field contracts |
-| GET | `home/<name>/history/` | admin | — | Last 20 revisions |
-| POST | `home/<name>/publish/` | admin | — | Copy `draft_data` → live `data` |
-| POST | `home/<name>/revert/<revId>/` | admin | — | Restore a revision (non-destructive) |
-| GET | `settings/site/` | public | keyed | Site-wide identity, SEO defaults, analytics, verification |
-| PATCH | `settings/site/` | admin | keyed | Deep-merged; validated (see §13.6 shape) |
-| GET | `settings/site/schema/organization/` | public | — | Computed Organization/LocalBusiness + WebSite JSON-LD |
-| GET | `seo/` | public | list | All `PageSEO` rows (sitemaps, audits) |
-| GET/PATCH | `seo/<path>/` | public / admin | keyed | Per-page SEO blob |
-| GET | `seo/<path>/history/` | admin | — | Last 20 SEO change snapshots |
-| POST | `seo/<path>/revert/<histId>/` | admin | — | Restore an SEO snapshot |
-| GET | `seo/resolve/<path>/` | public (cached) | — | **Fully-resolved metadata + JSON-LD @graph. Use this in `generateMetadata()`.** |
-| GET/POST | `seo/analyze/<path>/` | admin | — | Run + persist an SEO audit. POST `{html, url}` adds live-DOM checks |
-| GET | `seo/analyze/` | admin | — | Site-wide roll-up, worst pages first |
-| POST | `seo/validate-schema/` | admin | — | `{schema}` → `{valid, issues}` for pasted JSON-LD |
-| GET | `ai/section-schema/` | public | — | `SECTION_SCHEMA` — sync your `SECTION_REGISTRY` against this |
-| GET | `ai/dynamic-page-prompt/?sections=hero,faq` | admin | — | Copy-paste AI prompt to generate page JSON |
-| GET | `ai/copy-structure-prompt/` | admin | — | Copy-paste AI prompt to reproduce a pasted page |
-| POST | `content/paste-to-build/` | admin | — | `{raw, path?, page_type?}` → creates host + sections + pending media |
-| GET | `content/pages/` | public | list | Visible `ContentPage`s |
-| POST | `content/pages/` | admin | REST | Create a `ContentPage` |
-| GET/PATCH/DELETE | `content/pages/<path>/` | public / admin | REST | One page (+ its `sections` on GET). PATCH `status:"published"` enforces the publish guard |
-| GET | `content/<path>/sections/` | public | list | Ordered published sections |
-| POST | `content/<path>/sections/` | admin | — | Replace the whole section list (atomic, validated) |
-| PATCH/DELETE | `content/<path>/sections/<id>/` | admin | REST | One section |
-| POST | `content/<path>/sections/reorder/` | admin | — | `{order:[id,…]}` — must be exactly this page's ids |
-| POST | `content/<path>/sections/<id>/media/<slot>/` | admin | multipart | Upload one image into a slot |
-| GET/POST/PATCH/DELETE | `blog/` , `blog/<slug>/` | public / admin | REST | Blog posts. Drafts + future `published_at` hidden from non-admins |
-| GET…POST | `blog/<slug>/sections/…` | same as `content/…/sections/` | — | Identical section surface bound to a `BlogPost` |
-| GET | `images/?category=&unused=1&missing_alt=1` | public | list | Image library + SEO-cleanup filters |
-| POST | `images/` | admin | multipart | Upload. Returns existing row + `duplicate:true` on checksum match |
-| GET/PATCH/DELETE | `images/<id>/` | public / admin | REST | One image |
-| GET | `images/<id>/usage/` | admin | — | Back-references |
-| GET | `forms/<name>/submit/` … POST | public | — | Submit. Validated against `home/form-<name>/`. `{errors:{field}}` on 400 |
-| GET | `forms/<name>/submissions/?is_read=&is_spam=&since=` | admin | list | Submissions |
-| GET | `forms/<name>/submissions/export/?format=csv\|json` | admin | — | Export |
-| PATCH | `forms/<name>/submissions/<id>/` | admin | — | Toggle `is_read` / `is_spam` |
-| GET | `redirects/`, `redirects/<id>/` | public / admin | REST | Redirect rules |
-| GET | `redirects/resolve/?path=/old` | public (cached) | — | `{to, status}` or 404 — call from middleware / not-found |
-| GET/POST | `redirects/io/?format=csv` | admin | — | CSV export / import |
-| GET | `/robots.txt`, `/sitemap.xml`, `/sitemap-index.xml`, `/sitemap-<section>.xml` | public | — | Served by the backend at its own root (proxy or link to them) |
-
-### Image upload snippet (the only correct way)
-
-```js
-async function uploadImage(file, category = "content") {
-  const fd = new FormData();
-  fd.append("image", file);
-  fd.append("category", category);
-  const r = await fetch(`${API}/images/`, {
-    method: "POST",
-    headers: authHeaders(),          // NO Content-Type — the browser sets the multipart boundary
-    body: fd,
-  });
-  const data = await r.json();       // { id, image_url, width, height, duplicate, ... }
-  return data.image_url;             // always absolute
-}
-```
-
-Never give an admin a raw image-URL text field. Upload first, store the returned
-`image_url`.
-
-### `seo/resolve/<path>/` precedence — HARD RULE
-
-```
-PageSEO.data  >  BlogPost.seo_*  (blog/<slug> paths only)  >  SiteSettings.data.seoDefaults  >  built-in default
-```
-
-`generateMetadata()` must be a **thin mapping** of the resolve response — never
-re-implement this precedence per project. Response shape:
-
-```jsonc
-{
-  "path": "pricing",
-  "fullTitle": "Pricing | Acme",        // titleTemplate already applied
-  "title": "Pricing",
-  "description": "...",
-  "canonical": "https://acme.test/pricing",
-  "robots": { "index": true, "follow": true, "maxImagePreview": "large", ... },
-  "social": { "ogTitle", "ogDescription", "ogImage", "ogImageAlt", "ogType",
-              "twitterCard", "twitterTitle", "twitterDescription", "twitterImage", "twitterHandle" },
-  "hreflang": [{ "lang": "en", "href": "..." }],
-  "alternates": { "amp": "", "rss": "" },
-  "prev": "", "next": "",
-  "locale": "en_US",
-  "themeColor": "#0b0b0b",
-  "verification": { "google": "", "bing": "", ... },
-  "jsonLd": { "@context": "https://schema.org", "@graph": [ ... ] }   // '<' already escaped
-}
-```
-
-### Error shapes
-
-- Field validation: `400 { "<field>": "message" }` (settings, component schema)
-  or `400 { "errors": { "<field>": "message" } }` (forms) or
-  `400 { "errors": [ { "section_index": 0, "message": "…" } ] }` (paste-to-build).
-- Publish guard: `400 { "detail": "...", "missing": [ { section_id, slot, image_prompt } ] }`.
-- Auth: `401` (no/invalid token), `403` (valid token, not staff).
-
-### Section schema & the publish guard
-
-- `GET ai/section-schema/` returns `{ section_schema, single_image_types,
-  per_item_image_types, recommended_sizes }`. `section_schema` maps every
-  section `type` → `{ field: "required" | "optional" | "required_list" }`.
-- Your `SECTION_REGISTRY` keys **must exactly equal** `Object.keys(section_schema)`.
-  On build, fetch it and assert — fail loudly on drift.
-- A `ContentPage`/`BlogPost` cannot be set `status:"published"` while any
-  `required` `SectionMedia` slot has no image. The 400 lists the missing slots.
-- Video URLs must match `^https://(www\.)?(youtube\.com/embed/|youtu\.be/|player\.vimeo\.com/video/)` — backend rejects others; your renderer must allowlist the same.
-- Rich text (`rich_text`, `image_text` `content`) is **plain paragraphs split on
-  blank lines**. Render as JSX `<p>` nodes. **Never `dangerouslySetInnerHTML`
-  for any CMS or AI-authored text.**
-
-### `SiteSettings.data` canonical shape
-
-```jsonc
-{
-  "organization": { "name", "legalName", "logo", "logoAlt", "foundingDate", "description", "sameAs": [] },
-  "contact": { "email", "phone", "contactType", "availableLanguages": [] },
-  "locations": [ { "name","streetAddress","addressLocality","addressRegion","postalCode","addressCountry",
-                   "latitude": null, "longitude": null,
-                   "openingHours": [ { "days": ["Monday"], "opens": "09:00", "closes": "17:00" } ],
-                   "priceRange", "telephone" } ],
-  "seoDefaults": { "siteUrl", "titleTemplate": "%s", "defaultTitle", "defaultDescription",
-                   "defaultOgImage", "defaultOgImageAlt", "twitterHandle", "twitterCard",
-                   "robots": { "index": true, "follow": true }, "themeColor", "locale": "en_US",
-                   "searchUrl": "https://site/search?q={query}" },
-  "verification": { "google", "bing", "yandex", "pinterest", "facebookDomain" },
-  "analytics": { "gtmId", "ga4Id", "metaPixelId", "clarityId", "hotjarId", "linkedinPartnerId",
-                 "customHead": [], "customBodyStart": [], "customBodyEnd": [] },   // raw strings, admin-only, injected verbatim
-  "schema": { "organizationType": "Organization", "enabled": true, "raw": null },
-  "navigation": { "primary": [], "footer": [] },
-  "brand": { "primaryColor", "secondaryColor", "fontHeading", "fontBody" },
-  "robotsTxt": { "disallow": ["/api/"], "allow": [] }
-}
-```
+| R1 | **Install the frontend kit verbatim** (`frontend-kit/src` → the app's `src/`). Do not rewrite kit files, re-implement them, or hand-roll an alternative (no custom admin bar, no custom editor modal, no custom API client). Only the 4 ADAPT files in `frontend-kit/MANIFEST.md` may be changed, and only as the manifest says. |
+| R2 | **Inline editing is the primary way to edit.** Every visible string in a CMS-wired component is `<E.Text path="…" />`. Every image has `<E.Image path="…" />`, every list item has `<E.Item>`, every list ends with `<E.Add>`, and every link's URL has `<E.Link>` beside its text. Panels and modals are secondary (the "All fields" pill, AI, JSON, History). Never build a "click Edit → modal form → Save/Cancel" flow as the main editing path. |
+| R3 | **Drafts, then Publish.** Every edit (inline, panel, AI paste, JSON paste) autosaves as a draft (`?mode=draft`). Visitors only see what was published from the admin bar. Never write live data from an editor. |
+| R4 | **Session cookie + CSRF auth only.** No tokens in `localStorage`/`sessionStorage`/cookies you set. `isAdmin` comes from `GET auth/session/`, never from client storage. All admin fetches go through `apiRequest`/`apiFetch` in `lib/api.js` (`credentials: "include"` + `X-CSRFToken`). |
+| R5 | **The backend owns every AI prompt.** The frontend never contains prompt text. It calls the `ai/*-prompt/` and `content/<key>/build-prompt/` endpoints and shows the result in `<PromptBox>`. |
+| R6 | **Every pasted AI or JSON reply goes through `POST ai/normalize/`** (or `paste-to-build` / `paste-to-edit`, which normalise server-side) before it touches content. Never `JSON.parse` a pasted AI reply yourself, and never write one straight into content. |
+| R7 | **The backend webhook refreshes caches.** Public reads use `lib/cms.js` (ISR with `cms:*` tags), and `app/api/revalidate/route.js` verifies the HMAC webhook. The browser never calls revalidation. |
+| R8 | **Visitors get zero CMS UI and zero CMS cost.** No admin markup, no `contentEditable`, no extra client fetches for visitors. Published HTML is server-rendered from `CmsSection`/`lib/cms.js`. |
+| R9 | **Preserve 100% of design, animation and copy.** Current hard-coded copy becomes the `defaults` **verbatim**, so the page looks identical before anything is saved. |
+| R10 | **Plain text only.** Never `dangerouslySetInnerHTML` for CMS or AI text. Multi-line text uses `<E.Text multiline />`, and paragraphs come from blank-line splits. |
+| R11 | **Images are uploaded, never typed.** Use `uploadImage()` / `<E.Image>` / `SlotUpload`. No raw image-URL text inputs. |
+| R12 | **Don't ask clarifying questions** unless an action is destructive or irreversible. Pick the default given here and state it in your report. |
 
 ---
 
-## §13.1 — Autonomous mode (whole frontend repo)
+## §1 — Modes
 
-Ten pasteable phases. Each ends green (build passes, no hydration warnings,
-admin round-trip works, public view unchanged). Stop and report after each.
+| Attached with this file… | Do this |
+|---|---|
+| A whole frontend repo, no other instruction | **§2 Autonomous mode**: all phases, in order. Report after each phase, then continue. |
+| One or more specific files | **§5 Input router**, once per file, in dependency order (layout → pages → sections → forms → lists → blog). |
+| A brief, screenshot or markup for a new page | **§7 Paste to Build** (from a brief) or **§8 Copy Structure** (from a reference). |
+| One phase heading from §2 | Run only that phase, end green, stop. |
 
-**Phase F0 — Audit.** Inventory: framework + version, routing style, styling
-system, i18n, every route, every section/component, existing data sources,
-existing SEO/metadata, existing analytics. Output one table:
-`file → current state → target state → phase`. No code changes.
-
-**Phase F1 — Global wiring.** `lib/api.js`; `AdminProvider`/`useAdmin`
-(`!!localStorage.authToken`, read in `useEffect`); `app/layout` (§13.2 layout
-rules); `app/robots.js` + `app/sitemap.js` (proxy or mirror the backend's, or
-generate from `seo/` + `blog/` + `content/pages/`); analytics injection;
-`<html lang>`; `themeColor`; mount `<SeoEditPanel>` and an admin login affordance.
-
-**Phase F2 — Per-page metadata.** `generateMetadata()` for every route from
-`GET seo/resolve/<path>/`. `<script type="application/ld+json">` from
-`resolved.jsonLd`. `<Breadcrumbs>` + the `BreadcrumbList` is already in the
-graph. Canonical, robots, hreflang, `rel=prev/next` from the resolve response.
-
-**Phase F3 — Section conversion.** Every static section → CMS-wired editable
-component (§13.2 component rules). One per commit. Design/animation/copy 100%
-preserved.
-
-**Phase F4 — Forms.** Every form → `GET home/form-<name>/` definition +
-`POST forms/<name>/submit/` with server-trusted `{errors}` (§13.2 form rules).
-
-**Phase F5 — Lists & detail.** Blog index / product / service lists →
-paginated CMS reads. Detail pages → `body_mode` branch → `<DynamicPageRenderer>`.
-
-**Phase F6 — Dynamic Page Builder UI.** Admin panel: "Generate AI Prompt"
-(`ai/dynamic-page-prompt/`), "Paste to Build" (`content/paste-to-build/`),
-"Copy Structure" (`ai/copy-structure-prompt/`), per-slot media upload, the
-pending-images review screen, the publish-guard error surface.
-
-**Phase F7 — Redirects.** `redirects/resolve/?path=` in `middleware.js` (or the
-404 handler), issuing the returned `status`.
-
-**Phase F8 — Performance.** `next/image` with real `sizes`/`priority`; lazy
-non-critical sections; `next/font` with `display: swap`; reserved space for
-embeds; revalidate tuning; no CLS; Lighthouse ≥ 90 mobile.
-
-**Phase F9 — Accessibility & semantics.** One H1/route; heading order with no
-gaps; alt text from `UploadedImage.alt_text`; visible focus; skip link;
-`prefers-reduced-motion`; breadcrumb UI matches the markup.
-
-**Phase F10 — Verification.** `next build` clean, no hydration warnings; admin
-round-trip (login → edit → save → server response reflected in the UI); public
-view unaffected; metadata visible in view-source; JSON-LD validates
-(schema.org + Google Rich Results); the per-page checklist (§13.5 end) passes
-for every route.
+Framework: Next.js App Router (`src/app`), React 18+, Tailwind. On another
+framework, map each concept (server components, `generateMetadata`, route
+handlers) to its equivalent and say so in the report. Kit files assume the
+`@/` alias → `src/`.
 
 ---
 
-## §13.2 — Input router (exact behaviour per file type)
+## §2 — Autonomous mode (whole repo)
 
-### `layout.js` / `layout.jsx` / `layout.tsx`
+Each phase ends green: build passes, no hydration warnings, public pages
+unchanged.
 
-1. Fetch `settings/site/` **server-side**. Build the default `metadata` export:
-   `title.template` = `seoDefaults.titleTemplate`, `title.default` =
-   `defaultTitle`, `metadataBase` = `new URL(seoDefaults.siteUrl)`, `description`,
-   `openGraph` (siteName, locale, default image w/ 1200×630 + alt),
-   `twitter` (card, site = `twitterHandle`), `robots` (from `seoDefaults.robots`),
-   `icons`, `themeColor`, `verification` (google/bing/yandex/other:
-   `[{name:"msvalidate.01",content:bing}, …]`).
-2. Inject `analytics.customHead` strings into `<head>`; `customBodyStart` right
-   after `<body>`; `customBodyEnd` before `</body>`. Build GTM/GA4/Meta
-   Pixel/Clarity/Hotjar/LinkedIn tags from their IDs using
-   `next/script` (`strategy="afterInteractive"`, GTM `beforeInteractive` only
-   if consent model requires it).
-3. Emit Organization/LocalBusiness + WebSite JSON-LD from
-   `GET settings/site/schema/organization/` (or the `jsonLd` from any
-   `seo/resolve`) as a single `<script type="application/ld+json">`.
-4. `<html lang={seoDefaults.locale.split("_")[0]}>`. Preserve every existing
-   provider, wrapper, class, font setup. Mount `<SeoEditPanel>` and the admin
-   affordance provider.
+**P0 — Audit (no code changes).** List the framework and version, router,
+styling, every route, every section component and its hard-coded copy, lists,
+images, links, forms, existing SEO/metadata and analytics. Output one table:
+`file → what's hard-coded → useCms name → phase`.
 
-### `page.js` for a route
+**P1 — Install the kit (R1).**
+1. Copy `frontend-kit/src/**` into `src/`. Do not overwrite site files that
+   aren't in the manifest; if a path collides, stop and report it.
+2. Set `SITE_NAME` in `src/lib/brand.js` (or `NEXT_PUBLIC_SITE_NAME`).
+3. Copy `frontend-kit/scripts/check-inline.mjs` and `check-sections.mjs` to
+   `scripts/` and add these npm scripts:
+   `"check:inline": "node scripts/check-inline.mjs src"` and
+   `"check:sections": "node scripts/check-sections.mjs"`.
+4. Env (`.env.local`):
+   `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`, `REVALIDATE_SECRET` (the same
+   value as the backend). On the backend: `FRONTEND_REVALIDATE_URL=<site>/api/revalidate`,
+   plus the site origin in `CORS_ALLOWED_ORIGINS` **and** `CSRF_TRUSTED_ORIGINS`.
+5. Root layout (exact shape):
+   ```jsx
+   import "./globals.css";
+   import "./cms.css";
+   import { AdminProvider } from "@/components/cms/AdminProvider";
+   import AdminBar from "@/components/cms/AdminBar";
+   import Analytics from "@/components/seo/Analytics";
+   // …site imports…
+   export default async function RootLayout({ children }) {
+     const settings = await getSiteSettings();               // lib/cms.js
+     return (
+       <html lang={(settings.seoDefaults?.locale || "en_US").split("_")[0]}>
+         <body>
+           <AdminProvider>
+             {children}
+             <AdminBar />
+           </AdminProvider>
+           <Analytics analytics={settings.analytics} />
+         </body>
+       </html>
+     );
+   }
+   ```
+   Keep every existing provider, font and wrapper. `generateMetadata` and
+   `generateViewport` come from `settings/site/`, as in §5.1.
+6. Add a footer link `Staff login {/* cms-static: admin entry point */}` →
+   `/admin/login?next=<current path>` with `rel="nofollow"`. Use `usePathname`;
+   on `/admin*` routes, link without `next`.
 
-- Add/replace `generateMetadata()` reading `GET seo/resolve/<path>/`. Merge any
-  existing good metadata as fallback; never delete it.
-- Emit `<script type="application/ld+json">{JSON.stringify(resolved.jsonLd)}</script>`.
-- Add `<Breadcrumbs>` UI (data from `resolved.jsonLd["@graph"]` BreadcrumbList).
-- Render `<SeoEditPanel path="<path>" />` once near the end (admin-only).
-- Leave section components to their own conversion.
-- **Listing page:** paginated fetch (`{count,next,previous,results}`), admin
-  "New" / "Delete" with real REST semantics, empty state, `rel=prev/next`.
-- **Dynamic detail page:** branch `body_mode === "dynamic"` →
-  `<DynamicPageRenderer sections={sections} />`; legacy path untouched.
+**P2 — Per-route metadata.** Every route: `generateMetadata()` =
+`pageMetadata("/<path>")` (from `lib/seo.js`, which reads `seo/resolve/`), and
+`<PageSeo path="/<path>" />` once in the page. That emits JSON-LD and gives
+the admin bar its SEO button.
 
-### A component / section (`.jsx`)
+**P3 — Convert every section (§3 recipe).** One component per commit. After
+each one, `npm run check:inline` must pass for that file.
 
-- Keep 100% of markup, classes, animation, copy.
-- `"use client"`. Fetch `GET home/<NAME>/`. On `{}` render built-in
-  `defaultData` (never blank, never an infinite loader). Choose `NAME` as the
-  component's purpose in kebab-case (`hero`, `pricing-table`, `footer`) — state it.
-- View/edit modes; edit only when `isAdmin`. Copy to `tempData` — never mutate
-  live `data`. `structuredClone` for nested updates.
-- Save → `PATCH home/<NAME>/` with `authHeaders()`. Set state to the **server
-  response**, not `tempData`. Cancel resets.
-- Every array is add / remove / reorder in edit mode — not edit-in-place only.
-- Images: `uploadImage()` (§13.6) → store the returned URL. Per-item spinner.
-- If the purpose matches a `home/schemas/` key, follow that field shape and
-  include `schema_key` in the first PATCH.
-- Output: the full component + a sample `GET home/<NAME>/` JSON + the one-line
-  `NAME` note. Nothing needs pre-seeding.
+**P4 — Forms (§5.4).**
 
-### A form component
+**P5 — CMS pages and blog.** Catch-all route for CMS pages, using
+`components/dynamic/DynamicContentPage.jsx` (ADAPT), which wraps the
+server-rendered `DynamicPageRenderer` in `DynamicPageAdmin`. That gives admins
+inline section editing, per-section AI, and the Page builder. Dynamic blog
+posts work the same way with `kind="blog"`.
 
-- Fetch the definition from `GET home/form-<NAME>/`. Render fields from
-  `definition.fields` (types: text, textarea, email, tel, url, number, date,
-  time, datetime, select, multiselect, radio, checkbox, checkboxes, file,
-  hidden, rating, range). Honour `width`, `placeholder`, `help`, `options`,
-  `validation`.
-- Hidden honeypot input named `definition.honeypotField || "website"`.
-- Submit → `POST forms/<NAME>/submit/`. Client-validate for UX, then **trust
-  the server** `{errors:{field}}`. Success / error text from the definition
-  (`successMessage` / `errorMessage`). Consent checkbox when
-  `definition.consent.required`.
-- Provide the definition JSON to seed + the admin note.
+**P6 — Sitemap, robots, redirects.** `app/sitemap.js` builds from static routes,
+`seo/`, `blog/` and `content/pages/`, honouring `sitemap.include:false` and
+`robots.index:false`. `app/robots.js` reads `settings/site/`. The middleware
+calls `redirects/resolve/?path=`. Add the static routes to
+`SiteSettings.sitemap.extraPaths` so the backend sitemap report covers them.
 
-### A blog / article page
+**P7 — Seed.** A `scripts/seed-cms.mjs` that fills empty CMS rows: site
+settings, **including the `ai` block (§6.3)**, form definitions, per-route
+`seo/<path>/`, and `sitemap.extraPaths`. It must be idempotent and skip
+non-empty rows unless `--force`.
 
-- `GET blog/<slug>/`. `generateMetadata()` from `seo/resolve/blog/<slug>/`
-  (BlogPost `seo_*` already folded in as fallback by the backend).
-- JSON-LD: use `resolved.jsonLd` (already a `BlogPosting` + `BreadcrumbList`
-  graph; `FAQPage` too if the page's `seo` config lists it).
-- `body_mode === "dynamic"` → `<DynamicPageRenderer>`; legacy block content →
-  existing pipeline, untouched.
-- Reading time, related posts, TOC from sections.
-- Mount the Paste-to-Build / Copy-Structure admin panel on the blog **index**.
-
-### A blog / list index
-
-- Paginated `GET blog/`. Card grid preserved. Admin "New post" → Paste-to-Build
-  flow. Note sitemap inclusion is automatic (backend `sitemap-blog.xml`).
+**P8 — Verify.** Run the four checks in the Definition of done. Fix and rerun
+until all four are green, then report the acceptance output verbatim.
 
 ---
 
-## §13.2 (cont.) — The renderer contract
+## §3 — Section conversion recipe (exact)
 
-```js
-// components/dynamic/registry.js
-import Hero from "./sections/Hero";
-import RichText from "./sections/RichText";
-// … one per section type …
-
-export const SECTION_REGISTRY = {
-  hero: Hero, rich_text: RichText, image_text: ImageText, cards: Cards,
-  features: Features, statistics: Statistics, testimonials: Testimonials,
-  faq: Faq, gallery: Gallery, team: Team, timeline: Timeline, pricing: Pricing,
-  logos: Logos, steps: Steps, cta: Cta, banner: Banner, video: Video,
-  contact_block: ContactBlock, map_block: MapBlock, newsletter: Newsletter,
-};
-
-// On build / in a test: assert Object.keys(SECTION_REGISTRY) matches
-// (await fetch(`${API}/ai/section-schema/`)).section_schema keys.
-```
+Before:
 
 ```jsx
-// components/dynamic/DynamicPageRenderer.jsx
-export default function DynamicPageRenderer({ sections }) {
-  return [...sections].sort((a, b) => a.order - b.order).map((s) => {
-    const Cmp = SECTION_REGISTRY[s.section_type];
-    if (!Cmp) {
-      return (
-        <div key={s.id} style={{ border: "1px dashed #c00", padding: 16, margin: 8 }}>
-          Unsupported section type: <code>{s.section_type}</code>
-        </div>
-      );
-    }
-    return <Cmp key={s.id} {...s.content} media={s.media} />;
-  });
+export default function Pricing() {
+  return (
+    <section className="py-20">
+      <p className="eyebrow">Pricing</p>
+      <h2>Simple, <span className="text-accent">fixed fees</span></h2>
+      <img src="/pricing.jpg" alt="Calculator" />
+      <ul>
+        {[["Starter", "£49"], ["Growth", "£99"]].map(([name, price]) => (
+          <li key={name}><h3>{name}</h3><p>{price}</p></li>
+        ))}
+      </ul>
+      <a href="/contact" className="btn">Get a quote</a>
+    </section>
+  );
 }
 ```
 
-Rules the renderer and its section adapters must follow:
+After:
 
-- Unknown type → the dashed-box fallback above. **Never drop content, never
-  crash the route.**
-- Rich text → `content.split(/\n\s*\n/).map((p, i) => <p key={i}>{p}</p>)`.
-- Video → sandboxed iframe, `src` allowlisted to the YouTube/Vimeo embed regex;
-  reject anything else (render the fallback box).
-- Images: an origin-normalising resolver — if `media[i].image.url` is relative,
-  prefix `NEXT_PUBLIC_API_URL`; use `alt_override || image.alt_text` for `alt`.
-- Thin adapter component per type; keep all visual design in those adapters.
+```jsx
+"use client";
+import { useCms } from "@/components/cms/useCms";
+
+// Module-level constant. The ORIGINAL copy, verbatim (R9).
+const defaults = {
+  eyebrow: "Pricing",
+  title: "Simple,",
+  titleHighlight: "fixed fees",
+  image: "/pricing.jpg",
+  imageAlt: "Calculator",
+  plans: [
+    { name: "Starter", price: "£49" },
+    { name: "Growth", price: "£99" },
+  ],
+  buttonText: "Get a quote",
+  buttonHref: "/contact",
+};
+
+export default function Pricing() {
+  const { data, E, editButton } = useCms("pricing", defaults, { label: "Pricing" });
+  return (
+    <section className="relative py-20">
+      {editButton}
+      <p className="eyebrow"><E.Text path="eyebrow" /></p>
+      <h2><E.Text path="title" /> <span className="text-accent"><E.Text path="titleHighlight" /></span></h2>
+      <div className="relative">
+        <img src={data.image} alt={data.imageAlt} />
+        <E.Image path="image" />
+      </div>
+      <ul>
+        {data.plans.map((plan, i) => (
+          <li key={i} className="relative">
+            <E.Item path="plans" index={i} />
+            <h3><E.Text path={`plans.${i}.name`} /></h3>
+            <p><E.Text path={`plans.${i}.price`} /></p>
+          </li>
+        ))}
+        <E.Add path="plans" label="Add plan" />
+      </ul>
+      <a href={data.buttonHref} className="btn"><E.Text path="buttonText" /><E.Link path="buttonHref" /></a>
+    </section>
+  );
+}
+```
+
+Rules:
+
+1. `useCms(name, defaults, { label })`. `name` is kebab-case, unique, and
+   descriptive (`home-hero`, `services-process`, `footer`). `defaults` is
+   module-level. Shared blocks (header, footer, site-wide CTA) pass
+   `excludeFromKeywordAudit: true`.
+2. **Every** visible string → `<E.Text path>`. Text with line breaks →
+   `multiline`. Split styled fragments into separate keys (`title` +
+   `titleHighlight`). Never leave literal copy in JSX. `check:inline` enforces
+   this. The only exceptions are marked `{/* cms-static: reason */}` (units,
+   legal marks, the honeypot label, the staff-login link).
+3. Every `<img>`/`next/image` → `src={data.x}` plus `<E.Image path="x" />`
+   inside a `relative` parent. Put alt text in its own key.
+4. Every array: `<E.Item path index>` inside each item (the item gets
+   `relative`), and `<E.Add path label>` after the list. Lists of plain strings
+   work too (`path={`lines.${i}`}`).
+5. Every link: `href={data.xHref}`, with `<E.Link path="xHref" />` directly after
+   the link's `<E.Text>`.
+6. Render `{editButton}` once at the top of the section root. The root must be
+   `relative`.
+7. **Subcomponents:** pass `data={{ ...data, E }}` and use `data.E.Text` inside.
+   Never use a bare `E` in a function that didn't receive it.
+8. Wrap server pages in `<CmsSection names={["pricing", …]}>`
+   (`components/cms/CmsSection.jsx`), so visitors get server-rendered published
+   content with no client fetch (R8).
+9. Hard-coded arrays (icons and similar) stay in code. Only the copy moves into
+   `defaults`. Pick an icon by index or with a `fields` select hint
+   (`options.fields["plans[].icon"] = { type: "select", options: [...] }`).
+10. Stateful UI such as accordions, carousels and search filters must keep
+    working with editing on. Clicking editable text never triggers the parent
+    link or toggle, because the kit stops propagation; Cmd/Ctrl-click follows
+    the link.
 
 ---
 
-## §13.3 — Paste to Build
+## §4 — What the admin gets (the editing contract)
 
-User pastes a brief (or markup) + this file. You:
+The kit already provides all of this. Your job is to keep it working on every
+route:
 
-1. Infer the sequence of sections from the catalogue in `ai/section-schema/`.
-2. `GET ai/dynamic-page-prompt/?sections=<the ones you'll use>` for the exact
-   schema, or build the JSON directly against `section_schema`.
-3. Produce `SECTION_SCHEMA`-valid JSON: `{ page_type, title, seo, sections: [...] }`.
-   Every image → `"image_required": true` + a concrete `"image_prompt"`.
-4. `POST content/paste-to-build/ { raw: <that JSON as a string>, path?, page_type? }`.
-5. From the response: generate the route (`app/<path>/page.jsx`),
-   `generateMetadata()` from `seo/resolve`, and
-   `<DynamicPageRenderer sections={...} />` wiring.
-6. List `response.pending_images` for the admin — each `{ section_id, slot,
-   image_prompt, recommended_size }` uploads via
-   `POST content/<path>/sections/<id>/media/<slot>/`.
-7. The page stays `draft` until every required image is uploaded (publish guard).
-
-## §13.4 — Copy Structure
-
-User pastes an existing component/page as a **reference**. You:
-
-1. `GET ai/copy-structure-prompt/` and follow it, OR directly:
-2. Walk the reference top to bottom. Emit one section per visual block,
-   preserving headings, body copy, list items, order, and CTAs **verbatim**.
-3. Map each block to the closest `section_schema` type. Flag every image with
-   `image_required` + `image_prompt`.
-4. Round-trip through `POST content/paste-to-build/`.
-5. Build adapter components that reproduce the reference's **exact** design,
-   animation, and responsive behaviour — visuals byte-identical.
-6. If the target is a single reusable component (not a page), instead produce a
-   `ComponentSchema` (`PATCH home/schemas/`… is admin; or just wire the
-   component to `home/<name>/` with a matching `schema_key`).
+- **Floating admin bar** (bottom centre; collapses behind "More" on phones):
+  - Editing toggle, plus the Publish menu (this page / everything / discard,
+    with a list of pending drafts).
+  - **AI assist** (whole page) with a keyword-coverage badge.
+  - **SEO** (when the route has `<PageSeo>`).
+  - **Page builder** (on CMS pages).
+  - **+ New page**, **Site tools** (settings, images, form inbox, blog,
+    redirects, sitemap — the same panels as `/admin/*`), **Dashboard**, and an
+    account menu with Sign out.
+- **Inline:** click text and type. Enter ends a single-line field, Esc
+  reverts, and paste is plain text. Item tools (↑ ↓ ⧉ ✕) appear on hover or
+  focus. Images get "Replace image". Links get 🔗.
+- **"All fields" pill** per block: tabs for All fields, **AI assist** (prompt
+  → paste → preview → apply as draft), **JSON** (copy / paste / validate,
+  normalised), and **History** (revisions, revert).
+- **SEO panel** with tabs:
+  - Essentials, with a snippet preview
+  - Sharing & indexing
+  - Advanced
+  - Checks (jump to field)
+  - **AI**: an SEO audit prompt and a keyword research prompt, each pasted
+    back through `ai/normalize`
+  - History
+- **CMS pages**: hover tools per section (move, duplicate, delete, add above or
+  below with a type picker, per-section AI, fields), plus the Page builder:
+  - AI tab: build-prompt, then paste-to-edit as drafts
+  - Images tab: required slots
+  - Page tab: title, publish/unpublish, delete
+- **Tooling hooks:** each editable span has `data-cms-block` (the useCms name,
+  or `section:<id>`) and `data-cms-path`. The admin bar root has
+  `data-cms-adminbar`. Don't remove them; the acceptance test depends on them.
 
 ---
 
-## §13.5 — Exhaustive SEO reference
+## §5 — Input router
+
+### 5.1 `layout.jsx`
+
+Use §2 P1 step 5. `generateMetadata` reads `settings/site/`:
+- `metadataBase` = `seoDefaults.siteUrl`
+- `title.template` (`seoDefaults.titleTemplate`, which must contain `%s`)
+- `title.default`, `description`
+- `openGraph` (siteName, locale, default image 1200×630 + alt)
+- `twitter`
+- `robots`
+- `verification`, from `verificationFrom()` in `lib/seo.js`
+
+`generateViewport` returns `themeColor`. `<html lang>` comes from
+`seoDefaults.locale`.
+
+### 5.2 `page.jsx` for a route
+
+- `export const generateMetadata = () => pageMetadata("/<path>", fallback)`,
+  with the old static metadata as the fallback. Never delete good existing
+  metadata.
+- Render `<PageSeo path="/<path>" />` once.
+- Wrap CMS sections in `<CmsSection names={[…]}>`.
+- Listing pages use paginated reads (`{count,next,previous,results}`).
+  CMS-page detail routes branch on `body_mode === "dynamic"` →
+  `DynamicContentPage`.
+
+### 5.3 A section component
+
+Use the §3 recipe. Output the component, its `useCms` name, and its sample
+`GET home/<name>/` shape (which equals `defaults`).
+
+### 5.4 A form
+
+- The definition lives in `home/form-<name>/` via `useCms`, with the default
+  definition JSON as `defaults`. Fields render from `definition.fields`.
+- Every visible string — headings, `submitText`, `successTitle`,
+  `successMessage`, `resetText`, `privacyNote` — is `E.Text` on the definition.
+- Include a hidden honeypot named `definition.honeypotField || "website"`.
+- Submit with `POST forms/<name>/submit/`. Validate on the client for UX, but
+  trust the server's `{errors:{field}}`.
+- Seed the definition in P7.
+
+### 5.5 Blog index / article
+
+- **Index:** paginated `GET blog/`.
+- **Article:** `generateMetadata` from `seo/resolve/blog/<slug>/`, JSON-LD from
+  `resolved.jsonLd`.
+  - `body_mode === "dynamic"` → the dynamic renderer inside
+    `DynamicPageAdmin kind="blog"`.
+  - Legacy bodies keep their existing pipeline.
+- Admins create posts from **+ New page** (blog kind) or `/admin/blog`.
+
+---
+
+## §6 — Backend contract
+
+### 6.1 Auth (session + CSRF)
+
+```
+GET  auth/csrf/                    -> {csrfToken}          (sets the session cookie)
+POST auth/login/  {username|email, password, session: true}
+     headers: X-CSRFToken           -> {authenticated: true, user}
+GET  auth/session/                 -> {authenticated, user?}   (staff only = true)
+POST auth/logout/                  (X-CSRFToken)
+```
+
+`lib/api.js` does all of this. Every admin call is
+`apiRequest(path, {method, body})`, which adds `credentials:"include"` and
+`X-CSRFToken`, and refreshes the token once on a CSRF 403. Public reads on the
+server go through `lib/cms.js`. Token login (`{key}`, `Authorization: Token`)
+exists only for scripts such as `seed-cms.mjs`; never use it in the browser.
+
+Deployment: in production the session cookie is `SameSite=Strict`. Host the
+API on the **same site** as the frontend (`api.example.com` +
+`www.example.com`). For an API on another domain, set
+`SESSION_COOKIE_SAMESITE=None` + `SESSION_COOKIE_SECURE=True` (HTTPS) on the
+backend. Without one of these, login appears to succeed but every admin call
+returns 403.
+
+### 6.2 Endpoints
+
+**Content (upsert, name-keyed).** `GET` of an unknown key returns `200 {}`.
+`PATCH` deep-merges objects and replaces arrays.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `home/<name>/` | public | Published JSON (`?mode=draft` returns the admin's working copy) |
+| PATCH/PUT/DELETE | `home/<name>/` | admin | `?mode=draft` writes `draft_data`; without it, writes live (scripts only) |
+| GET | `home/<name>/history/` · POST `…/revert/<id>/` | admin | Revisions |
+| GET | `home/schemas/` | public | ComponentSchema field contracts |
+
+**Drafts.**
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `drafts/` | admin | `{components:[{name}], hosts:[{kind,key,title,sections}], total}` |
+| POST | `drafts/publish/` · `drafts/discard/` | admin | Body `{}` (everything) or a scope `{components:[…], hosts:[{kind,key}]}` |
+
+**Settings and SEO.**
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET/PATCH | `settings/site/` | public / admin | Site identity, SEO defaults, analytics, `ai`, `sitemap` (validated) |
+| GET | `settings/site/schema/organization/` | public | Organization + WebSite JSON-LD |
+| GET | `seo/` · GET/PATCH `seo/<path>/` | public / admin | Per-page SEO blob (home = `seo/home/`) |
+| GET | `seo/resolve/` · `seo/resolve/<path>/` | public | Fully resolved metadata + JSON-LD (root = home) |
+| GET/POST | `seo/analyze/<path>/` · GET `seo/analyze/` | admin | SEO audits |
+| POST | `seo/validate-schema/` | admin | Validate pasted JSON-LD |
+| GET | `seo/<path>/history/` · POST `…/revert/<id>/` | admin | SEO history |
+
+**AI** (R5, R6).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `ai/section-schema/` | public | Section types (sync `SECTION_REGISTRY`) |
+| GET | `ai/new-page-prompt/?title&topic&path&page_type&host_kind&sections&<brief>` | admin | New page prompt |
+| GET | `content/<key>/build-prompt/?mode=create\|edit&strategy=expand\|override&<brief>` (and `blog/<slug>/…`) | admin | Prompt for an existing page |
+| POST | `ai/section-prompt/` | admin | Body `{content, section_type?, label?, path?, fields?, keyword?, strategy?, instruction?}` — prompt for one block |
+| POST | `ai/page-assist-prompt/` | admin | Body `{path, sections:{id:{label,content,excludeFromKeywordAudit?}}}` → `{prompt, audit}` |
+| POST | `ai/seo-prompt/` | admin | Body `{path, page_text?}` → `{prompt, checks}` |
+| POST | `ai/keyword-prompt/` | admin | Body `{path, page_text?, <brief>}` → `{prompt}` |
+| POST | `ai/normalize/` | admin | Body `{kind: section\|page_assist\|seo\|keywords\|page, raw, current?, path?}` |
+| GET | `ai/copy-structure-prompt/` | admin | Copy-structure prompt |
+
+`<brief>` = `keyword, intent, location, audience, supporting, cta`.
+
+What `ai/normalize/` does to a pasted reply:
+- strips prose and code fences
+- unwraps markdown links (whole-value and inline)
+- unwraps a stray `{"content": …}` wrapper
+- maps flat SEO keys onto the nested shape
+- refuses list shrinkage (returns `warnings`)
+
+It returns `400 {detail}` when the reply can't be used.
+
+**CMS pages and sections.**
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `content/paste-to-build/` | admin | Body `{raw, path?, page_type?}` → creates a draft page + sections + page SEO |
+| POST | `content/<key>/paste-to-edit/` | admin | Body `{raw, as_draft: true}` — apply to an existing page (always `as_draft` from the UI) |
+| GET/POST | `content/pages/` · GET/PATCH/DELETE `content/pages/<path>/` | public / admin | Pages (publish guard on `status:"published"`) |
+| GET | `content/<key>/sections/` | public | Sections (admins also get `draft_content`) |
+| PATCH | `content/<key>/sections/<id>/?mode=draft` | admin | Section draft |
+| POST | `content/<key>/sections/add/` | admin | Body `{section_type, content, position?}` |
+| POST | `…/sections/reorder/` | admin | Body `{order:[ids]}` |
+| POST | `…/sections/<id>/media/<slot>/` | admin | Multipart upload into a slot |
+
+Blog posts mirror all of these under `blog/<slug>/…`.
+
+**Images, forms, redirects, sitemap.**
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET/POST | `images/` (`?category&unused=1&missing_alt=1`) | public / admin | Library. Upload is multipart, auto-optimised to WebP, and deduplicated by checksum |
+| GET/PATCH/DELETE | `images/<id>/` (`?force=1` to delete an image in use → otherwise 409) · GET `images/<id>/usage/` | public / admin | One image |
+| POST | `forms/<name>/submit/` · GET `forms/<name>/submissions/` (+ `export/`) | public / admin | Forms |
+| GET | `redirects/resolve/?path=` · CRUD `redirects/` · `redirects/io/` | public / admin | Redirects |
+| GET | `sitemap/report/` | admin | Every URL the backend sitemap would list, plus why pages are excluded |
+| GET | `/robots.txt`, `/sitemap.xml` (backend root) | public | Optional backend-served copies |
+
+### 6.3 `SiteSettings.data` (validated)
+
+```jsonc
+{
+  "organization": { "name", "legalName", "logo", "description", "sameAs": [] },
+  "contact": { "email", "phone", "contactType", "availableLanguages": [] },
+  "locations": [ { "name", "streetAddress", "addressLocality", "postalCode", "addressCountry",
+                   "latitude": null, "longitude": null, "openingHours": [] } ],
+  "seoDefaults": { "siteUrl", "titleTemplate": "%s | Site", "defaultTitle", "defaultDescription",
+                   "defaultOgImage", "defaultOgImageAlt", "twitterHandle", "twitterCard",
+                   "robots": { "index": true, "follow": true }, "themeColor", "locale": "en_US" },
+  "verification": { "google", "bing", "yandex", "pinterest", "facebookDomain" },
+  "analytics": { "gtmId", "ga4Id", "metaPixelId", "clarityId", "hotjarId", "linkedinPartnerId",
+                 "customHead": [], "customBodyStart": [], "customBodyEnd": [] },
+  "schema": { "organizationType": "Organization", "enabled": true },
+  // Injected into EVERY AI prompt. Seed it (P7) — prompts are generic without it.
+  "ai": {
+    "brandVoice": "clear, warm, plain English",
+    "audience": "who the site serves",
+    "location": "default service area",
+    "pageKinds": { "services": "Service page", "blog": "Blog article" },   // path prefix -> label
+    "extraRules": ["House style rules, one per string"]
+  },
+  "sitemap": {
+    "extraPaths": ["/", "about", "contact"],          // static routes the CMS doesn't own
+    "overrides": { "about": { "priority": 0.8, "changefreq": "monthly", "include": true } }
+  }
+}
+```
+
+### 6.4 `seo/resolve` precedence (hard rule)
+
+`PageSEO.data` > `BlogPost.seo_*` (blog paths) > `SiteSettings.seoDefaults` >
+built-in default. `generateMetadata` is a thin mapping of the response
+(`lib/seo.js#metadataFromResolved`). Never re-implement precedence.
+
+### 6.5 Revalidation webhook (R7)
+
+On every committed write the backend sends:
+
+```
+POST <FRONTEND_REVALIDATE_URL>
+X-CMS-Timestamp: <unix seconds>
+X-CMS-Signature: sha256=<hex HMAC-SHA256(REVALIDATE_SECRET, "<timestamp>.<raw body>")>
+{"tags": ["cms:home:footer", "cms:seo:about", …]}
+```
+
+Tags:
+- `cms` — everything
+- `cms:settings`
+- `cms:home:<name>`
+- `cms:seo`, `cms:seo:<path>` (home = `cms:seo:home`)
+- `cms:blog`, `cms:blog:<slug>`
+- `cms:pages`, `cms:page:<path>`
+- `cms:redirects`
+
+Every server read in `lib/cms.js` is tagged to match. The kit's route handler
+rejects bad signatures and a clock skew over 5 minutes, and only revalidates
+`cms*` tags.
+
+### 6.6 Errors
+
+- Validation: `400 {field: msg}` (settings), `400 {errors:{field}}` (forms),
+  `400 {errors:[{section_index, message}]}` (pages).
+- Publish guard: `400 {detail, missing:[{section_id, slot, image_prompt}]}`.
+- Auth: `401`/`403`. CSRF failure: `403 {detail: "CSRF Failed…"}` (`apiFetch`
+  retries once with a fresh token).
+- Image in use: `409 {detail, usage}`.
+
+---
+
+## §7 — Paste to Build (new page from a brief)
+
+In the UI: **+ New page** → brief → **Build prompt** (`ai/new-page-prompt/`) →
+copy it to any AI chat → paste the reply → **Create draft page**
+(`content/paste-to-build/`). The kit then:
+- navigates to the new draft page
+- lists required images (Page builder → Images)
+- seeds page SEO from the reply
+
+From code (agent-driven): build JSON valid against `ai/section-schema/` in the
+shape `{title, page_type, seo:{title, description, keywords?}, sections:[{type, …fields}]}`,
+then POST it as `raw`. Every image gets `image_required: true` plus a concrete
+`image_prompt`. The page stays `draft` until required images exist and it is
+published.
+
+## §8 — Copy Structure (from a reference)
+
+`GET ai/copy-structure-prompt/` → paste the reference into the AI → paste the
+reply into **+ New page → Copy an existing page**. The AI must:
+- keep headings, copy, list items and order **verbatim**
+- map each visual block to the closest section type
+- flag images
+
+If the reference is one reusable component rather than a page, convert it with
+the §3 recipe instead.
+
+## §9 — Renderer contract
+
+- `components/dynamic/registry.js` keys must equal
+  `Object.keys(ai/section-schema.section_schema)`. `check:sections` enforces
+  this.
+- Unknown type → a dashed fallback box. Never crash and never drop content.
+- **Adapters** (`sections.jsx`, `interactive.jsx`) are where site design lives.
+  Restyle them to the site, but keep their editing hooks:
+  - `T` for text (with `keyOf` from `media.js` for alias fields; `media.js` stays server-safe — never import a client module's plain functions into server adapters)
+  - `ItemTools` / `AddItem` for lists
+  - `SlotUpload` for images
+  - `EditableParagraphs` for `content`
+- Video `src` is allowlisted to YouTube/Vimeo embeds. Rich text = blank-line
+  paragraphs (R10).
+
+---
+
+## §10 — Exhaustive SEO reference
 
 Every item below has concrete Next App Router code expectations. When you build
 a page, you are responsible for all of these.
@@ -600,60 +717,47 @@ unclosed/invalid JSON-LD, marking up invisible content.
 - [ ] `rel=prev/next` on paginated routes
 - [ ] no mixed content; no CLS; LCP image has `priority`
 - [ ] included in sitemap (or intentionally `sitemap.include:false`)
-- [ ] admin round-trip works; public view unchanged
+- [ ] admin round-trip works (inline edit → draft → publish → visitor sees it); public view unchanged
 
 ---
 
-## §13.7 — Fill-in-the-blanks prompt template
+## §11 — Anti-patterns (each one fails review)
+
+- A token in `localStorage`, or `isAdmin` derived from client storage (R4).
+- A modal or "Edit mode → form → Save" as the main way to change copy (R2).
+- An editor that writes live data, or a component with its own Save button (R3).
+- Prompt text written in the frontend, or a paste box that `JSON.parse`s and
+  writes directly (R5, R6).
+- `revalidatePath`/`revalidateTag` called from the browser or from an editor (R7).
+- Literal copy left in a CMS component without `cms-static` (R2, `check:inline`).
+- Bare `E` used in a subcomponent (it must be `data.E`), or a client-only helper
+  imported into a server component (this crashes prerender).
+- Defaults that differ from the original copy, so the page changes before any
+  edit (R9).
+- Admin UI, `contentEditable` or extra fetches present for visitors (R8).
+- `dangerouslySetInnerHTML` for CMS or AI text (R10). Image URL text inputs (R11).
+
+## §12 — Fill-in prompt
 
 ```
-You are the frontend integration agent. Attached: FRONTEND_INTEGRATION_PROMPT.md
-and <FILE(S)>.
-
-Backend base URL: <NEXT_PUBLIC_API_URL>
-Framework: <Next.js App Router | other>
-
-Do: <run Autonomous mode | run the Input router for each attached file |
-Paste to Build from this brief: "<brief>" | Copy Structure from the attached reference>
-
-Constraints: preserve 100% of existing design, animation, and copy. Token auth
-(not Bearer). isAdmin read in useEffect only. Never dangerouslySetInnerHTML for
-CMS/AI text. No clarifying questions unless an action is destructive.
-
-Report per phase/file: what changed, what was assumed, test result.
+Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
+exactly (rules R1–R12). Kit: dynamic-cms/frontend-kit.
+Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
+Do: <Autonomous mode | Input router for: <files> | Paste to Build: "<brief>">
+Finish only when build + check:inline + check:sections + acceptance.mjs all pass;
+paste the acceptance output in the report.
 ```
 
----
+## §13 — Final checklist
 
-## §14 — MASTER CHECKLIST (frontend)
-
-- [ ] Self-contained (backend + auth + image contracts inline) — §13.6
-- [ ] Behaviour selector: whole-repo / per-file / natural-language — §13.0
-- [ ] Autonomous mode: 10 pasteable phases — §13.1
-- [ ] Input router: `layout.js` fully specified — §13.2
-- [ ] Input router: `page.js` (route / listing / dynamic detail) — §13.2
-- [ ] Input router: component / section (defaults, edit, arrays reorderable, image upload, `schema_key`) — §13.2
-- [ ] Input router: form (definition fetch, validated submit, states) — §13.2
-- [ ] Input router: blog page + blog index — §13.2
-- [ ] Paste to Build end-to-end — §13.3
-- [ ] Copy Structure end-to-end — §13.4
-- [ ] Dynamic Page Builder admin panel wiring — §13.1 F6
-- [ ] `seo/resolve` precedence stated as a hard rule — §13.6
-- [ ] `SECTION_REGISTRY` ↔ `ai/section-schema/` sync — §13.2 renderer
-- [ ] Exhaustive SEO reference — §13.5
-- [ ] Token not Bearer; `isAdmin` in `useEffect` only — §13.6
-- [ ] "never `dangerouslySetInnerHTML` for CMS/AI text"; video allowlist — §13.6 / §13.2
-- [ ] "preserve 100% of design/animation/copy" for every file type — throughout
-- [ ] Fill-in-the-blanks prompt template — §13.7
-- [ ] This checklist embedded — here
-
-### End-to-end acceptance
-
-- [ ] Repo + this file, no instructions → F0 audit produced
-- [ ] One phase heading pasted → only that phase runs, ends green
-- [ ] `layout.js` + this file → layout fully wired, nothing else asked
-- [ ] `page.js` + this file → metadata + JSON-LD + panel wired
-- [ ] A component + this file → CMS-wired, editable, design identical
-- [ ] A form + this file → dynamic + validated + notifying
-- [ ] A blog page + this file → CMS + schema + dynamic sections
-- [ ] Clone for a different vertical → nothing to strip or rename
+- [ ] Kit installed verbatim; only the MANIFEST ADAPT files changed (R1)
+- [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`
+- [ ] Every route: `generateMetadata` via `pageMetadata`, plus `<PageSeo>`
+- [ ] Every section uses the §3 recipe; `check:inline` passes
+- [ ] Registry matches the backend; `check:sections` passes
+- [ ] Forms are definition-driven, with editable copy and a honeypot
+- [ ] CMS pages and dynamic blog posts render through `DynamicPageAdmin`
+- [ ] Sitemap and robots honour SEO flags; redirects run in middleware; `sitemap.extraPaths` seeded
+- [ ] `SiteSettings.ai` seeded (brand voice, audience, location, page kinds, rules)
+- [ ] Env: `REVALIDATE_SECRET` on both sides, `FRONTEND_REVALIDATE_URL`, CORS + CSRF trusted origins
+- [ ] `next build` is clean; `acceptance.mjs` passes every check (output pasted in the report)

@@ -1,3 +1,60 @@
+# Upgrade Notes — inline editing + AI assist (`feat/inline-editing-ai-assist`)
+
+This brings back what the Prometheus editor had and the first dynamic-cms
+port lost:
+- true click-and-type inline editing (no popups)
+- draft → publish
+- AI prompts written by the backend, with site context and SEO practice built in
+- JSON/AI paste boxes that clean messy replies
+- keyword coverage
+- instant cache refresh
+
+It also adds a frontend kit, a strict integration spec and an acceptance test,
+so the next integration needs no extra instructions.
+
+## Moving an existing clone forward
+
+```bash
+git pull
+./venv/bin/pip install -r requirements.txt   # no new packages
+./venv/bin/python manage.py migrate          # 0010: DynamicSection.draft_content (additive)
+./venv/bin/python manage.py test api         # 161 pass
+```
+
+Then on the backend `.env`:
+- `FRONTEND_REVALIDATE_URL=<site>/api/revalidate`
+- `REVALIDATE_SECRET=<random>` (the same value in the frontend's env)
+- the site origin in both `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`
+- in production: `SESSION_COOKIE_SECURE=True`, `CSRF_COOKIE_SECURE=True`, and
+  either the API on the same site as the frontend or `SESSION_COOKIE_SAMESITE=None`
+
+## Breaking change for frontends
+
+The browser now authenticates with a **session cookie + CSRF**
+(`auth/login/` with `session: true`, `auth/csrf/`, `auth/session/`,
+`auth/logout/`), not a token in `localStorage`. Token login still works for
+scripts. Frontends built from the old prompt must install `frontend-kit/`
+(see `FRONTEND_INTEGRATION_PROMPT.md` v2 and `frontend-kit/MANIFEST.md`).
+
+## What changed
+
+| Area | Change |
+|---|---|
+| Auth | Session + CSRF for the browser (`auth_views.py`; `CSRF_USE_SESSIONS`); login by email **or username**; real server-side logout; `SESSION_COOKIE_SAMESITE` override for cross-domain APIs. |
+| Drafts | `DynamicSection.draft_content` (migration 0010); section `PATCH ?mode=draft`; `GET drafts/`, `POST drafts/publish/`, `POST drafts/discard/` (all or a scope), with revision snapshots on publish. Drafts are never served to visitors. |
+| AI prompts | `prompts.py` is the single source of every prompt. It is built from `SiteSettings.data.ai` (`brandVoice`, `audience`, `location`, `pageKinds`, `extraRules`) plus shared SEO principles and exact JSON shapes. New endpoints: `ai/new-page-prompt/`, `ai/section-prompt/`, `ai/page-assist-prompt/` (whole page, with keyword audit), `ai/seo-prompt/` (with rule checks), `ai/keyword-prompt/`, `content|blog/<key>/build-prompt/` (create/edit, expand/override). `ai/dynamic-page-prompt/` is kept as an alias. |
+| AI replies | `ai/normalize/` (`ai_normalize.py`) extracts JSON from prose and fences, unwraps markdown links (whole-value and inline) and `content` wrappers, refuses list shrinkage, and maps flat SEO keys to the nested shape. `content|blog/<key>/paste-to-edit/` applies a full-page reply to an existing page (`as_draft`). `paste-to-build` now seeds page SEO from the reply. |
+| Sections | `content|blog/<key>/sections/add/` inserts one section at a position. |
+| Keywords | `keywords.py` — coverage with stop words and contiguous phrase matching (mirrored in the kit's `lib/keywords.js`). |
+| Cache | `revalidation.py`: post-commit signals send a debounced, HMAC-signed webhook with `cms:*` tags, and bump the resolver cache versions (SEO resolve and redirects stay fresh). |
+| SEO | `seo/resolve/` (no path) resolves the home page (`seo/home/`). |
+| Images | WebP optimisation on upload (`IMAGE_OPTIMIZE*`; the checksum stays on the original for dedupe); usage scanning across all content JSON (`image_usage.py`); `DELETE` returns 409 while in use (`?force=1`). |
+| Sitemap | `sitemap.extraPaths` (static routes) and `sitemap.overrides`, validated in settings; `GET sitemap/report/` lists every URL and the reason for each exclusion. |
+| Frontend kit | `frontend-kit/`: a Next.js App Router kit (inline primitives, floating admin bar, drafts, AI/JSON panels, SEO panel, page builder, site tools, `/admin`), `sync_kit.py`, `scripts/check-inline.mjs`, `scripts/check-sections.mjs`, `acceptance/acceptance.mjs`. |
+| Docs | `FRONTEND_INTEGRATION_PROMPT.md` rewritten as a strict spec (R1–R12, phases, conversion recipe, contract). `AGENTS.md` + `CLAUDE.md` for coding agents. |
+
+---
+
 # Upgrade Notes — CMS + SEO upgrade (`cms-upgrade` branch)
 
 Brings dynamic-cms to parity with (and past) the logic-gate-portfolio

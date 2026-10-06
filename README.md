@@ -27,13 +27,30 @@ backend.
 - `robots.txt` + `sitemap*.xml` with a pluggable content-source registry
 - Image management: dimensions, checksum dedupe, alt/SEO metadata, usage refs,
   SVG gate + magic-byte validation
-- Admin login (email + password → token), no third-party auth provider
+- **True inline editing kit for Next.js** (`frontend-kit/`): click any text on
+  the live site and type; images, list items and links are edited in place.
+  A floating admin bar handles drafts → publish, whole-page AI, SEO, page
+  builder and site tools
+- **Drafts → Publish** for content blocks *and* dynamic-page sections
+  (`drafts/`, `drafts/publish/`, `drafts/discard/`)
+- **AI assist without an API key:** the backend writes copy/paste prompts for
+  any chat model (new page, edit page, one block, whole page, SEO audit,
+  keyword research), injecting the site's voice (`SiteSettings.ai`) and SEO
+  best practice. `ai/normalize/` cleans whatever comes back (prose, fences,
+  markdown links, wrappers) and refuses replies that would lose data
+- **Instant cache refresh:** every write sends a signed webhook to the frontend
+  (`revalidateTag`), so edits made anywhere reach visitors immediately
+- Images auto-optimised to WebP on upload, with usage tracking and
+  delete-protection for images still in use
+- Admin login: session cookie + CSRF for the browser, with token login kept for
+  scripts. No third-party auth provider
 
 See `UPGRADE_NOTES.md` for what changed and `SECURITY_AUDIT.md` for the
-security posture. `FRONTEND_INTEGRATION_PROMPT.md` is the self-contained
-frontend build agent.
+security posture. **`FRONTEND_INTEGRATION_PROMPT.md` is the strict integration
+spec** (`AGENTS.md`/`CLAUDE.md` point agents to it): give an agent a frontend
+plus this repo and it can integrate the CMS without further instructions.
 
-**What it deliberately doesn't have:** a dashboard UI, social login, JWT,
+**What it deliberately doesn't have:** social login, JWT,
 role-based permissions beyond `is_staff`, or anything specific to one
 business. All of that was audited out — see [History](#history) below.
 
@@ -50,10 +67,14 @@ cp .env.example .env
 # Edit .env: at minimum, set SECRET_KEY if DEBUG=False.
 # Defaults work as-is for local development.
 
-python manage.py migrate
-python manage.py createsuperuser  # this becomes your first admin login
-python manage.py runserver
+./venv/bin/python manage.py migrate
+./venv/bin/python manage.py createsuperuser  # this becomes your first admin login
+./venv/bin/python manage.py runserver
 ```
+
+> `zsh: command not found: python`? Either activate the venv first
+> (`source venv/bin/activate`) or call it by path, as above
+> (`./venv/bin/python …`). macOS ships only `python3`.
 
 Verify it's alive:
 
@@ -62,10 +83,10 @@ curl http://127.0.0.1:8000/api/home/anything/
 # -> {}  (never 404s — see "Upsert semantics" below)
 ```
 
-Run the test suite (114 tests, no external services required):
+Run the test suite (161 tests, no external services required):
 
 ```bash
-python manage.py test api
+./venv/bin/python manage.py test api
 ```
 
 ---
@@ -102,11 +123,13 @@ is in [`api/README.md`](api/README.md). The originals:
 
 All relative to `/api/`. **The complete, current endpoint table (~50 routes)
 lives in [`FRONTEND_INTEGRATION_PROMPT.md`](FRONTEND_INTEGRATION_PROMPT.md)
-§13.6** — including which of the two URL shapes each one uses. The core set:
+§6** — including which of the two URL shapes each one uses. The core set:
 
 | Purpose | Method | Path | Auth |
 |---|---|---|---|
-| Admin login | POST | `auth/login/` | public |
+| Session login / CSRF / status / logout | POST / GET / GET / POST | `auth/login/` (`session:true`), `auth/csrf/`, `auth/session/`, `auth/logout/` | public |
+| Drafts: list / publish / discard | GET / POST / POST | `drafts/`, `drafts/publish/`, `drafts/discard/` | admin |
+| AI prompts + reply normaliser | GET/POST | `ai/new-page-prompt/`, `ai/section-prompt/`, `ai/page-assist-prompt/`, `ai/seo-prompt/`, `ai/keyword-prompt/`, `ai/normalize/`, `content/<key>/build-prompt/`, `content/<key>/paste-to-edit/` | admin |
 | Get/set a content block | GET / PATCH / PUT / DELETE | `home/<name>/` (`?mode=draft`) | GET public; writes admin |
 | Component schemas / history / publish / revert | GET/POST | `home/schemas/`, `home/<name>/history/`, `.../publish/`, `.../revert/<id>/` | schemas public; rest admin |
 | Get/set site-wide settings | GET / PATCH | `settings/site/` | GET public; PATCH admin |
@@ -130,53 +153,49 @@ real REST collections with their own id/slug.
 
 ## Auth contract
 
-```js
-const isAdmin = !!localStorage.getItem("authToken");
-```
-
-That's the entire frontend admin gate. Login:
+The browser uses a **Django session cookie + CSRF**; it never holds a token.
 
 ```js
-const res = await fetch(`${apiUrl}/auth/login/`, {
+// frontend-kit/src/lib/api.js does all of this — use it, don't re-implement it.
+const { csrfToken } = await (await fetch(`${API}/auth/csrf/`, { credentials: "include" })).json();
+await fetch(`${API}/auth/login/`, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ email, password }),
+  credentials: "include",
+  headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+  body: JSON.stringify({ username: "email-or-username", password, session: true }),
 });
-const { key } = await res.json();
-localStorage.setItem("authToken", key);
+const { authenticated } = await (await fetch(`${API}/auth/session/`, { credentials: "include" })).json();
 ```
 
-Every authenticated write:
+`authenticated` is true only for `is_staff` users. Every admin write sends
+`credentials: "include"` and `X-CSRFToken`. Cross-origin dev setups need the
+frontend origin in **both** `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`.
 
-```js
-headers: { Authorization: `Token ${localStorage.getItem("authToken")}` }
-```
-
-The scheme is **`Token`**, not `Bearer` — this is DRF's `TokenAuthentication`.
+Scripts (seeders, CI) can still use `POST auth/login/ {email, password}` →
+`{key}` and the `Authorization: Token <key>` header (the scheme is `Token`,
+not `Bearer`).
 
 ## Image uploads
 
-```js
-const formData = new FormData();
-formData.append("image", file);
-formData.append("category", "hero-background"); // any descriptive label
-const res = await fetch(`${apiUrl}/images/`, {
-  method: "POST",
-  headers: { Authorization: `Token ${token}` }, // no Content-Type — browser sets the multipart boundary
-  body: formData,
-});
-const { image } = await res.json(); // absolute URL — use directly
-```
+`POST images/` (multipart: `image`, `category`). Uploads are re-encoded to
+WebP (max 2400px, quality 82; set via `IMAGE_OPTIMIZE*`) and deduplicated by
+checksum. The kit's `uploadImage(file, category)` returns the absolute URL to
+store. `DELETE images/<id>/` returns `409` with the usage list while the image
+is referenced (`?force=1` overrides).
 
 ## Frontend integration
 
-See **`FRONTEND_INTEGRATION_PROMPT.md`** in this same directory — it's a
-complete, self-contained prompt you (or an AI agent) can paste to turn any
-static component into one wired against this backend, plus deeper patterns
-for full pages (with `generateMetadata()` SEO wiring), forms, list pages,
-and blog posts. It includes a recommended build order for a fresh project
-(layout → sitemap/robots → pages → sections → forms → list/detail pages →
-redirects).
+- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R12, a
+  phase-by-phase procedure, the exact section-conversion recipe, the full
+  backend contract and an SEO reference.
+- **`frontend-kit/`**: the Next.js App Router kit to copy in.
+  `frontend-kit/MANIFEST.md` lists every file and the four that need site
+  hooks.
+- **Gates:** `frontend-kit/scripts/check-inline.mjs` (no hard-coded copy left
+  in CMS components), `check-sections.mjs` (renderer ↔ section-schema), and
+  `frontend-kit/acceptance/acceptance.mjs` (end-to-end test: login, inline edit
+  → draft → publish → webhook → visitor sees it, AI paste, discard, SEO AI,
+  section editing, page creation, admin pages, sign out).
 
 ## Configuration
 
@@ -192,17 +211,27 @@ the load-bearing ones:
 | `DATABASE_URL` (or `POSTGRES_*`) | production | SQLite when `DEBUG=True` |
 | `REDIS_URL` | multi-worker production | in-memory cache (fine for single-worker/dev; throttle counts aren't shared across workers without Redis) |
 | `FORM_NOTIFICATION_EMAIL` | if you want submission emails | unset = notifications silently skipped, submissions still save |
+| `FRONTEND_REVALIDATE_URL` + `REVALIDATE_SECRET` | always, with a Next.js frontend | unset = no webhook (visitors see edits only after ISR expiry). Same secret in the frontend's env |
+| `SESSION_COOKIE_AGE` | optional | 12 hours |
+| `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE` | production (HTTPS) | `False` |
+| `SESSION_COOKIE_SAMESITE` | API on a different domain than the site | `Strict` in production (`Lax` in DEBUG); `None` needs `SESSION_COOKIE_SECURE=True` |
+| `IMAGE_OPTIMIZE`, `IMAGE_OPTIMIZE_MAX_DIMENSION`, `IMAGE_OPTIMIZE_WEBP_QUALITY` | optional | `True`, `2400`, `82` |
 
 ## Deploying
 
 1. Set `DEBUG=False`, `SECRET_KEY`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`,
    `CSRF_TRUSTED_ORIGINS`, and a real `DATABASE_URL`.
-2. `python manage.py migrate`
-3. `python manage.py collectstatic --noinput`
-4. `python manage.py createsuperuser`
-5. Run under `gunicorn backend.wsgi:application` (already in
+2. `./venv/bin/python manage.py migrate`
+3. `./venv/bin/python manage.py collectstatic --noinput`
+4. `./venv/bin/python manage.py createsuperuser`
+5. Set `FRONTEND_REVALIDATE_URL=https://<site>/api/revalidate` and the shared
+   `REVALIDATE_SECRET`. Serve both over HTTPS and set
+   `SESSION_COOKIE_SECURE=True` and `CSRF_COOKIE_SECURE=True`. Host the API on the
+   same site as the frontend (e.g. `api.example.com`) so the `Strict` session
+   cookie is sent. Otherwise set `SESSION_COOKIE_SAMESITE=None`.
+6. Run under `gunicorn backend.wsgi:application` (already in
    `requirements.txt`).
-6. Optional: set `REDIS_URL` once you're running more than one worker.
+7. Optional: set `REDIS_URL` once you're running more than one worker.
 
 All of the above has been verified end-to-end (production-mode `check`,
 `collectstatic`, cache behavior with and without `REDIS_URL`, a real
@@ -216,8 +245,9 @@ login → PATCH → persistence round trip) — not just asserted.
    to an actual import in this codebase).
 3. `cp .env.example .env`, fill in real values.
 4. `python manage.py migrate && python manage.py createsuperuser`.
-5. Point your frontend's `NEXT_PUBLIC_API_URL` at it and start with
-   `FRONTEND_INTEGRATION_PROMPT.md`.
+5. Give your agent the frontend repo and this directory. `AGENTS.md` sends it
+   to `FRONTEND_INTEGRATION_PROMPT.md` and `frontend-kit/`, and it's done when
+   the acceptance test passes.
 
 Nothing here references a specific business, domain, or dataset. Every
 `home/<name>/` row, blog post, and page's SEO data is created by whoever
