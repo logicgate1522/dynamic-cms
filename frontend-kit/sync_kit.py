@@ -59,6 +59,7 @@ CORE = [
     "components/seo/PageSeo.jsx",
     "components/seo/RawHtmlInjector.jsx",
     "lib/api.js",
+    "lib/bgImage.js",
     "lib/cms.js",
     "lib/keywords.js",
     "lib/seoChecks.js",

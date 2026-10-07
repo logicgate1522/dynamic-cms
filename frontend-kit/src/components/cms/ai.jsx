@@ -102,7 +102,7 @@ export function Segmented({ value, onChange, options }) {
                     key={key}
                     type="button"
                     onClick={() => onChange(key)}
-                    className={`rounded-md px-3 py-1 text-[12px] font-semibold ${value === key ? "bg-white text-[#0F172A] shadow-sm" : "text-[#64748B]"}`}
+                    className={`rounded-md px-3 py-1 text-[12px] font-semibold ${value === key ? "bg-white text-[#0F172A] shadow-sm" : "text-[#475569]"}`}
                 >
                     {label}
                 </button>

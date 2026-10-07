@@ -124,6 +124,13 @@ for (const file of files) {
         problems++;
         console.log(`${relative(process.cwd(), file)}:${line}  list key built from the item's text — use the map index (fields lose focus after one keystroke otherwise)`);
     });
+    // Raw CSS background URLs ship the original (often multi-MB) file.
+    lines.forEach((line, i) => {
+        if (/url\(\s*['"`]?(\$\{|\/)/.test(line) && !/bgImage|cms-static/.test(line)) {
+            problems++;
+            console.log(`${relative(process.cwd(), file)}:${i + 1}  raw CSS url(...) — use bgImage() from @/lib/bgImage (optimised AVIF/WebP)`);
+        }
+    });
     if (!usesCms) continue;
     visit(ast.program, (node) => {
         if (node.type !== "JSXText") return;

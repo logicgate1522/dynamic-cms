@@ -21,6 +21,7 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 | Redirects | `middleware.js` | CMS redirects, matched from a list cached for a minute. Sends `X-CMS-Frontend` like `lib/cms.js`. |
 | Server reads | `lib/cms.js` | Tagged ISR reads (`getContent(s)`, `getSiteSettings`, `resolveSeo`, `getBlogPost(s)`, `getContentPage(s)`, `getPageSeoList`). |
 | SEO | `lib/seo.js`, `components/seo/*` | `pageMetadata`, `metadataFromResolved`, `pageJsonLd`, `<PageSeo>`, `<JsonLd>`, `<Analytics>`. |
+| Backgrounds | `lib/bgImage.js` | `bgImage(src)` — CSS background images through the Next image optimiser (AVIF/WebP, resized). |
 | Keywords | `lib/keywords.js` | Keyword matching, mirroring `api/keywords.py`. Used by the coverage badge. |
 | SEO checks | `lib/seoChecks.js` | The 18 SEO rules (id, tab, field, fix), mirroring `api/prompts.py#seo_rule_checks`. Used by the SEO panel and the whole-page assist. |
 | Admin state | `components/cms/AdminProvider.jsx` | Session, edit mode, editables registry, drafts, publish/discard (flushes pending saves first), panels. |

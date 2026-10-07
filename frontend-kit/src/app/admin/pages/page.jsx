@@ -96,7 +96,7 @@ function PagesOverview({ defaultType }) {
                                 <tr key={page.id} className="border-b border-[#F1F5F9] last:border-0">
                                     <td className="px-5 py-3">
                                         <p className="font-semibold text-[#0F172A]">{page.title}</p>
-                                        <p className="text-[12px] text-[#94A3B8]">/{page.path}</p>
+                                        <p className="text-[12px] text-[#64748B]">/{page.path}</p>
                                     </td>
                                     <td className="px-3 py-3"><StatusBadge status={page.status} /></td>
                                     <td className="px-3 py-3 text-[#475569]">{formatDate(page.updated_at)}</td>

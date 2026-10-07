@@ -18,7 +18,12 @@ import { pageMetadata, SITE_NAME } from "@/lib/seo";
      the not-found page.
 ========================================= */
 
+// CMS paths are slugs. Anything else (favicon.ico, wp-login.php, .env,
+// image probes…) is a 404 without a backend round trip.
+const CMS_PATH = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+
 async function load(path) {
+    if (!CMS_PATH.test(path)) return null;
     const page = await getContentPage(path);
     if (page && page.body_mode === "dynamic") {
         return { title: page.title, seoPath: page.seo_path || page.path, sections: page.sections || [], cms: true };

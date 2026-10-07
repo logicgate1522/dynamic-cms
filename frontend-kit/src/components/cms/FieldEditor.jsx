@@ -93,7 +93,7 @@ function ImageField({ value, onChange, label, hint }) {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={mediaUrl(value)} alt="" className="h-full w-full object-cover" />
                     ) : (
-                        <span className="text-[11px] text-[#94A3B8]">No image</span>
+                        <span className="text-[11px] text-[#64748B]">No image</span>
                     )}
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -156,7 +156,7 @@ function ListField({ value, onChange, label, path, hints, template }) {
                         <div className="flex items-center gap-1 px-2 py-1.5">
                             {isObjectList ? (
                                 <button type="button" onClick={() => toggle(index)} className="flex-1 truncate text-left text-[13px] font-medium text-[#1E293B]">
-                                    <span className="mr-1.5 inline-block w-3 text-[#94A3B8]">{open.has(index) ? "▾" : "▸"}</span>
+                                    <span className="mr-1.5 inline-block w-3 text-[#64748B]">{open.has(index) ? "▾" : "▸"}</span>
                                     {itemTitle(item, index)}
                                 </button>
                             ) : (

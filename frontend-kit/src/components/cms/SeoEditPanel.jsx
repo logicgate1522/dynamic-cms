@@ -181,8 +181,8 @@ function SeoDrawer({ path, initialTab = "ai", onClose }) {
     ];
     const segment = path.split("/").pop() || "home";
     const fieldProps = (field) => ({ field, flash: flash === field });
-    const fill = autoFill(form, path);
-    const canFill = Object.keys(fill).length > 0;
+    // Cheap test per render; the page text is only read when Auto-fill is clicked.
+    const canFill = !form.keywords.primary || !form.seoTitle || !form.metaDescription || !form.searchIntent || !form.breadcrumbLabels[path];
 
     return (
         <Drawer
@@ -219,7 +219,7 @@ function SeoDrawer({ path, initialTab = "ai", onClose }) {
                 {["essentials", "sharing", "advanced"].includes(tab) && canFill ? (
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-[#CBD5E1] px-3 py-2">
                         <p className="text-[12px] text-[#475569]">Some fields are empty. Auto-fill suggests them from the page (mechanical — review before saving).</p>
-                        <button type="button" className={buttonStyles.secondary} onClick={() => setForm((f) => deepMergePatch(f, fill))}>Auto-fill</button>
+                        <button type="button" className={buttonStyles.secondary} onClick={() => setForm((f) => deepMergePatch(f, autoFill(f, path)))}>Auto-fill</button>
                     </div>
                 ) : null}
 
@@ -504,7 +504,7 @@ function Wrap({ label, help, count, field, flash, children }) {
         <div data-field={field} className={`rounded-lg transition ${flash ? "bg-[var(--cms-accent-soft)] ring-2 ring-[var(--cms-accent)] ring-offset-2" : ""}`}>
             <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#475569]">{label}</span>
-                {count !== undefined ? <span className="text-[11px] text-[#94A3B8]">{count}</span> : null}
+                {count !== undefined ? <span className="text-[11px] text-[#64748B]">{count}</span> : null}
             </div>
             {children}
             {help ? <p className="mt-1 text-[11px] text-[#64748B]">{help}</p> : null}
@@ -556,7 +556,7 @@ function ChipsField({ label, value, onChange, field, flash }) {
                 {value.map((v) => (
                     <span key={v} className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2 py-0.5 text-[12px]">
                         {v}
-                        <button type="button" aria-label={`Remove ${v}`} className="text-[#94A3B8] hover:text-[#B42318]" onClick={() => onChange(value.filter((x) => x !== v))}>×</button>
+                        <button type="button" aria-label={`Remove ${v}`} className="text-[#64748B] hover:text-[#B42318]" onClick={() => onChange(value.filter((x) => x !== v))}>×</button>
                     </span>
                 ))}
                 <input
@@ -583,7 +583,7 @@ function ImageField({ label, value, onChange, field, flash }) {
             <div className="flex items-center gap-3">
                 <div className="flex h-16 w-28 items-center justify-center overflow-hidden rounded-lg border border-[#D6DEE8] bg-[#F1F5F9]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {value ? <img src={mediaUrl(value)} alt="" className="h-full w-full object-cover" /> : <span className="text-[11px] text-[#94A3B8]">None</span>}
+                    {value ? <img src={mediaUrl(value)} alt="" className="h-full w-full object-cover" /> : <span className="text-[11px] text-[#64748B]">None</span>}
                 </div>
                 <label className="cursor-pointer rounded-lg bg-[var(--cms-primary)] px-3 py-1.5 text-[12px] font-semibold text-white">
                     {busy ? "Uploading…" : value ? "Replace" : "Upload"}
@@ -609,7 +609,7 @@ function SnippetPreview({ form, path }) {
     const url = `${typeof window !== "undefined" ? window.location.host : ""}/${path === "home" ? "" : path}`;
     return (
         <div className="rounded-xl border border-[#E2E8F0] p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#94A3B8]">Search result preview</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#64748B]">Search result preview</p>
             <p className="mt-1 truncate text-[12px] text-[#4D5156]">{url}</p>
             <p className="truncate text-[18px] leading-6 text-[#1A0DAB]">{form.seoTitle || "No SEO title — the site default is used"}</p>
             <p className="line-clamp-2 text-[13px] leading-5 text-[#4D5156]">{form.metaDescription || "No meta description — search engines will pick text from the page."}</p>

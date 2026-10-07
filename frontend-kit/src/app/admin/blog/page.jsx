@@ -67,7 +67,7 @@ export default function BlogAdminPage() {
                                     <tr key={post.id} className="border-b border-[#F1F5F9] last:border-0">
                                         <td className="px-5 py-3">
                                             <p className="font-semibold text-[#0F172A]">{post.title}</p>
-                                            <p className="text-[12px] text-[#94A3B8]">/blog/{post.slug}</p>
+                                            <p className="text-[12px] text-[#64748B]">/blog/{post.slug}</p>
                                         </td>
                                         <td className="px-3 py-3">{scheduled ? <StatusBadge status="scheduled" /> : <StatusBadge status={post.status} />}</td>
                                         <td className="px-3 py-3 text-[#475569]">{post.body_mode === "dynamic" ? "Sections" : "Article"}</td>

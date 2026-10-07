@@ -4,7 +4,7 @@
    An integration is DONE only when every check here passes.
 
    Setup (once, in any folder):
-     npm i playwright && npx playwright install chromium
+     npm i playwright axe-core && npx playwright install chromium
 
    Run (frontend production build + backend both running):
      SITE_URL=http://localhost:3000 API_URL=http://localhost:8000 \
@@ -23,7 +23,23 @@
    the page keyword are restored and the entry it creates is deleted.
 ========================================================================= */
 
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
 import { chromium } from "playwright";
+
+// axe-core (accessibility rules) — admin UI contrast + critical issues for visitors.
+let AXE = null;
+try {
+    AXE = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+} catch {
+    // reported as a failing check below
+}
+async function axeViolations(target, options) {
+    await target.addScriptTag({ content: AXE });
+    return target.evaluate(async (opts) => (await window.axe.run(opts.context || document, opts.run)).violations
+        .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, example: v.nodes[0]?.html?.slice(0, 90) })), options);
+}
 
 const SITE = (process.env.SITE_URL || "http://localhost:3000").replace(/\/+$/, "");
 const API = `${(process.env.API_URL || "http://localhost:8000").replace(/\/+$/, "")}/api`;
@@ -262,6 +278,23 @@ try {
         check("SEO button on the admin bar", false, "this route has no seoPath — wire PageSeo / setSeoPath");
     }
 
+    /* ---------- 7a. Accessibility: admin panels readable, no critical issues ---------- */
+    if (!AXE) {
+        check("axe-core installed (npm i axe-core) for the accessibility checks", false);
+    } else {
+        const seoBtn = bar().getByRole("button", { name: "SEO", exact: true });
+        if (await seoBtn.count()) {
+            await seoBtn.click();
+            await page.locator("[data-cms-seo-ai] textarea[readonly]").first().waitFor({ timeout: 10000 }).catch(() => {});
+            const v = await axeViolations(page, { context: '[role="dialog"]', run: { runOnly: ["color-contrast"] } });
+            check("admin panels meet WCAG AA contrast (set --cms-* to ≥4.5:1 shades)", v.length === 0, v.map((x) => `${x.nodes}× ${x.example}`).join(" | "));
+            await closeDrawer();
+        }
+        const vv = await axeViolations(visitor, { run: { resultTypes: ["violations"] } });
+        const critical = vv.filter((x) => x.impact === "critical");
+        check("visitor page has no critical accessibility violations", critical.length === 0, critical.map((x) => `${x.id}: ${x.example}`).join(" | "));
+    }
+
     /* ---------- 7b. Edit tools never cover the page ---------- */
     const pill = page.locator(".cms-hover-tools").first();
     if (await pill.count()) {
@@ -359,6 +392,10 @@ try {
             await viewer.goto(`${SITE}${path}`);
             await viewer.waitForLoadState("networkidle").catch(() => {});
             const overflow = await viewer.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+            if (width === 1920) {
+                const h1s = await viewer.locator("h1").count();
+                check(`SEO: exactly one <h1> in the HTML of ${path}`, h1s === 1, h1s === 1 ? "" : `${h1s} <h1> elements — a hidden mobile/desktop twin? make one <div role="heading" aria-level={1}>`);
+            }
             check(`responsive: no horizontal scroll at ${width}px on ${path}`, overflow <= 1, overflow > 1 ? `${overflow}px wider than the screen` : "");
         }
         await viewer.close();

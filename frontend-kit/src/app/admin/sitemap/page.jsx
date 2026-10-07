@@ -73,7 +73,7 @@ export default function SitemapPage() {
                     {extraPaths.map((p) => (
                         <span key={p} className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-[12px]">
                             /{p}
-                            <button type="button" aria-label={`Remove ${p}`} onClick={() => setExtraPaths(extraPaths.filter((x) => x !== p))} className="text-[#94A3B8] hover:text-[#B42318]">×</button>
+                            <button type="button" aria-label={`Remove ${p}`} onClick={() => setExtraPaths(extraPaths.filter((x) => x !== p))} className="text-[#64748B] hover:text-[#B42318]">×</button>
                         </span>
                     ))}
                     <form

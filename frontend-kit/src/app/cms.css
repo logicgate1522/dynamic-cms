@@ -6,8 +6,11 @@
    native on each site while its structure stays identical everywhere.
    ========================================================================= */
 :root {
-    --cms-accent: #0f9e86;        /* primary admin actions, outlines, focus rings */
-    --cms-accent-strong: #0b7a68; /* accent-coloured text on light backgrounds */
+    /* Use shades with ≥4.5:1 contrast against white (WCAG AA): admin buttons
+       put white text on --cms-accent, and --cms-accent-strong is used as
+       text on white. Check at https://webaim.org/resources/contrastchecker/ */
+    --cms-accent: #0b7a68;        /* primary admin actions, outlines, focus rings (5.3:1 with white) */
+    --cms-accent-strong: #0a6b5c; /* accent-coloured text on light backgrounds (6.4:1 on white) */
     --cms-accent-soft: #ecfdf5;   /* accent tint (hover / selected backgrounds) */
     --cms-bar: #0b1a2e;           /* admin bar and dark panel surfaces */
     --cms-primary: #123a5c;       /* secondary brand colour: active tabs, admin headings */

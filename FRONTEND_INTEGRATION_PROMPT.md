@@ -38,7 +38,7 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R18 | **Typing never loses focus.** Every list that contains editable fields is keyed by the map **index** (`key={i}`), never by the item's own text (`key={item.title}`, `` key={`${item.name}-${i}`} ``). A text-derived key changes on every keystroke, React re-creates the element and the cursor is gone. `check:inline` fails on it, and the acceptance test types into list fields and asserts the element is never re-created. The kit also restores focus if a re-mount ever happens, but that is a safety net, not permission. |
 | R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
 | R20 | **Responsive on every screen.** Converting a section must keep its behaviour at every width: phones (≈390px), tablets (≈768px), laptops (≈1280px) and large screens (≥1920px — content stays inside a max-width container, nothing stretches edge to edge, type and images scale up sensibly). No horizontal scroll at any width. The admin UI is responsive too: on phones the bar collapses behind "More" and panels fit the screen. The acceptance test checks visitors and admins at 390px and 1920px. |
-| R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. |
+| R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. Pick shades with **≥4.5:1 contrast against white** (WCAG AA): admin buttons put white text on `--cms-accent`, and `--cms-accent-strong` is text on white. Darken the brand colour if needed; the acceptance test runs an axe contrast scan on the admin panels. |
 
 ---
 
@@ -250,7 +250,10 @@ Rules:
    this. The only exceptions are marked `{/* cms-static: reason */}` (units,
    legal marks, the honeypot label, the staff-login link).
 3. Every `<img>`/`next/image` → `src={data.x}` plus `<E.Image path="x" />`
-   inside a `relative` parent. Put alt text in its own key.
+   inside a `relative` parent. Put alt text in its own key. CSS background
+   images use `style={{ backgroundImage: bgImage(data.x) }}` (`lib/bgImage.js`,
+   the Next image optimiser), never a raw `url('/file.png')`. `check:inline`
+   flags raw `url(`.
 4. Every array: `<E.Item path index>` inside each item (the item gets
    `relative`), and `<E.Add path label>` after the list. Lists of plain strings
    work too (`path={`lines.${i}`}`).
@@ -866,7 +869,8 @@ unclosed/invalid JSON-LD, marking up invisible content.
   no score bar, fewer than 18 checks, coverage that is stale after Apply
   (R16).
 - Admin colors hard-coded to the site instead of the `--cms-*` variables, or
-  admin markup changed to match the site (R17).
+  admin markup changed to match the site, or an accent colour too light for
+  white text (R17).
 - Writing AI prompt text on the client, or a prompt that doesn't end with its
   FINAL CHECK (prompts live only in `api/prompts.py`).
 
@@ -904,10 +908,15 @@ gate that proves it; a line with no automatic gate is yours to verify by hand.
 - [ ] **R14** New entries follow the template exactly, like their siblings. (acceptance "new entry follows the collection template exactly")
 - [ ] **R15** Edit tools are hover-only and never cover content; the bar minimises. (acceptance "edit tools are hidden…", "admin bar minimises")
 - [ ] **R16** The SEO panel opens on Ask AI with its prompt built and shows 18 checks; the whole-page assist shows coverage %, chips and 6 rules, live after Apply. (acceptance SEO + AI assist checks)
-- [ ] **R17** The `--cms-*` theme variables are set to the site palette. (review)
+- [ ] **R17** The `--cms-*` theme variables are set to the site palette, at ≥4.5:1 contrast with white. (acceptance "admin panels meet WCAG AA contrast")
 - [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus" + "never re-created")
 - [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (review; acceptance shows no 429s)
 - [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
+
+**Also checked by the acceptance test**
+- [ ] Exactly one `<h1>` in each page's HTML. Hidden mobile/desktop twins use `<div role="heading" aria-level={1}>` for the hidden copy.
+- [ ] No critical accessibility violations for visitors (axe).
+- [ ] CSS background images go through `bgImage()` (`lib/bgImage.js`), never raw `url('/big.png')`.
 
 **Setup**
 - [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`

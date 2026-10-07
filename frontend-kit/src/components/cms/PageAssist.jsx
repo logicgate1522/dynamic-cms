@@ -208,10 +208,10 @@ function CoverageCard({ coverage, rules, failingRules, onOpenSeo }) {
                         title={r.excluded ? "Shared across pages — not counted" : r.hasKeyword ? `Contains “${keyword}”` : keyword ? `Does not contain “${keyword}”` : ""}
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.02em] ${
                             r.excluded
-                                ? "border-dashed border-[#CBD5E1] text-[#94A3B8]"
+                                ? "border-dashed border-[#CBD5E1] text-[#64748B]"
                                 : r.hasKeyword
                                   ? "border-[#86EFAC] bg-[#F0FDF4] text-[#15803D]"
-                                  : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                                  : "border-[#E2E8F0] bg-white text-[#64748B]"
                         }`}
                     >
                         {r.hasKeyword && !r.excluded ? <span aria-hidden="true">✓</span> : null}
@@ -226,7 +226,7 @@ function CoverageCard({ coverage, rules, failingRules, onOpenSeo }) {
                     <span className="text-[12px] font-black uppercase tracking-[0.1em] text-[#0F172A]">Other SEO rules</span>
                     <ul className="space-y-1">
                         {rules.map((rule) => (
-                            <li key={rule.id} data-cms-rule={rule.id} data-pass={rule.skip ? "skip" : String(rule.pass)} className={`flex items-start gap-2 text-[13px] leading-5 ${rule.skip ? "text-[#94A3B8]" : rule.pass ? "text-[#15803D]" : "text-[#B45309]"}`}>
+                            <li key={rule.id} data-cms-rule={rule.id} data-pass={rule.skip ? "skip" : String(rule.pass)} className={`flex items-start gap-2 text-[13px] leading-5 ${rule.skip ? "text-[#64748B]" : rule.pass ? "text-[#15803D]" : "text-[#B45309]"}`}>
                                 <span aria-hidden="true" className="w-3 shrink-0">{rule.skip ? "—" : rule.pass ? "✓" : "✕"}</span>
                                 {rule.label}
                             </li>
@@ -234,7 +234,7 @@ function CoverageCard({ coverage, rules, failingRules, onOpenSeo }) {
                     </ul>
                     {failingRules.length ? (
                         <div className="space-y-2 pt-1">
-                            <p className="text-[11px] leading-4 text-[#94A3B8]">These are SEO fields (title, description, keyword, schema), not page copy — pasting section JSON can&apos;t fix them. Fix them in the SEO panel.</p>
+                            <p className="text-[11px] leading-4 text-[#64748B]">These are SEO fields (title, description, keyword, schema), not page copy — pasting section JSON can&apos;t fix them. Fix them in the SEO panel.</p>
                             {onOpenSeo ? <button type="button" onClick={onOpenSeo} className={`${buttonStyles.secondary} w-full`}>Open SEO panel</button> : null}
                         </div>
                     ) : null}
