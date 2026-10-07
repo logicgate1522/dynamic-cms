@@ -59,6 +59,10 @@ instructions the docs already answer.
     the matching tag in `frontend-kit/src/lib/cms.js`.
   - Auth: session + CSRF (`api/auth_views.py`, `AdminLoginView` with
     `session: true`). Token login stays for scripts only.
+  - Rate limits: `api/throttles.py`. Staff and the site's own server
+    (`X-CMS-Frontend` = `REVALIDATE_SECRET`) skip the general limits;
+    `login` and `form_submit` always apply. A new public endpoint with its own
+    `throttle_classes` must use `SiteAwareScopedRateThrottle`.
 - **Every behaviour change ships with a test** in `api/tests.py`. The
   permission-audit test fails if you add an unauthenticated write endpoint
   without adding it to `PUBLIC_WRITE_ALLOWLIST` on purpose.
@@ -74,6 +78,7 @@ instructions the docs already answer.
 
 - **Inline first:** click the thing to change it. Panels exist for bulk, AI,
   JSON and history. Edit tools appear on hover; nothing covers the page.
+  Typing never loses focus (index keys; `check:inline` + acceptance enforce it).
 - **Build only what repeats:** collections (articles, services, projects…)
   get "＋ New" on their index page, with one template. One-off pages keep
   their structure.

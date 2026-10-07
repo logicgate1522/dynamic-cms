@@ -35,6 +35,8 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R14 | **New entries must look exactly like their siblings.** A collection's `sections` must equal, in order, the section types of the existing detail pages. Blank entries copy the newest published sibling's fields and list lengths; AI entries are fitted to the template server-side. Never hand-design a new entry layout. |
 | R15 | **Edit tools never cover the page.** Block pills, item tools, link 🔗 buttons, "＋ Add" buttons and "Replace image" chips are `cms-hover-tools`: hidden until their own block / item is hovered or focused (always shown on touch screens). The admin bar can be minimised. Never add an always-visible overlay on top of content. |
 | R16 | **SEO and AI parity is fixed.** The SEO panel opens on **✦ Ask AI** with the audit prompt already built, shows the score bar on every tab, and lists all 18 checks (`lib/seoChecks.js`, mirroring `prompts.seo_rule_checks`) with a fix for each. The whole-page AI assist builds its prompt when opened, shows KEYWORD COVERAGE (%, sentence, a chip per section) and OTHER SEO RULES (6 rules, ✓/✕), stays live after Apply, and covers CMS-page sections too. Don't rebuild these UIs; they ship in the kit. |
+| R18 | **Typing never loses focus.** Every list that contains editable fields is keyed by the map **index** (`key={i}`), never by the item's own text (`key={item.title}`, `` key={`${item.name}-${i}`} ``). A text-derived key changes on every keystroke, React re-creates the element and the cursor is gone. `check:inline` fails on it, and the acceptance test types into list fields and asserts the element is never re-created. The kit also restores focus if a re-mount ever happens, but that is a safety net, not permission. |
+| R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
 | R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. |
 
 ---
@@ -261,7 +263,9 @@ Rules:
 9. Hard-coded arrays (icons and similar) stay in code. Only the copy moves into
    `defaults`. Pick an icon by index or with a `fields` select hint
    (`options.fields["plans[].icon"] = { type: "select", options: [...] }`).
-10. Stateful UI such as accordions, carousels and search filters must keep
+10. **Keys:** any `.map(...)` that renders editable fields uses the index as
+    the key (R18). Never use the item's text or a value an admin can edit.
+11. Stateful UI such as accordions, carousels and search filters must keep
     working with editing on. Clicking editable text never triggers the parent
     link or toggle, because the kit stops propagation; Cmd/Ctrl-click follows
     the link.
@@ -840,6 +844,10 @@ unclosed/invalid JSON-LD, marking up invisible content.
 - A collection entry whose layout differs from its siblings, or a collection
   `sections` list that doesn't match the existing detail pages (R14).
 - Edit chrome that is always visible on top of content (R15).
+- A list keyed by its own editable text, so fields lose focus after one
+  keystroke (R18).
+- Server-side CMS fetches without `X-CMS-Frontend`, or the secret in browser
+  code (R19).
 - A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI not first,
   no score bar, fewer than 18 checks, coverage that is stale after Apply
   (R16).
@@ -866,7 +874,8 @@ paste the acceptance output in the report.
 - [ ] Every route: `generateMetadata` via `pageMetadata`, plus `<PageSeo>`
 - [ ] Collections decided and seeded (R13): each `sections` equals its existing detail pages; one-off pages have none
 - [ ] `--cms-*` theme variables set to the site palette (R17)
-- [ ] Every section uses the §3 recipe; `check:inline` passes
+- [ ] Every section uses the §3 recipe; `check:inline` passes (no hard-coded copy, no text-derived list keys)
+- [ ] `middleware.js` and `lib/cms.js` from the kit (server requests carry `X-CMS-Frontend`)
 - [ ] Registry matches the backend; `check:sections` passes
 - [ ] Forms are definition-driven, with editable copy and a honeypot
 - [ ] CMS pages and dynamic blog posts render through `DynamicPageAdmin`

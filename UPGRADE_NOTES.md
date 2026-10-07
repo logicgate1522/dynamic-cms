@@ -1,3 +1,32 @@
+# Upgrade Notes — focus-safe editing, rate limits that fit editors
+
+**Typing never loses focus**
+- Lists keyed by their own text (`key={item.title}`) re-created the field on
+  every keystroke. All of them are now index-keyed.
+- `check-inline.mjs` fails on any text-derived key.
+- The inline editor restores focus and the caret if an element is ever
+  re-created anyway.
+- The acceptance test types into list fields across an autosave and asserts
+  the element is never replaced.
+
+**List-item tools** (↑ ↓ ⧉ ✕) now float above the hovered item (portal), so
+they never cover its text and can't be clipped.
+
+**Rate limits** (`api/throttles.py`)
+- Staff are exempt from the general limits, so fast inline editing no longer
+  hits 429s.
+- The site's server sends `X-CMS-Frontend: <REVALIDATE_SECRET>` (`lib/cms.js`,
+  `middleware.js`), so page renders and redirects aren't limited as one
+  anonymous visitor.
+- Login and form-spam limits are unchanged.
+
+**Moving forward**
+- Re-sync the kit (now includes `middleware.js`).
+- Make sure `REVALIDATE_SECRET` is set in the frontend's server env.
+- Run `check:inline` and fix any reported keys.
+
+---
+
 # Upgrade Notes — Prometheus parity, collections, theming
 
 A second pass against the Prometheus editor.
