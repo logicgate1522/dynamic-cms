@@ -3,6 +3,15 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .collection_views import (
+    CollectionEntriesView,
+    CollectionEntryApplyView,
+    CollectionEntryDetailView,
+    CollectionEntryPromptView,
+    CollectionForPathView,
+    CollectionListView,
+    CollectionPromptView,
+)
 from .ai_views import (
     BlogBuildPromptView,
     BuildPromptView,
@@ -79,6 +88,13 @@ urlpatterns = [
     path('sitemap/report/', SitemapReportView.as_view(), name='sitemap-report'),
     path('drafts/publish/', DraftPublishView.as_view(), name='drafts-publish'),
     path('drafts/discard/', DraftDiscardView.as_view(), name='drafts-discard'),
+    path('collections/', CollectionListView.as_view(), name='collections'),
+    path('collections/for-path/', CollectionForPathView.as_view(), name='collection-for-path'),
+    path('collections/<slug:key>/prompt/', CollectionPromptView.as_view(), name='collection-prompt'),
+    path('collections/<slug:key>/entries/', CollectionEntriesView.as_view(), name='collection-entries'),
+    path('collections/<slug:key>/entries/<slug:slug>/prompt/', CollectionEntryPromptView.as_view(), name='collection-entry-prompt'),
+    path('collections/<slug:key>/entries/<slug:slug>/apply/', CollectionEntryApplyView.as_view(), name='collection-entry-apply'),
+    path('collections/<slug:key>/entries/<slug:slug>/', CollectionEntryDetailView.as_view(), name='collection-entry'),
 
     # Generic inline-editable ("CMS") sections — e.g. home/footer/, home/hero/.
     # Specific sub-routes MUST precede the greedy <slug:name> catch-all.

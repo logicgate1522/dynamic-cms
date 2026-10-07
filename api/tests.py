@@ -1692,3 +1692,201 @@ class ImageUsageTests(AdminAuthMixin, APITestCase):
         self.assertEqual(blocked.status_code, 409)
         self.assertIn("SEO for /about", blocked.data["usage"])
         self.assertEqual(self.admin_client.delete(f"/api/images/{self.image['id']}/?force=1").status_code, 204)
+
+
+class CollectionTests(AdminAuthMixin, APITestCase):
+    """Collections: site-specific, template-locked entry builders."""
+
+    SERVICES = {
+        "label": "Service", "plural": "Services", "hostKind": "content",
+        "indexPath": "services", "pathPrefix": "services", "pageType": "service",
+        "sections": ["hero", "features", "faq", "cta"], "allowAdd": [],
+        "listingNote": "Link it from the home page cards.",
+    }
+    ARTICLES = {
+        "label": "Article", "plural": "Articles", "hostKind": "blog",
+        "indexPath": "resources", "pathPrefix": "blog", "pageType": "article",
+        "sections": ["rich_text"], "allowAdd": ["rich_text", "image_text", "faq"],
+        "fields": {"excerpt": {"label": "Excerpt", "type": "textarea"},
+                   "category": {"label": "Category", "options": ["VAT", "Tax"]}},
+    }
+
+    def setUp(self):
+        super().setUp()
+        r = self.admin_client.patch("/api/settings/site/", {"collections": {
+            "services": self.SERVICES, "articles": self.ARTICLES}}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def _reference_service(self):
+        """A published sibling with 3 features and 4 FAQs."""
+        page = ContentPage.objects.create(path="services/vat", title="VAT", page_type="service",
+                                          body_mode="dynamic", status="published")
+        r = self.admin_client.post("/api/content/services/vat/sections/", [
+            {"section_type": "hero", "content": {"eyebrow": "VAT", "heading": "VAT returns", "description": "Filed on time."}},
+            {"section_type": "features", "content": {"heading": "Why us", "items": [{"title": f"F{i}", "icon": "check"} for i in range(3)]}},
+            {"section_type": "faq", "content": {"heading": "FAQ", "items": [{"question": f"Q{i}", "answer": "A"} for i in range(4)]}},
+            {"section_type": "cta", "content": {"heading": "Talk to us", "button_text": "Call"}},
+        ], format="json")
+        self.assertIn(r.status_code, (200, 201), r.data)
+        return page
+
+    def test_settings_validation_rejects_unknown_section_types(self):
+        r = self.admin_client.patch("/api/settings/site/", {"collections": {"x": {"sections": ["nope"]}}}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("collections.x.sections", r.data)
+
+    def test_listing_and_path_roles(self):
+        self.assertEqual({c["key"] for c in self.admin_client.get("/api/collections/").data}, {"services", "articles"})
+        index = self.admin_client.get("/api/collections/for-path/?path=/services").data
+        self.assertEqual((index["collection"]["key"], index["role"]), ("services", "index"))
+        entry = self.admin_client.get("/api/collections/for-path/?path=/blog/some-post").data
+        self.assertEqual((entry["collection"]["key"], entry["role"]), ("articles", "entry"))
+        self.assertIsNone(self.admin_client.get("/api/collections/for-path/?path=/about").data["collection"])
+        self.assertEqual(self.client.get("/api/collections/").status_code, 401)
+
+    def test_blank_entry_copies_the_sibling_layout(self):
+        self._reference_service()
+        r = self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["entry"]["href"], "/services/payroll")
+        self.assertEqual(r.data["entry"]["status"], "draft")
+        sections = self.admin_client.get("/api/content/services/payroll/sections/").data
+        sections = sections.get("results", sections) if isinstance(sections, dict) else sections
+        self.assertEqual([s["section_type"] for s in sections], ["hero", "features", "faq", "cta"])
+        self.assertEqual(sections[0]["content"]["heading"], "Payroll")
+        self.assertEqual(sections[0]["content"]["eyebrow"], "Eyebrow")       # sibling has one
+        self.assertEqual(sections[1]["content"]["items"][0]["icon"], "Icon")  # item keys follow too
+        self.assertEqual(len(sections[1]["content"]["items"]), 3)
+        self.assertEqual(len(sections[2]["content"]["items"]), 4)
+        # No image on the sibling's hero -> optional slot, publishing is not blocked.
+        published = self.admin_client.patch("/api/collections/services/entries/payroll/", {"status": "published"}, format="json")
+        self.assertEqual(published.status_code, 200, published.data)
+        self.assertEqual(self.client.get("/api/content/pages/services/payroll/").status_code, 200)
+
+    def test_messy_ai_reply_is_forced_onto_the_template(self):
+        reply = "Sure! Here it is:\n```json\n" + _json.dumps({
+            "title": "Payroll Services",
+            "seo": {"title": "Payroll Services for Small Businesses | Acme", "description": "x" * 130,
+                    "keywords": ["payroll services", "payroll leeds"]},
+            "sections": [
+                {"type": "cta", "heading": "Start today", "button_text": "Book"},
+                {"type": "hero", "content": {"heading": "Payroll [made easy](https://x.y)", "description": "D"}},
+                {"type": "statistics", "items": [{"value": "1", "label": "x"}]},
+                {"type": "faq", "heading": "FAQ", "items": [{"question": "Q?", "answer": "A."}]},
+            ],
+        }) + "\n```\nHope that helps!"
+        r = self.admin_client.post("/api/collections/services/entries/", {"raw": reply}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["entry"]["slug"], "payroll-services")
+        joined = " ".join(r.data["warnings"])
+        self.assertIn("features", joined)      # missing slot filled
+        self.assertIn("statistics", joined)    # extra type dropped
+        sections = self.admin_client.get("/api/content/services/payroll-services/sections/").data
+        sections = sections.get("results", sections) if isinstance(sections, dict) else sections
+        self.assertEqual([s["section_type"] for s in sections], ["hero", "features", "faq", "cta"])
+        self.assertEqual(sections[0]["content"]["heading"], "Payroll made easy")
+        seo = self.admin_client.get("/api/seo/services/payroll-services/").data
+        self.assertEqual(seo["keywords"]["primary"], "payroll services")
+
+    def test_blog_entries_store_fields_and_keep_flexible_order(self):
+        reply = _json.dumps({
+            "title": "Making Tax Digital explained",
+            "fields": {"excerpt": "What MTD means for you.", "category": "VAT"},
+            "sections": [
+                {"type": "rich_text", "heading": "Intro", "content": "Para."},
+                {"type": "faq", "heading": "FAQ", "items": [{"question": "Q?", "answer": "A."}]},
+                {"type": "rich_text", "heading": "More", "content": "Para."},
+                {"type": "pricing", "items": [{"name": "x"}]},
+            ],
+        })
+        r = self.admin_client.post("/api/collections/articles/entries/", {"raw": reply}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        post = BlogPost.objects.get(slug="making-tax-digital-explained")
+        self.assertEqual(post.excerpt, "What MTD means for you.")
+        self.assertEqual(post.content["category"], "VAT")
+        self.assertEqual(r.data["entry"]["href"], "/blog/making-tax-digital-explained")
+        types = [s.section_type for s in post.dynamic_sections.order_by("order")]
+        self.assertEqual(types, ["rich_text", "faq", "rich_text"])
+        # An option outside the list is refused, a valid one is kept.
+        self.admin_client.patch(f"/api/collections/articles/entries/{post.slug}/", {"fields": {"category": "Nope"}}, format="json")
+        post.refresh_from_db()
+        self.assertEqual(post.content["category"], "VAT")
+
+    def test_prompt_is_template_strict_and_repeats_its_rules(self):
+        self._reference_service()
+        r = self.admin_client.get("/api/collections/services/prompt/?title=Payroll&keyword=payroll%20services")
+        self.assertEqual(r.status_code, 200)
+        prompt = r.data["prompt"]
+        self.assertIn('exactly 4 sections, in exactly this order', prompt)
+        self.assertIn('1. "hero"', prompt)
+        self.assertIn("STYLE REFERENCE", prompt)
+        self.assertIn("VAT returns", prompt)          # the sibling is shown
+        self.assertIn("FINAL CHECK", prompt)
+        self.assertIn("hero, features, faq, cta", prompt.split("FINAL CHECK")[1])
+        self.assertIn("payroll services", prompt)
+        blog = self.admin_client.get("/api/collections/articles/prompt/?title=MTD").data["prompt"]
+        self.assertIn('exactly one of ["VAT", "Tax"]', blog)
+
+    def test_renaming_a_published_entry_keeps_old_links(self):
+        self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
+        self.admin_client.patch("/api/seo/services/payroll/", {"seoTitle": "Payroll"}, format="json")
+        self.admin_client.patch("/api/collections/services/entries/payroll/", {"status": "published"}, format="json")
+        r = self.admin_client.patch("/api/collections/services/entries/payroll/", {"slug": "payroll-bureau"}, format="json")
+        self.assertEqual(r.data["href"], "/services/payroll-bureau")
+        self.assertEqual(Redirect.objects.get(source="/services/payroll").destination, "/services/payroll-bureau")
+        self.assertEqual(PageSEO.objects.get(path="services/payroll-bureau").data["seoTitle"], "Payroll")
+
+    def test_delete_removes_entry_sections_and_seo(self):
+        self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
+        self.admin_client.patch("/api/seo/services/payroll/", {"seoTitle": "Payroll"}, format="json")
+        self.assertEqual(self.admin_client.delete("/api/collections/services/entries/payroll/").status_code, 204)
+        self.assertFalse(ContentPage.objects.filter(path="services/payroll").exists())
+        self.assertFalse(PageSEO.objects.filter(path="services/payroll").exists())
+        self.assertFalse(DynamicSection.objects.filter(object_id__isnull=False, content__heading="Payroll").exists())
+
+    def test_ai_rewrite_is_fitted_and_saved_as_drafts(self):
+        self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
+        self.admin_client.patch("/api/collections/services/entries/payroll/", {"status": "published"}, format="json")
+        reply = _json.dumps({"sections": [
+            {"type": "hero", "heading": "Payroll, sorted", "description": "Weekly or monthly."},
+            {"type": "faq", "heading": "FAQ", "items": [{"question": "Q?", "answer": "A."}]},
+        ]})
+        r = self.admin_client.post("/api/collections/services/entries/payroll/apply/", {"raw": reply}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        types = [s["section_type"] for s in r.data["sections"]]
+        self.assertEqual(types, ["hero", "features", "faq", "cta"])
+        hero = r.data["sections"][0]
+        self.assertEqual(hero["draft_content"]["heading"], "Payroll, sorted")
+        self.assertEqual(hero["content"]["heading"], "Payroll")      # live copy untouched until Publish
+        prompt = self.admin_client.get("/api/collections/services/entries/payroll/prompt/?instruction=shorter").data["prompt"]
+        self.assertIn("CHANGE REQUESTED: shorter", prompt)
+        self.assertIn("FINAL CHECK", prompt)
+
+
+class PromptRepetitionTests(AdminAuthMixin, APITestCase):
+    """Every prompt restates its hard rules at the very end."""
+
+    def test_every_prompt_ends_with_the_final_check(self):
+        from . import prompts
+        checks = [
+            prompts.page_prompt(None, {"mode": "create", "title": "X"}),
+            prompts.section_prompt(content={"title": "x"}, label="Hero", path="about"),
+            prompts.page_assist_prompt(path="about", sections={"hero": {"label": "Hero", "content": {"title": "x"}}})[0],
+            prompts.seo_prompt(path="about", seo={}),
+            prompts.keyword_prompt(path="about"),
+            prompts.copy_structure_prompt(),
+        ]
+        for prompt in checks:
+            tail = prompt[-2500:]
+            self.assertIn("FINAL CHECK", tail)
+
+    def test_seo_checks_carry_tab_field_and_fix(self):
+        from . import prompts
+        rules = prompts.seo_rule_checks({})
+        self.assertGreaterEqual(len(rules), 18)
+        for rule in rules:
+            self.assertTrue(rule["fix"] and rule["field"] and rule["tab"] in ("essentials", "sharing", "advanced"), rule)
+        ids = [r["id"] for r in rules]
+        self.assertEqual(len(ids), len(set(ids)))
+        for wanted in prompts.SEO_CHECKS_FOR_PAGE_ASSIST:
+            self.assertIn(wanted, ids)

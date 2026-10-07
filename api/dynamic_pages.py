@@ -58,6 +58,54 @@ RECOMMENDED_SIZE = {
 }
 
 
+# Placeholder content for a section an admin adds by hand (or a template
+# slot the AI left out). Single source — the frontend reads it from
+# GET ai/section-schema/ ("starters").
+STARTER_CONTENT = {
+    "hero": {"heading": "New heading", "description": "Describe the offer in one or two sentences.",
+             "button_text": "Get started", "button_href": "/contact"},
+    "rich_text": {"heading": "New section", "content": "Write the first paragraph here."},
+    "image_text": {"heading": "New section", "content": "Write the copy here.", "image_position": "right"},
+    "cta": {"heading": "Ready to get started?", "description": "", "button_text": "Contact us",
+            "button_href": "/contact"},
+    "banner": {"text": "Announcement text", "link_text": "", "link_href": ""},
+    "video": {"heading": "", "video_url": "https://www.youtube.com/embed/"},
+    "contact_block": {"heading": "Get in touch", "email": "", "phone": "", "address": ""},
+    "map_block": {"heading": "Find us", "embed_url": "https://www.google.com/maps/embed?pb="},
+    "newsletter": {"heading": "Stay in the loop", "description": "", "form_name": "newsletter"},
+}
+STARTER_ITEM = {
+    "cards": {"title": "Card title", "description": "Card text", "href": ""},
+    "features": {"title": "Feature", "description": "What it does"},
+    "statistics": {"value": "100+", "label": "Label"},
+    "testimonials": {"quote": "Quote", "author": "Name", "role": "Role", "rating": 5},
+    "faq": {"question": "Question?", "answer": "Answer."},
+    "gallery": {"caption": ""},
+    "team": {"name": "Name", "role": "Role", "bio": ""},
+    "timeline": {"date": "2026", "title": "Milestone", "description": ""},
+    "pricing": {"name": "Plan", "price": "0", "period": "month", "features": ["Feature"],
+                "button_text": "Choose", "button_href": "/contact"},
+    "logos": {"name": "Partner"},
+    "steps": {"title": "Step", "description": "What happens"},
+}
+
+
+def starter_content(section_type, items=1, heading=None):
+    """Valid placeholder content for one section (list types get `items`
+    placeholder entries, so a blank page keeps the layout of its siblings)."""
+    import copy
+    if section_type in STARTER_CONTENT:
+        content = copy.deepcopy(STARTER_CONTENT[section_type])
+    elif section_type in STARTER_ITEM:
+        content = {"heading": "New section",
+                   "items": [copy.deepcopy(STARTER_ITEM[section_type]) for _ in range(max(1, items))]}
+    else:
+        content = {}
+    if heading and "heading" in SECTION_SCHEMA.get(section_type, {}):
+        content["heading"] = heading
+    return content
+
+
 class DynamicPageParseError(Exception):
     def __init__(self, errors):
         self.errors = errors  # [{"section_index": int|None, "message": str}]

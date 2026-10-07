@@ -7,6 +7,8 @@ This checks only the *canonical* keys that are present in the incoming
 PATCH; unknown keys pass through untouched. Returns {dotted.path: message}.
 """
 
+import re
+
 _STR_ARRAY_KEYS = [
     ("analytics", "customHead"),
     ("analytics", "customBodyStart"),
@@ -76,6 +78,39 @@ def validate_site_settings(payload):
                 isinstance(overrides, dict) and all(isinstance(v, dict) for v in overrides.values())
             ):
                 errors["sitemap.overrides"] = 'Must be an object of {"path": {"include", "priority", "changefreq"}}.'
+
+    collections = payload.get("collections")
+    if collections is not None:
+        from .dynamic_pages import SECTION_SCHEMA
+        if not isinstance(collections, dict):
+            errors["collections"] = 'Must be an object of {"key": {collection}}.'
+        else:
+            for key, cfg in collections.items():
+                where = f"collections.{key}"
+                if not re.match(r"^[a-z0-9][a-z0-9-]*$", str(key)):
+                    errors[where] = "Key must be lowercase letters, digits and hyphens."
+                    continue
+                if not isinstance(cfg, dict):
+                    errors[where] = "Must be an object."
+                    continue
+                if cfg.get("hostKind", "content") not in ("content", "blog"):
+                    errors[f"{where}.hostKind"] = 'Must be "content" or "blog".'
+                for field in ("sections", "allowAdd"):
+                    value = cfg.get(field)
+                    if value is None:
+                        continue
+                    bad = [t for t in value if t not in SECTION_SCHEMA] if isinstance(value, list) else None
+                    if bad is None:
+                        errors[f"{where}.{field}"] = "Must be an array of section types."
+                    elif bad:
+                        errors[f"{where}.{field}"] = f"Unknown section type(s): {', '.join(map(str, bad))}."
+                if "sections" in cfg and isinstance(cfg["sections"], list) and not cfg["sections"]:
+                    errors[f"{where}.sections"] = "A collection needs at least one section in its template."
+                for field in ("label", "plural", "indexPath", "pathPrefix", "pageType", "listingNote"):
+                    if field in cfg and not isinstance(cfg[field], str):
+                        errors[f"{where}.{field}"] = "Must be a string."
+                if "fields" in cfg and not isinstance(cfg["fields"], dict):
+                    errors[f"{where}.fields"] = 'Must be an object of {"name": {"label", "type"?, "options"?}}.'
 
     seo = payload.get("seoDefaults")
     if isinstance(seo, dict) and "robots" in seo and not isinstance(seo["robots"], dict):

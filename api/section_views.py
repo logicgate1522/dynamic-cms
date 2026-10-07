@@ -26,6 +26,7 @@ from .dynamic_pages import (
     build_ai_prompt,
     build_copy_structure_prompt,
     parse_and_validate,
+    starter_content,
 )
 from .models import BlogPost, ContentPage, DynamicSection, SectionMedia
 from .utils import build_unique_slug
@@ -178,6 +179,7 @@ class SectionSchemaView(APIView):
             "single_image_types": sorted(SINGLE_IMAGE_SECTION_TYPES),
             "per_item_image_types": sorted(PER_ITEM_IMAGE_SECTION_TYPES),
             "recommended_sizes": RECOMMENDED_SIZE,
+            "starters": {t: starter_content(t) for t in SECTION_SCHEMA},
         })
 
 
@@ -312,6 +314,37 @@ class BlogSectionAddView(SectionAddView):
     kind = "blog"
 
 
+def apply_sections(host, incoming, as_draft=True):
+    """Apply a full list of parsed sections to an existing page, matched by
+    position: same type -> content updated in place (images kept; as a draft
+    when as_draft); different type or extra -> replaced/created; surplus ->
+    deleted."""
+    current = list(_sections_qs(host, published_only=False))
+    with transaction.atomic():
+        for i, entry in enumerate(incoming):
+            if i < len(current) and current[i].section_type == entry["section_type"]:
+                row = current[i]
+                if as_draft:
+                    row.draft_content = entry["content"]
+                else:
+                    row.content = entry["content"]
+                    row.draft_content = None
+                row.order = i
+                row.save(update_fields=["content", "draft_content", "order"])
+                _sync_media(row, entry)
+            else:
+                if i < len(current):
+                    current[i].delete()
+                row = DynamicSection.objects.create(
+                    content_type=_host_ct(host), object_id=host.pk,
+                    section_type=entry["section_type"], order=i,
+                    content=entry["content"], status="published",
+                )
+                _sync_media(row, entry)
+        for row in current[len(incoming):]:
+            row.delete()
+
+
 class PasteToEditView(APIView):
     """POST content/<key>/paste-to-edit/ {raw, as_draft?}
     Apply an AI "full page" reply to an EXISTING page: sections are matched
@@ -346,31 +379,7 @@ class PasteToEditView(APIView):
         except DynamicPageParseError as e:
             return Response({"errors": e.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        incoming = parsed["sections"]
-        current = list(_sections_qs(host, published_only=False))
-        with transaction.atomic():
-            for i, entry in enumerate(incoming):
-                if i < len(current) and current[i].section_type == entry["section_type"]:
-                    row = current[i]
-                    if as_draft:
-                        row.draft_content = entry["content"]
-                    else:
-                        row.content = entry["content"]
-                        row.draft_content = None
-                    row.order = i
-                    row.save(update_fields=["content", "draft_content", "order"])
-                    _sync_media(row, entry)
-                else:
-                    if i < len(current):
-                        current[i].delete()
-                    row = DynamicSection.objects.create(
-                        content_type=_host_ct(host), object_id=host.pk,
-                        section_type=entry["section_type"], order=i,
-                        content=entry["content"], status="published",
-                    )
-                    _sync_media(row, entry)
-            for row in current[len(incoming):]:
-                row.delete()
+        apply_sections(host, parsed["sections"], as_draft=as_draft)
 
         return Response({
             "sections": [serialize_section(s, request) for s in

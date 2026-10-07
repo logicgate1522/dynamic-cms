@@ -93,6 +93,26 @@ ARRAY_RULE = (
 )
 
 
+def final_check(*rules):
+    """The non-negotiable rules, restated as the LAST thing the model reads.
+    Models follow instructions at the end of a prompt most reliably, so every
+    prompt repeats its hard constraints here even when stated above."""
+    lines = "\n".join(f"{i}. {rule}" for i, rule in enumerate(rules, 1))
+    return f"""
+=== FINAL CHECK — before you reply, confirm every point (these repeat the rules above on purpose) ===
+{lines}
+If any point fails, fix your reply first. Do not mention this checklist in your reply."""
+
+
+RULE_JSON = "The reply is ONLY the JSON described above: no markdown fences, no explanation before or after, no comments."
+RULE_URLS = 'Every URL, path and image reference is a plain string exactly as given — never "[x](x)" markdown.'
+RULE_ARRAYS = "No existing list item was removed, shortened or reordered; new items were only ADDED where a list was thin."
+RULE_FACTS = "Nothing is invented: no statistics, prices, awards, reviews, accreditations or legal claims you were not given."
+RULE_KEYWORD = "The primary keyword (or a natural variation) appears where it reads naturally — never stuffed or repeated mechanically."
+RULE_PLAIN = "Text is plain: no HTML, no markdown, paragraphs separated by a blank line."
+RULE_VOICE = "The copy matches the brand voice and spelling conventions stated above."
+
+
 # --------------------------------------------------------------- context
 
 def site_context():
@@ -239,6 +259,14 @@ def page_prompt(section_types=None, context=None):
         )
         output = "Return the page JSON."
 
+    _checklist = final_check(
+        RULE_JSON,
+        'Every section has a "type" from the list above and all of its "required"/"required_list" fields.',
+        'seo.title is 50–60 characters and seo.description is 120–160 characters, both containing the primary keyword.',
+        RULE_KEYWORD + " The H1 (first hero heading) and at least one H2 contain it.",
+        RULE_ARRAYS if mode == "edit" else "Lists (FAQ, steps, features) have real, specific entries — at least 3 where the section needs a list.",
+        RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+    )
     return f"""{opening}
 
 {_voice_block(site)}
@@ -265,7 +293,129 @@ SECTION RULES:
 - "video_url" must be a YouTube or Vimeo embed URL (https://www.youtube.com/embed/… or https://player.vimeo.com/video/…).
 - Links ("*_href") are site paths like "/contact" or full https URLs.
 {_image_rules(types)}- Do not invent section types or fields that are not listed above.
-"""
+{_checklist}"""
+
+
+# --------------------------------------------------------------- collection entry
+
+def _template_lines(cfg):
+    lines = []
+    for i, section_type in enumerate(cfg["sections"], 1):
+        fields = ", ".join(f"{name} ({rule.replace('_', ' ')})" for name, rule in SECTION_SCHEMA[section_type].items())
+        lines.append(f'{i}. "{section_type}" — {fields}')
+    return "\n".join(lines)
+
+
+def _fields_block(cfg):
+    if not cfg["fields"]:
+        return "", ""
+    rows, shape = [], {}
+    for name, spec in cfg["fields"].items():
+        spec = spec if isinstance(spec, dict) else {}
+        options = spec.get("options")
+        label = spec.get("label") or name
+        if options:
+            rows.append(f'- {name} ({label}): exactly one of {json.dumps(options, ensure_ascii=False)}')
+            shape[name] = f"<one of the {len(options)} options>"
+        else:
+            rows.append(f"- {name} ({label}): " + ("1–2 sentences, 140–200 characters, makes a reader want to open it"
+                                                  if name == "excerpt" else "plain text"))
+            shape[name] = "<text>"
+    return "ENTRY FIELDS (shown on listings and cards):\n" + "\n".join(rows), shape
+
+
+def collection_entry_prompt(cfg, *, title="", topic="", brief=None, reference=None, slug="",
+                            existing=None, instruction="", strategy="expand", image_types=None):
+    """Write a NEW entry of a collection, or rewrite an existing one, in the
+    collection's exact template. The reply is fitted to the template on the
+    way in (site_collections.fit_to_template) — the prompt makes that a no-op."""
+    site = site_context()
+    label = cfg["label"]
+    types = cfg["sections"]
+    where = f' at /{cfg["pathPrefix"]}/{slug}' if slug else f' under /{cfg["pathPrefix"]}/'
+    fields_text, fields_shape = _fields_block(cfg)
+    flexible = cfg["allowAdd"]
+
+    if existing is not None:
+        strategy_text = (
+            "override: rewrite every section freely, keeping the structure."
+            if (strategy or "").lower() == "override" else
+            "expand: keep what is strong, sharpen the rest, rewrite thin or generic text with concrete detail, "
+            "and fill thin lists."
+        )
+        opening = (
+            f'You are improving an existing {label.lower()}{where} titled "{title}".\n\n'
+            f"CURRENT SECTIONS (in order):\n{json.dumps(existing, indent=2, ensure_ascii=False)}\n\n"
+            + (f"CHANGE REQUESTED: {instruction}\n\n" if instruction else "")
+            + f"EDIT STRATEGY — {strategy_text}\n\n{ARRAY_RULE}"
+        )
+    else:
+        opening = (
+            f'You are writing a NEW {label.lower()} for {site["brand"] or "this website"}{where}'
+            + (f' titled "{title}"' if title else "")
+            + (f". It is about: {topic}" if topic else "")
+            + "."
+        )
+
+    reference_text = ""
+    if reference:
+        ref = json.dumps(reference, indent=2, ensure_ascii=False)
+        if len(ref) > 7000:
+            ref = ref[:7000] + "\n…(truncated)"
+        reference_text = (
+            f"STYLE REFERENCE — an existing published {label.lower()} on this site. Match its structure, depth, "
+            "tone, sentence length and NUMBER OF LIST ITEMS per section so the new page looks exactly like its "
+            "siblings. Do NOT copy its wording or facts — the topic is different.\n"
+            f"{ref}\n\n"
+        )
+
+    structure_rule = (
+        f"The page MUST have exactly {len(types)} sections, in exactly this order — no more, no fewer, no other types:"
+        if not flexible else
+        f'The page starts with these sections, in this order, and may add more sections ONLY of these types after them: {", ".join(flexible)}.'
+    )
+    example_sections = ", ".join(f'{{"type": "{t}", …}}' for t in types)
+    output_shape = {"title": "<the H1 / entry title>",
+                    "seo": {"title": "<50-60 chars>", "description": "<120-160 chars>",
+                            "keywords": ["<primary>", "<secondary>", "…"]}}
+    if fields_shape:
+        output_shape["fields"] = fields_shape
+    shape = json.dumps(output_shape, indent=2, ensure_ascii=False)[:-2] + f',\n  "sections": [{example_sections}]\n}}'
+
+    image_section_types = types if image_types is None else [t for t in types if t in image_types]
+    images_text = _image_rules(image_section_types) or (
+        "- Images: this collection's pages use no uploaded images in these sections — do not add "
+        "\"image_required\" or \"image_prompt\" anywhere.\n")
+
+    checklist = final_check(
+        RULE_JSON,
+        (f"\"sections\" has exactly {len(types)} items whose types are, in order: {', '.join(types)}."
+         if not flexible else
+         f"\"sections\" starts with {', '.join(types)} in that order; any extra sections are only: {', '.join(flexible)}."),
+        "Every section has all of its \"required\"/\"required list\" fields filled with real copy — no placeholders like \"Lorem\" or \"TBD\".",
+        ("\"fields\" is present and every field with options uses one of the listed options exactly." if fields_shape else
+         "There is no \"fields\" key (this collection has none)."),
+        "seo.title is 50–60 characters and seo.description is 120–160 characters, both containing the primary keyword.",
+        RULE_KEYWORD + " The first section's heading (the H1) contains it.",
+        "Lists have the same number of items as the style reference's matching section (or at least 3 when there is no reference).",
+        RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+    )
+
+    return f"""{opening}
+
+{_voice_block(site)}
+
+{_brief_block(brief, site)}
+
+STRUCTURE — {structure_rule}
+{_template_lines(cfg)}
+
+{reference_text}{fields_text + chr(10) + chr(10) if fields_text else ""}{SEO_PRINCIPLES}
+{images_text}
+OUTPUT FORMAT — {JSON_ONLY}
+{shape}
+Each section object is {{"type": "<type>", …its fields at the top level…}} — NOT {{"type": …, "content": {{…}}}}.
+{checklist}"""
 
 
 # --------------------------------------------------------------- one section
@@ -305,6 +455,12 @@ def section_prompt(*, content, section_type="", label="", path="", page_type="",
         "OUTPUT FORMAT — return ONLY this block's content object: the exact same keys and nesting as "
         "CURRENT CONTENT (keep fields you did not change), NOT wrapped in another key, NOT the whole page. "
         + JSON_ONLY
+        + final_check(
+            RULE_JSON,
+            "The reply has the SAME keys and nesting as CURRENT CONTENT — no new top-level keys, no wrapper key, every unchanged field kept.",
+            RULE_ARRAYS, RULE_KEYWORD if keyword else "The copy stays on this block's topic.",
+            RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+        )
     )
 
 
@@ -320,7 +476,8 @@ def page_assist_prompt(*, path, sections, seo=None):
     seo = seo or {}
     keyword = ((seo.get("keywords") or {}).get("primary") or "").strip()
     audit = section_coverage(keyword, sections)
-    audit["rules"] = seo_rule_checks(seo, keyword)
+    by_id = {r["id"]: r for r in seo_rule_checks(seo, keyword)}
+    audit["rules"] = [by_id[i] for i in SEO_CHECKS_FOR_PAGE_ASSIST]
     payload = {sid: {"label": (e or {}).get("label") or sid, "content": (e or {}).get("content") or {}}
                for sid, e in (sections or {}).items()}
 
@@ -336,6 +493,14 @@ def page_assist_prompt(*, path, sections, seo=None):
                     "use it consistently.")
 
     secondary = ", ".join((seo.get("keywords") or {}).get("secondary") or [])
+    _checklist = final_check(
+        RULE_JSON,
+        "Top-level keys are block ids copied EXACTLY from the input (e.g. " + ", ".join(f'"{k}"' for k in list(payload)[:3]) + ") — no other keys, no labels.",
+        'Each block maps DIRECTLY to its content object, with every field it had (unchanged fields kept) — never {"label": …, "content": …}.',
+        ("Every block listed as NOT mentioning the keyword now mentions it (or the reply explains in one line why that block cannot)." if keyword and missing else RULE_KEYWORD),
+        "Thin or empty lists the block's purpose needs were filled with real, specific entries.",
+        RULE_ARRAYS, RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+    )
     prompt = f"""You are auditing and improving every editable block on the {describe_page_kind(path, site=site)} at {_where(path)}.
 {f'Primary keyword: "{keyword}".' if keyword else ""}{f" Secondary keywords: {secondary}." if secondary else ""}{f' SEO title: "{seo.get("seoTitle")}".' if seo.get("seoTitle") else ""}
 
@@ -356,6 +521,7 @@ Fix only what each block needs. Change copy, not structure — except adding ent
 {ARRAY_RULE}
 
 OUTPUT FORMAT — a JSON object containing ONLY the blocks you changed, keyed by block id, each mapped DIRECTLY to that block's full content object (same keys and nesting as its "content" above — not wrapped in {{"label","content"}}). Omit blocks you left alone. If nothing needs changing, return {{}}. {JSON_ONLY}
+{_checklist}
 """
     return prompt, audit
 
@@ -369,31 +535,65 @@ SEO_FIELD_KEYS = (
 )
 
 
+SEO_CHECKS_FOR_PAGE_ASSIST = ("keyword-set", "title-keyword", "desc-keyword", "title-length", "desc-length", "schema-enabled")
+
+
 def seo_rule_checks(seo, keyword=None):
-    """Fast metadata rules shared by the SEO panel and the whole-page assist."""
-    seo = seo or {}
-    keyword = keyword if keyword is not None else ((seo.get("keywords") or {}).get("primary") or "")
-    title = seo.get("seoTitle") or ""
-    desc = seo.get("metaDescription") or ""
+    """Every mechanical SEO rule, in display order — the single list used by
+    the SEO panel (frontend lib/seoChecks.js mirrors it id-for-id), the
+    whole-page assist ("Other SEO rules") and the AI prompts. Each rule says
+    where it is fixed (tab + field) and how."""
     from .keywords import contains_keyword
-    rules = [
-        {"id": "keyword-set", "label": "Primary keyword is set", "pass": bool(keyword), "field": "keywords.primary"},
-        {"id": "title-keyword", "label": "SEO title contains the keyword", "field": "seoTitle",
-         "pass": bool(keyword and title and contains_keyword(title, keyword)), "skip": not keyword},
-        {"id": "title-length", "label": "SEO title is 30–60 characters", "field": "seoTitle",
-         "pass": 30 <= len(title) <= 60},
-        {"id": "desc-keyword", "label": "Meta description contains the keyword", "field": "metaDescription",
-         "pass": bool(keyword and desc and contains_keyword(desc, keyword)), "skip": not keyword},
-        {"id": "desc-length", "label": "Meta description is 120–160 characters", "field": "metaDescription",
-         "pass": 120 <= len(desc) <= 160},
-        {"id": "intent-set", "label": "Search intent is set", "field": "searchIntent",
-         "pass": seo.get("searchIntent") in SEARCH_INTENTS},
-        {"id": "indexable", "label": "Page can be indexed", "field": "robots.index",
-         "pass": (seo.get("robots") or {}).get("index", True) is not False},
-        {"id": "og-image", "label": "Social share image is set", "field": "social.ogImage",
-         "pass": bool((seo.get("social") or {}).get("ogImage"))},
+    seo = seo or {}
+    keyword = (keyword if keyword is not None else ((seo.get("keywords") or {}).get("primary") or "")).strip()
+    title = (seo.get("seoTitle") or "").strip()
+    desc = (seo.get("metaDescription") or "").strip()
+    social = seo.get("social") or {}
+    robots = seo.get("robots") or {}
+    kw = seo.get("keywords") or {}
+
+    def rule(rule_id, label, passed, field, tab, fix, skip=False):
+        return {"id": rule_id, "label": label, "pass": bool(passed), "skip": bool(skip),
+                "field": field, "tab": tab, "fix": fix}
+
+    return [
+        rule("keyword-set", "Primary keyword is set", keyword, "keywords.primary", "essentials",
+             "Add the one phrase this page should rank for (Ask AI → Find keywords can choose it)."),
+        rule("title-set", "SEO title is set", title, "seoTitle", "essentials",
+             "Write an SEO title — it is the clickable headline in search results."),
+        rule("title-length", "SEO title is 50–60 characters", 50 <= len(title) <= 60, "seoTitle", "essentials",
+             "Tighten or expand the SEO title to 50–60 characters, keyword first."),
+        rule("title-keyword", "SEO title contains the keyword", keyword and title and contains_keyword(title, keyword),
+             "seoTitle", "essentials", "Work the primary keyword into the SEO title, near the start.", skip=not keyword),
+        rule("desc-set", "Meta description is set", desc, "metaDescription", "essentials",
+             "Write a meta description — the two lines under the title in search results."),
+        rule("desc-length", "Meta description is 120–160 characters", 120 <= len(desc) <= 160,
+             "metaDescription", "essentials", "Adjust the meta description to 120–160 characters."),
+        rule("desc-keyword", "Meta description contains the keyword", keyword and desc and contains_keyword(desc, keyword),
+             "metaDescription", "essentials", "Work the primary keyword into the meta description.", skip=not keyword),
+        rule("secondary", "At least 3 secondary keywords", len([k for k in kw.get("secondary") or [] if str(k).strip()]) >= 3,
+             "keywords.secondary", "essentials", "Add 3–8 related phrases the page also covers."),
+        rule("intent-set", "Search intent is set", seo.get("searchIntent") in SEARCH_INTENTS, "searchIntent",
+             "essentials", "Choose what a searcher wants: informational, commercial, transactional, navigational or local."),
+        rule("canonical", "Canonical URL is set", seo.get("canonicalSelf", True) is not False or (seo.get("canonicalUrl") or "").strip(),
+             "canonicalUrl", "essentials", "Leave the canonical empty to use this page's own URL, or set the preferred URL."),
+        rule("og-title", "Social title is available", (social.get("ogTitle") or title), "social.ogTitle", "sharing",
+             "Set an SEO title (social reuses it) or a dedicated social title."),
+        rule("og-desc", "Social description is available", (social.get("ogDescription") or desc), "social.ogDescription",
+             "sharing", "Set a meta description (social reuses it) or a dedicated social description."),
+        rule("og-image", "Social share image is set", social.get("ogImage"), "social.ogImage", "sharing",
+             "Upload a 1200×630 social share image."),
+        rule("og-alt", "Social image has alt text", (not social.get("ogImage")) or social.get("ogImageAlt"),
+             "social.ogImageAlt", "sharing", "Describe the social image in one short sentence."),
+        rule("indexable", "Page can be indexed", robots.get("index", True) is not False, "robots.index", "sharing",
+             "Turn “Allow indexing” back on — this page is hidden from search results."),
+        rule("followable", "Links on the page are followed", robots.get("follow", True) is not False, "robots.follow",
+             "sharing", "Turn “Follow links” back on."),
+        rule("sitemap", "Included in the sitemap", (seo.get("sitemap") or {}).get("include", True) is not False,
+             "sitemap.include", "sharing", "Turn “Include in sitemap” back on."),
+        rule("schema-enabled", "Structured data (schema) is enabled", (seo.get("schema") or {}).get("enabled", True) is not False,
+             "schema.enabled", "advanced", "Re-enable structured data in Advanced."),
     ]
-    return rules
 
 
 def seo_prompt(*, path, seo, failing=None, page_text=""):
@@ -424,6 +624,15 @@ def seo_prompt(*, path, seo, failing=None, page_text=""):
     failing = failing or []
     issues = "\n".join(f"- {f.get('label')}" + (f" — fix: {f['fix']}" if f.get("fix") else "") for f in failing)
     excerpt = (page_text or "").strip()[:2500]
+    _checklist = final_check(
+        "Your reply has the plain-text audit FIRST, then exactly ONE ```json block, and nothing after it.",
+        "The ```json block uses only these keys: " + ", ".join(SEO_FIELD_KEYS) + " — and only for fields that should change.",
+        "seoTitle is 50–60 characters and starts with (or contains early) the primary keyword.",
+        "metaDescription is 120–160 characters, contains the primary keyword and ends with a reason to click.",
+        "Every automated check listed as failing above is fixed by your json block, or your audit says why it should stay.",
+        "searchIntent (if present) is one of: " + ", ".join(SEARCH_INTENTS) + ".",
+        RULE_FACTS, RULE_URLS,
+    )
     return f"""You are an expert SEO editor auditing the {describe_page_kind(path, site=site)} at {_where(path)}{f" for {site['brand']}" if site["brand"] else ""}.
 
 CURRENT SEO FIELDS:
@@ -446,7 +655,8 @@ Do this in order:
 {{}}
 ```.
 {SEO_PRINCIPLES}
-The ```json block is pasted back into the CMS as-is — real changes only, no placeholders."""
+The ```json block is pasted back into the CMS as-is — real changes only, no placeholders.
+{_checklist}"""
 
 
 def keyword_prompt(*, path, page_text="", seo=None, brief=None):
@@ -457,6 +667,13 @@ def keyword_prompt(*, path, page_text="", seo=None, brief=None):
     brief = brief or {}
     excerpt = (page_text or "").strip()[:2500]
     known = (seo.get("keywords") or {})
+    _checklist = final_check(
+        "Exactly ONE ```json block with exactly four keys: primaryKeyword, secondaryKeywords, variations, searchIntent.",
+        "primaryKeyword is ONE phrase of 2–5 words the visible content can actually rank for.",
+        "secondaryKeywords has 4–8 phrases and variations has 3–6 phrases, all short and different from each other.",
+        "searchIntent is one of: " + ", ".join(SEARCH_INTENTS) + ".",
+        "No invented search volumes or difficulty numbers.",
+    )
     return f"""You are doing keyword research for the {describe_page_kind(path, site=site)} at {_where(path)}{f" for {site['brand']}" if site["brand"] else ""}.
 
 {_brief_block({**brief, "keyword": brief.get("keyword") or known.get("primary")}, site)}
@@ -470,11 +687,19 @@ Pick keywords this page can realistically rank for:
 Prefer specific, lower-competition phrases over broad head terms. Do not invent search volumes.
 
 Explain your choice in 2–4 plain sentences, then output ONE fenced block labelled ```json with exactly those four keys.
-Never output anything after the json block."""
+Never output anything after the json block.
+{_checklist}"""
 
 
 def copy_structure_prompt():
     """Reproduce an existing page/screenshot as page JSON (structure + copy verbatim)."""
+    _checklist = final_check(
+        RULE_JSON,
+        "Headings, body copy, list items and button text are VERBATIM from the original — nothing rewritten, summarised or added.",
+        "Sections are in the original top-to-bottom order, one per visual block.",
+        'Every image in the original has "image_required": true and a concrete "image_prompt".',
+        RULE_PLAIN, RULE_URLS,
+    )
     return f"""You are given an existing web page or component (HTML, JSX, markup, or a screenshot description). Reproduce its STRUCTURE and COPY as CMS page JSON — do not redesign or rewrite it.
 
 {JSON_ONLY}
@@ -494,4 +719,4 @@ def copy_structure_prompt():
 
 Section field reference:
 {json.dumps(SECTION_SCHEMA, indent=2)}
-"""
+{_checklist}"""
