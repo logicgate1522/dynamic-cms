@@ -37,6 +37,7 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R16 | **SEO and AI parity is fixed.** The SEO panel opens on **✦ Ask AI** with the audit prompt already built, shows the score bar on every tab, and lists all 18 checks (`lib/seoChecks.js`, mirroring `prompts.seo_rule_checks`) with a fix for each. The whole-page AI assist builds its prompt when opened, shows KEYWORD COVERAGE (%, sentence, a chip per section) and OTHER SEO RULES (6 rules, ✓/✕), stays live after Apply, and covers CMS-page sections too. Don't rebuild these UIs; they ship in the kit. |
 | R18 | **Typing never loses focus.** Every list that contains editable fields is keyed by the map **index** (`key={i}`), never by the item's own text (`key={item.title}`, `` key={`${item.name}-${i}`} ``). A text-derived key changes on every keystroke, React re-creates the element and the cursor is gone. `check:inline` fails on it, and the acceptance test types into list fields and asserts the element is never re-created. The kit also restores focus if a re-mount ever happens, but that is a safety net, not permission. |
 | R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
+| R20 | **Responsive on every screen.** Converting a section must keep its behaviour at every width: phones (≈390px), tablets (≈768px), laptops (≈1280px) and large screens (≥1920px — content stays inside a max-width container, nothing stretches edge to edge, type and images scale up sensibly). No horizontal scroll at any width. The admin UI is responsive too: on phones the bar collapses behind "More" and panels fit the screen. The acceptance test checks visitors and admins at 390px and 1920px. |
 | R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. |
 
 ---
@@ -117,7 +118,8 @@ images, links, forms, existing SEO/metadata and analytics. Output one table:
 the admin bar its SEO button.
 
 **P3 — Convert every section (§3 recipe).** One component per commit. After
-each one, `npm run check:inline` must pass for that file.
+each one, `npm run check:inline` must pass for that file, and the section
+must still work at 390px, 768px, 1280px and 1920px (R20).
 
 **P4 — Forms (§5.4).**
 
@@ -161,7 +163,8 @@ definitions, per-route `seo/<path>/`, and `sitemap.extraPaths`. Without
 non-empty rows unless `--force`.
 
 **P8 — Verify.** Run the four checks in the Definition of done. Fix and rerun
-until all four are green, then report the acceptance output verbatim.
+until all four are green. Then walk the §13 checklist (one line per rule,
+R1–R20) and report it ticked, together with the acceptance output verbatim.
 
 ---
 
@@ -266,7 +269,10 @@ Rules:
 10. **Keys:** any `.map(...)` that renders editable fields uses the index as
     the key (R18). Never use the item's text or a value an admin can edit.
 11. Stateful UI such as accordions, carousels and search filters must keep
-    working with editing on. Clicking editable text never triggers the parent
+    working with editing on.
+12. **Responsive (R20):** after converting, check the section at 390px,
+    768px, 1280px and 1920px. Same behaviour as before, no horizontal scroll,
+    and content held in its max-width container on large screens. Clicking editable text never triggers the parent
     link or toggle, because the kit stops propagation; Cmd/Ctrl-click follows
     the link.
 
@@ -826,6 +832,10 @@ unclosed/invalid JSON-LD, marking up invisible content.
 
 ## §11 — Anti-patterns (each one fails review)
 
+- Rewriting, "improving" or re-implementing a kit file instead of installing it
+  verbatim (R1).
+- Stopping to ask about something this spec already decides (R12). Pick the
+  stated default and note it in the report.
 - A token in `localStorage`, or `isAdmin` derived from client storage (R4).
 - A modal or "Edit mode → form → Save" as the main way to change copy (R2).
 - An editor that writes live data, or a component with its own Save button (R3).
@@ -848,6 +858,10 @@ unclosed/invalid JSON-LD, marking up invisible content.
   keystroke (R18).
 - Server-side CMS fetches without `X-CMS-Frontend`, or the secret in browser
   code (R19).
+- A section that breaks, overflows or stretches edge to edge at phone or
+  large-screen widths, or admin panels wider than a phone screen (R20).
+- Visitors shown any admin markup, or extra client fetches for content
+  (R8). Image URLs typed into text fields instead of uploaded (R11).
 - A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI not first,
   no score bar, fewer than 18 checks, coverage that is stale after Apply
   (R16).
@@ -860,26 +874,48 @@ unclosed/invalid JSON-LD, marking up invisible content.
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly (rules R1–R12). Kit: dynamic-cms/frontend-kit.
+exactly — every rule R1–R20, no exceptions. Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
-Do: <Autonomous mode | Input router for: <files> | Paste to Build: "<brief>">
-Finish only when build + check:inline + check:sections + acceptance.mjs all pass;
-paste the acceptance output in the report.
+Do: <Autonomous mode | Input router for: <files>>
+Finish only when build + check:inline + check:sections + acceptance.mjs all pass,
+then walk the §13 checklist line by line and paste it, ticked, with the
+acceptance output in your report.
 ```
 
-## §13 — Final checklist
+## §13 — Final checklist (every rule, one more time)
 
-- [ ] Kit installed verbatim; only the MANIFEST ADAPT files changed (R1)
+Walk this list before reporting. Every line must be true. Each line names the
+gate that proves it; a line with no automatic gate is yours to verify by hand.
+
+**The rules**
+- [ ] **R1** The kit is installed verbatim; only the MANIFEST's ADAPT files changed. (review)
+- [ ] **R2** Every visible string in a CMS component is `<E.Text>`; images, lists and links use `E.Image` / `E.Item` + `E.Add` / `E.Link`. No modal-first editing. (`check:inline`, acceptance "click-and-type")
+- [ ] **R3** Every edit saves as a draft; only Publish makes it live. (acceptance "public data unchanged before publish")
+- [ ] **R4** Session cookie + CSRF only; no token in browser storage. (acceptance "session cookie…")
+- [ ] **R5** No prompt text in the frontend; prompts come from `ai/*` endpoints. (review: grep the frontend for prompt wording)
+- [ ] **R6** Every pasted AI/JSON reply goes through `ai/normalize/` or a server paste endpoint. (acceptance "AI paste normalised")
+- [ ] **R7** The webhook route is installed, and visitors see a publish without a rebuild. (acceptance "visitor HTML updated")
+- [ ] **R8** Visitors get zero CMS UI and no extra content fetches. (acceptance "visitor: no admin bar")
+- [ ] **R9** Defaults are the original copy, verbatim; the page looks identical before any edit. (review: compare screenshots)
+- [ ] **R10** No `dangerouslySetInnerHTML` for CMS/AI text. (review: grep)
+- [ ] **R11** Images are uploaded, never typed as URLs. (review)
+- [ ] **R12** No clarifying questions were needed; defaults are stated in the report. (report)
+- [ ] **R13** Collections are decided and seeded; "＋ New …" appears only on their index pages; one-off pages are structure-locked. (acceptance "collections…", "structure is locked")
+- [ ] **R14** New entries follow the template exactly, like their siblings. (acceptance "new entry follows the collection template exactly")
+- [ ] **R15** Edit tools are hover-only and never cover content; the bar minimises. (acceptance "edit tools are hidden…", "admin bar minimises")
+- [ ] **R16** The SEO panel opens on Ask AI with its prompt built and shows 18 checks; the whole-page assist shows coverage %, chips and 6 rules, live after Apply. (acceptance SEO + AI assist checks)
+- [ ] **R17** The `--cms-*` theme variables are set to the site palette. (review)
+- [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus" + "never re-created")
+- [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (review; acceptance shows no 429s)
+- [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
+
+**Setup**
 - [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`
 - [ ] Every route: `generateMetadata` via `pageMetadata`, plus `<PageSeo>`
-- [ ] Collections decided and seeded (R13): each `sections` equals its existing detail pages; one-off pages have none
-- [ ] `--cms-*` theme variables set to the site palette (R17)
-- [ ] Every section uses the §3 recipe; `check:inline` passes (no hard-coded copy, no text-derived list keys)
-- [ ] `middleware.js` and `lib/cms.js` from the kit (server requests carry `X-CMS-Frontend`)
-- [ ] Registry matches the backend; `check:sections` passes
+- [ ] Registry matches the backend (`check:sections` passes)
 - [ ] Forms are definition-driven, with editable copy and a honeypot
 - [ ] CMS pages and dynamic blog posts render through `DynamicPageAdmin`
 - [ ] Sitemap and robots honour SEO flags; redirects run in middleware; `sitemap.extraPaths` seeded
-- [ ] `SiteSettings.ai` seeded (brand voice, audience, location, page kinds, rules)
+- [ ] `SiteSettings.ai` and `SiteSettings.collections` seeded
 - [ ] Env: `REVALIDATE_SECRET` on both sides, `FRONTEND_REVALIDATE_URL`, CORS + CSRF trusted origins
 - [ ] `next build` is clean; `acceptance.mjs` passes every check (output pasted in the report)

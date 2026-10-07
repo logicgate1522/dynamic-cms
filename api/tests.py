@@ -1960,3 +1960,20 @@ class ThrottleExemptionTests(AdminAuthMixin, APITestCase):
         codes = [self.client.post("/api/forms/contact/submit/", {"email": "a@b.co"}, format="json",
                                   HTTP_X_CMS_FRONTEND="site-secret").status_code for _ in range(4)]
         self.assertIn(429, codes)
+
+
+class IntegrationSpecTests(APITestCase):
+    """FRONTEND_INTEGRATION_PROMPT.md must restate every rule: in the rules
+    table (§0), as an anti-pattern (§11) and in the final checklist (§13)."""
+
+    def test_every_rule_is_reiterated(self):
+        import re
+        from pathlib import Path
+        spec = (Path(__file__).resolve().parent.parent / "FRONTEND_INTEGRATION_PROMPT.md").read_text()
+        sections = {p.split("\n", 1)[0][:6].strip("# ").strip(): p for p in re.split(r"\n(?=## )", spec)}
+        rules = sorted({int(n) for n in re.findall(r"\| R(\d+) \|", sections["§0"])})
+        self.assertEqual(rules, list(range(1, len(rules) + 1)), "rules must be numbered R1..Rn without gaps")
+        for n in rules:
+            for where in ("§0", "§11", "§13"):
+                self.assertRegex(sections[where], rf"\bR{n}\b", f"R{n} is missing from {where}")
+        self.assertIn(f"R1–R{rules[-1]}", sections["§12"], "the fill-in prompt must name every rule")

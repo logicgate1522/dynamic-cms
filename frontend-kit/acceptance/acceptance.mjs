@@ -351,6 +351,37 @@ try {
         await closeDrawer().catch(() => {});
     }
 
+    /* ---------- 9b. Responsive on every screen (R20) ---------- */
+    const pagesToCheck = [PAGE, ...(DYNAMIC_PAGE ? [DYNAMIC_PAGE] : [])];
+    for (const width of [390, 1920]) {
+        const viewer = await browser.newPage({ viewport: { width, height: 900 } });
+        for (const path of pagesToCheck) {
+            await viewer.goto(`${SITE}${path}`);
+            await viewer.waitForLoadState("networkidle").catch(() => {});
+            const overflow = await viewer.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+            check(`responsive: no horizontal scroll at ${width}px on ${path}`, overflow <= 1, overflow > 1 ? `${overflow}px wider than the screen` : "");
+        }
+        await viewer.close();
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${SITE}${PAGE}`);
+    await bar().waitFor({ timeout: 15000 });
+    const barBox = await bar().boundingBox();
+    check("responsive: admin bar fits a phone screen", !!barBox && barBox.x >= 0 && barBox.x + barBox.width <= 391);
+    const more = bar().getByRole("button", { name: /More/ });
+    check("responsive: secondary admin actions collapse behind “More” on phones", (await more.count()) === 1);
+    if (await more.count()) {
+        await more.click();
+        const seo = bar().getByRole("button", { name: "SEO", exact: true });
+        if (await seo.count()) {
+            await seo.click();
+            const panel = await page.locator('[role="dialog"] > div').last().boundingBox();
+            check("responsive: panels fit a phone screen", !!panel && panel.width <= 391, panel ? `${Math.round(panel.width)}px` : "no panel");
+            await closeDrawer();
+        }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     /* ---------- 10. Full-page admin still works ---------- */
     for (const path of ["/admin", "/admin/pages", "/admin/seo", "/admin/images", "/admin/sitemap", "/admin/settings"]) {
         await page.goto(`${SITE}${path}`);
