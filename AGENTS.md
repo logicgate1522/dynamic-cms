@@ -96,6 +96,8 @@ instructions the docs already answer.
   gap. Prefer an automatic gate (`check-inline.mjs`, acceptance, site-audit,
   launch-check) over "(review)".
 - Record notable changes in `UPGRADE_NOTES.md`.
+- **Git:** this repo has one branch, `main`. Commit and push to `main`
+  directly; never create feature branches or pull requests.
 
 ## Product principles (for any new feature)
 
