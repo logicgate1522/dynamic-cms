@@ -1,3 +1,65 @@
+# Upgrade Notes — Prometheus parity, collections, theming
+
+A second pass against the Prometheus editor.
+
+**SEO panel**
+- Opens on **✦ Ask AI**, with the audit prompt already built.
+- A score bar shows on every tab.
+- 18 checks, each with a fix and a jump to its field (single list:
+  `prompts.seo_rule_checks` ↔ `lib/seoChecks.js`).
+- Per-tab issue counts and Auto-fill for empty fields.
+
+**Whole-page AI assist**
+- Builds its prompt on open.
+- The KEYWORD COVERAGE card shows a %, a sentence and a ✓ chip per section,
+  and stays live after Apply.
+- OTHER SEO RULES lists 6 rules with ✓/✕.
+- Covers CMS-page sections too.
+
+**Prompts**
+- Every prompt ends with a FINAL CHECK that repeats its hard rules (enforced
+  by tests).
+
+**Collections replace the on-site page builder**
+- New `SiteSettings.collections`: pages that share one template and are
+  listed on an index page.
+- "＋ New <item>" appears only there, as a blank draft from the template
+  (copying a sibling's fields and list lengths) or written with AI using a
+  strict template prompt with a sibling as style reference.
+- Entry settings: publish, title, URL (live renames add a 301), fields, an
+  AI rewrite as drafts, and delete.
+- One-off pages can no longer be restructured from the site. The full
+  builder stays in Dashboard → Pages.
+
+**Edit tools never cover the page**
+- Block pills, item tools, link and add buttons, and image chips appear on
+  hover only.
+- The admin bar can be minimised.
+
+**Theming**
+- The admin UI reads five `--cms-*` CSS variables (`app/cms.css`).
+
+## Moving forward
+
+```bash
+git pull
+./venv/bin/python manage.py test api        # 172 pass, no migrations
+```
+
+Frontend:
+- re-sync `frontend-kit/src` (new: `CollectionPanel.jsx`, `lib/seoChecks.js`;
+  removed: `PageBuilder.jsx`)
+- set the `--cms-*` variables
+- add `collections` to your seed and run it (it now fills any missing
+  top-level settings block)
+- re-run `acceptance.mjs`
+
+New endpoints:
+- `collections/…` (see `FRONTEND_INTEGRATION_PROMPT.md` §6.2)
+- `starters` in `ai/section-schema/`
+
+---
+
 # Upgrade Notes — inline editing + AI assist (`feat/inline-editing-ai-assist`)
 
 This brings back what the Prometheus editor had and the first dynamic-cms

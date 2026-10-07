@@ -31,6 +31,11 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R10 | **Plain text only.** Never `dangerouslySetInnerHTML` for CMS or AI text. Multi-line text uses `<E.Text multiline />`, and paragraphs come from blank-line splits. |
 | R11 | **Images are uploaded, never typed.** Use `uploadImage()` / `<E.Image>` / `SlotUpload`. No raw image-URL text inputs. |
 | R12 | **Don't ask clarifying questions** unless an action is destructive or irreversible. Pick the default given here and state it in your report. |
+| R13 | **Only collections are buildable from the site.** A *collection* is a set of pages that share ONE section structure and are listed on an index page (blog articles on /blog, services on /services, projects on /projects). Configure them in `SiteSettings.collections` (§6.3). "＋ New …" appears only on a collection's index page, and every entry uses the collection template. One-off pages (home, about, contact, legal…) are NOT collections: their structure is fixed, and admins edit copy, never layout. Never add a free-form "new page" or "page builder" button to the site. |
+| R14 | **New entries must look exactly like their siblings.** A collection's `sections` must equal, in order, the section types of the existing detail pages. Blank entries copy the newest published sibling's fields and list lengths; AI entries are fitted to the template server-side. Never hand-design a new entry layout. |
+| R15 | **Edit tools never cover the page.** Block pills, item tools, link 🔗 buttons, "＋ Add" buttons and "Replace image" chips are `cms-hover-tools`: hidden until their own block / item is hovered or focused (always shown on touch screens). The admin bar can be minimised. Never add an always-visible overlay on top of content. |
+| R16 | **SEO and AI parity is fixed.** The SEO panel opens on **✦ Ask AI** with the audit prompt already built, shows the score bar on every tab, and lists all 18 checks (`lib/seoChecks.js`, mirroring `prompts.seo_rule_checks`) with a fix for each. The whole-page AI assist builds its prompt when opened, shows KEYWORD COVERAGE (%, sentence, a chip per section) and OTHER SEO RULES (6 rules, ✓/✕), stays live after Apply, and covers CMS-page sections too. Don't rebuild these UIs; they ship in the kit. |
+| R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. |
 
 ---
 
@@ -63,7 +68,10 @@ images, links, forms, existing SEO/metadata and analytics. Output one table:
 **P1 — Install the kit (R1).**
 1. Copy `frontend-kit/src/**` into `src/`. Do not overwrite site files that
    aren't in the manifest; if a path collides, stop and report it.
-2. Set `SITE_NAME` in `src/lib/brand.js` (or `NEXT_PUBLIC_SITE_NAME`).
+2. Set `SITE_NAME` in `src/lib/brand.js` (or `NEXT_PUBLIC_SITE_NAME`), and set
+   the five `--cms-*` theme variables at the top of `src/app/cms.css` to the
+   site's palette: accent = the site's primary action color, bar = its darkest
+   brand surface (R17).
 3. Copy `frontend-kit/scripts/check-inline.mjs` and `check-sections.mjs` to
    `scripts/` and add these npm scripts:
    `"check:inline": "node scripts/check-inline.mjs src"` and
@@ -111,10 +119,31 @@ each one, `npm run check:inline` must pass for that file.
 
 **P4 — Forms (§5.4).**
 
-**P5 — CMS pages and blog.** Catch-all route for CMS pages, using
+**P5 — Collections, CMS pages and blog.** First decide the collections (R13).
+A page type IS a collection when there is an index page listing entries AND
+(two or more detail pages share one section structure, OR it is a blog/news/
+projects-style list that will grow). For each one:
+1. Make every detail page a CMS page (`body_mode: "dynamic"`) rendered by the
+   kit's renderer at `/<pathPrefix>/<slug>`, including its existing entries
+   (seed them).
+2. Configure it in `SiteSettings.collections` (§6.3, seeded in P7):
+   - `sections` = the existing detail pages' section types, in order
+   - `allowAdd` = `[]` for fixed layouts (service, project, location pages);
+     body types (`rich_text`, `image_text`, `faq`, `cta`) only for long-form
+     articles
+   - `fields` = whatever the listing cards show that isn't a section
+     (excerpt, category with its exact options, cover image)
+   - `listingNote` = where admins must link a new entry from, when the index
+     page doesn't list entries automatically
+3. Make the index page list entries from the CMS when the site's design
+   allows it (blog index: `GET blog/`; content collections:
+   `GET content/pages/` filtered by prefix). Otherwise rely on `listingNote`.
+4. One-off pages stay one-off: no collection, locked structure.
+
+Then the catch-all route for CMS pages, using
 `components/dynamic/DynamicContentPage.jsx` (ADAPT), which wraps the
 server-rendered `DynamicPageRenderer` in `DynamicPageAdmin`. That gives admins
-inline section editing, per-section AI, and the Page builder. Dynamic blog
+inline section editing, per-section AI, and (on collection entries) the collection panel. Dynamic blog
 posts work the same way with `kind="blog"`.
 
 **P6 — Sitemap, robots, redirects.** `app/sitemap.js` builds from static routes,
@@ -124,8 +153,9 @@ calls `redirects/resolve/?path=`. Add the static routes to
 `SiteSettings.sitemap.extraPaths` so the backend sitemap report covers them.
 
 **P7 — Seed.** A `scripts/seed-cms.mjs` that fills empty CMS rows: site
-settings, **including the `ai` block (§6.3)**, form definitions, per-route
-`seo/<path>/`, and `sitemap.extraPaths`. It must be idempotent and skip
+settings, **including the `ai` and `collections` blocks (§6.3)**, form
+definitions, per-route `seo/<path>/`, and `sitemap.extraPaths`. Without
+`--force` it writes only the top-level settings blocks that are still empty. It must be idempotent and skip
 non-empty rows unless `--force`.
 
 **P8 — Verify.** Run the four checks in the Definition of done. Fix and rerun
@@ -243,34 +273,54 @@ Rules:
 The kit already provides all of this. Your job is to keep it working on every
 route:
 
-- **Floating admin bar** (bottom centre; collapses behind "More" on phones):
+- **Floating admin bar** (bottom centre; collapses behind "More" on phones;
+  "–" minimises it to a small "CMS" pill in the corner):
   - Editing toggle, plus the Publish menu (this page / everything / discard,
     with a list of pending drafts).
-  - **AI assist** (whole page) with a keyword-coverage badge.
+  - **✦ AI assist** (whole page) with a live keyword-coverage badge.
   - **SEO** (when the route has `<PageSeo>`).
-  - **Page builder** (on CMS pages).
-  - **+ New page**, **Site tools** (settings, images, form inbox, blog,
-    redirects, sitemap — the same panels as `/admin/*`), **Dashboard**, and an
-    account menu with Sign out.
+  - **＋ New <item>**, ONLY on a collection's index page. **<Item> settings**
+    ONLY on a collection entry. Nothing on one-off pages.
+  - **Site tools** (settings, images, form inbox, blog, redirects, sitemap —
+    the same panels as `/admin/*`), **Dashboard**, and an account menu with
+    Sign out.
 - **Inline:** click text and type. Enter ends a single-line field, Esc
-  reverts, and paste is plain text. Item tools (↑ ↓ ⧉ ✕) appear on hover or
-  focus. Images get "Replace image". Links get 🔗.
+  reverts, and paste is plain text. Hover tools (R15): item tools (↑ ↓ ⧉ ✕),
+  "＋ Add", 🔗 link editor, "Replace image", and the block's "All fields" pill.
 - **"All fields" pill** per block: tabs for All fields, **AI assist** (prompt
   → paste → preview → apply as draft), **JSON** (copy / paste / validate,
   normalised), and **History** (revisions, revert).
-- **SEO panel** with tabs:
-  - Essentials, with a snippet preview
-  - Sharing & indexing
-  - Advanced
-  - Checks (jump to field)
-  - **AI**: an SEO audit prompt and a keyword research prompt, each pasted
-    back through `ai/normalize`
-  - History
-- **CMS pages**: hover tools per section (move, duplicate, delete, add above or
-  below with a type picker, per-section AI, fields), plus the Page builder:
-  - AI tab: build-prompt, then paste-to-edit as drafts
-  - Images tab: required slots
-  - Page tab: title, publish/unpublish, delete
+- **SEO panel** — tabs in this order:
+  - **✦ Ask AI** (the default tab): the audit prompt is pre-built with every
+    field, the failing checks and their fixes, and the visible page text.
+    "Find keywords" switches to the keyword-research prompt. Both are pasted
+    back through `ai/normalize` and saved. A button leads on to the
+    whole-page AI assist.
+  - Essentials (with a snippet preview), Sharing & indexing, Advanced — each
+    shows its failing-check count and offers Auto-fill for empty fields.
+  - Checks: the 18 rules, with failing ones first, each showing its fix and
+    jumping to its field.
+  - History.
+  - A score bar sits above the tabs on every tab.
+- **Whole-page AI assist** (layout fixed by R16):
+  - KEYWORD COVERAGE card: the % pill, "“kw” appears in N of M sections
+    below.", and a chip per section (✓ green = has the keyword, grey =
+    missing, dashed = shared block not counted)
+  - OTHER SEO RULES: 6 ✓/✕ rules, plus "Open SEO panel" when any fail
+  - the prompt (built on open), Copy, the paste box, and "Apply to every
+    section (as drafts)"
+  - the coverage card recomputes live from the page
+- **Collection panel:**
+  - **＋ New <item>**: a title, then either "Start from the template" (a blank
+    draft that copies a sibling's layout) or "Write it with AI" (strict
+    template prompt → paste → draft). Either way it opens the new draft.
+  - **All <items>**: open, publish/unpublish, delete.
+  - **This <item>** (on an entry): publish toggle, title, URL (a live rename
+    adds a 301 redirect), configured fields, "Rewrite with AI" (applied as
+    drafts and fitted to the template), and delete.
+- **CMS pages:** inline editing, per-section ✦ AI / Fields / JSON. ↑ ↓ ＋ ✕
+  appear only on collection entries whose `allowAdd` includes that section
+  type.
 - **Tooling hooks:** each editable span has `data-cms-block` (the useCms name,
   or `section:<id>`) and `data-cms-path`. The admin bar root has
   `data-cms-adminbar`. Don't remove them; the acceptance test depends on them.
@@ -328,7 +378,7 @@ Use the §3 recipe. Output the component, its `useCms` name, and its sample
   - `body_mode === "dynamic"` → the dynamic renderer inside
     `DynamicPageAdmin kind="blog"`.
   - Legacy bodies keep their existing pipeline.
-- Admins create posts from **+ New page** (blog kind) or `/admin/blog`.
+- Admins create posts from **＋ New article** on the blog index (the blog collection) or from `/admin/blog`.
 
 ---
 
@@ -369,6 +419,19 @@ returns 403.
 | GET | `home/<name>/history/` · POST `…/revert/<id>/` | admin | Revisions |
 | GET | `home/schemas/` | public | ComponentSchema field contracts |
 
+**Collections** (R13, R14).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `collections/` | admin | Every configured collection (with entry `count`) |
+| GET | `collections/for-path/?path=` | admin | `{collection, role: "index"\|"entry"\|null, entry?}` for a site path |
+| GET | `collections/<key>/entries/` | admin | Entries, newest first (drafts included) |
+| POST | `collections/<key>/entries/` | admin | Body `{title, slug?, fields?, raw?}`: a blank template draft, or an AI reply (`raw`) fitted to the template |
+| GET | `collections/<key>/prompt/?title&topic&slug&<brief>` | admin | Strict new-entry prompt: exact structure, a sibling as STYLE REFERENCE, field options, FINAL CHECK |
+| GET | `collections/<key>/entries/<slug>/prompt/?instruction&strategy` | admin | Rewrite prompt for one entry |
+| POST | `collections/<key>/entries/<slug>/apply/` | admin | Body `{raw}`: AI rewrite, fitted to the template, saved as drafts |
+| PATCH/DELETE | `collections/<key>/entries/<slug>/` | admin | Body `{title?, slug?, status?, fields?}` (publish guard applies; renaming a live entry adds a 301) |
+
 **Drafts.**
 
 | Method | Path | Auth | Purpose |
@@ -392,7 +455,7 @@ returns 403.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `ai/section-schema/` | public | Section types (sync `SECTION_REGISTRY`) |
+| GET | `ai/section-schema/` | public | Section types (sync `SECTION_REGISTRY`), plus `starters`: placeholder content per type |
 | GET | `ai/new-page-prompt/?title&topic&path&page_type&host_kind&sections&<brief>` | admin | New page prompt |
 | GET | `content/<key>/build-prompt/?mode=create\|edit&strategy=expand\|override&<brief>` (and `blog/<slug>/…`) | admin | Prompt for an existing page |
 | POST | `ai/section-prompt/` | admin | Body `{content, section_type?, label?, path?, fields?, keyword?, strategy?, instruction?}` — prompt for one block |
@@ -462,6 +525,31 @@ Blog posts mirror all of these under `blog/<slug>/…`.
     "pageKinds": { "services": "Service page", "blog": "Blog article" },   // path prefix -> label
     "extraRules": ["House style rules, one per string"]
   },
+  // R13 — pages admins can create from the site. Key = lowercase-hyphen id.
+  "collections": {
+    "services": {
+      "label": "Service", "plural": "Services",
+      "hostKind": "content",                 // "content" (ContentPage) | "blog" (BlogPost, one per site)
+      "indexPath": "services",               // the listing page that shows "＋ New service"
+      "pathPrefix": "services",              // entries live at /services/<slug>
+      "pageType": "service",
+      "sections": ["hero", "features", "steps", "rich_text", "faq", "cta"],   // = existing detail pages, in order
+      "allowAdd": [],                        // [] = fixed layout
+      "fields": {},                          // extra entry fields (see articles)
+      "listingNote": "Link new services from the home Services cards."
+    },
+    "articles": {
+      "label": "Article", "plural": "Articles", "hostKind": "blog",
+      "indexPath": "blog", "pathPrefix": "blog", "pageType": "article",
+      "sections": ["rich_text", "rich_text", "faq"],
+      "allowAdd": ["rich_text", "image_text", "faq", "cta"],
+      "fields": {
+        "excerpt": { "label": "Excerpt", "type": "textarea" },          // model field on BlogPost
+        "category": { "label": "Category", "options": ["News", "Guides"] },   // stored in content.category
+        "coverImage": { "label": "Cover image", "type": "image", "category": "blog" }
+      }
+    }
+  },
   "sitemap": {
     "extraPaths": ["/", "about", "contact"],          // static routes the CMS doesn't own
     "overrides": { "about": { "priority": 0.8, "changefreq": "monthly", "include": true } }
@@ -510,25 +598,36 @@ rejects bad signatures and a clock skew over 5 minutes, and only revalidates
 
 ---
 
-## §7 — Paste to Build (new page from a brief)
+## §7 — New entries (collections) and one-off pages
 
-In the UI: **+ New page** → brief → **Build prompt** (`ai/new-page-prompt/`) →
-copy it to any AI chat → paste the reply → **Create draft page**
-(`content/paste-to-build/`). The kit then:
-- navigates to the new draft page
-- lists required images (Page builder → Images)
-- seeds page SEO from the reply
+**On the site** (admins), on a collection's index page: **＋ New <item>** →
+title → "Start from the template" or "Write it with AI". The AI prompt
+(`collections/<key>/prompt/`) states:
+- the exact section list and order
+- a published sibling as the STYLE REFERENCE (match list lengths, depth and
+  tone, but not its wording)
+- the entry fields with their allowed options
+- the brand voice and SEO principles
+- a FINAL CHECK that repeats every hard rule
 
-From code (agent-driven): build JSON valid against `ai/section-schema/` in the
-shape `{title, page_type, seo:{title, description, keywords?}, sections:[{type, …fields}]}`,
-then POST it as `raw`. Every image gets `image_required: true` plus a concrete
-`image_prompt`. The page stays `draft` until required images exist and it is
-published.
+`POST collections/<key>/entries/` with the reply fits it to the template:
+- missing slots get placeholders
+- foreign types are dropped (with warnings)
+- images are required only where siblings have them
+- page SEO is seeded from the reply
+
+**From code** (agent-driven), the same endpoint: build the reply JSON
+`{title, seo:{title, description, keywords}, fields:{…}, sections:[{type, …}]}`
+against the collection's `sections`, and POST it as `raw`.
+
+**One-off pages** (rare; not collections) are created only from Dashboard →
+Pages (`ai/new-page-prompt/` → `content/paste-to-build/`). Never from the
+site.
 
 ## §8 — Copy Structure (from a reference)
 
 `GET ai/copy-structure-prompt/` → paste the reference into the AI → paste the
-reply into **+ New page → Copy an existing page**. The AI must:
+reply into Dashboard → Pages → **Copy an existing page** (one-off pages are never built from the site; see R13). The AI must:
 - keep headings, copy, list items and order **verbatim**
 - map each visual block to the closest section type
 - flag images
@@ -736,6 +835,18 @@ unclosed/invalid JSON-LD, marking up invisible content.
   edit (R9).
 - Admin UI, `contentEditable` or extra fetches present for visitors (R8).
 - `dangerouslySetInnerHTML` for CMS or AI text (R10). Image URL text inputs (R11).
+- A "new page" / "page builder" button on the site, or section add / move /
+  delete on one-off pages (R13).
+- A collection entry whose layout differs from its siblings, or a collection
+  `sections` list that doesn't match the existing detail pages (R14).
+- Edit chrome that is always visible on top of content (R15).
+- A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI not first,
+  no score bar, fewer than 18 checks, coverage that is stale after Apply
+  (R16).
+- Admin colors hard-coded to the site instead of the `--cms-*` variables, or
+  admin markup changed to match the site (R17).
+- Writing AI prompt text on the client, or a prompt that doesn't end with its
+  FINAL CHECK (prompts live only in `api/prompts.py`).
 
 ## §12 — Fill-in prompt
 
@@ -753,6 +864,8 @@ paste the acceptance output in the report.
 - [ ] Kit installed verbatim; only the MANIFEST ADAPT files changed (R1)
 - [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`
 - [ ] Every route: `generateMetadata` via `pageMetadata`, plus `<PageSeo>`
+- [ ] Collections decided and seeded (R13): each `sections` equals its existing detail pages; one-off pages have none
+- [ ] `--cms-*` theme variables set to the site palette (R17)
 - [ ] Every section uses the §3 recipe; `check:inline` passes
 - [ ] Registry matches the backend; `check:sections` passes
 - [ ] Forms are definition-driven, with editable copy and a honeypot

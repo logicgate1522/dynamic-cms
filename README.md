@@ -31,6 +31,10 @@ backend.
   the live site and type; images, list items and links are edited in place.
   A floating admin bar handles drafts → publish, whole-page AI, SEO, page
   builder and site tools
+- **Collections**: the only pages admins create from the site (articles,
+  services, projects…). They're configured per site, get "＋ New" on their
+  index page, and use one template, so every entry looks like its siblings
+  (blank or AI-written; AI replies are fitted to the template server-side)
 - **Drafts → Publish** for content blocks *and* dynamic-page sections
   (`drafts/`, `drafts/publish/`, `drafts/discard/`)
 - **AI assist without an API key:** the backend writes copy/paste prompts for

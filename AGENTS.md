@@ -40,9 +40,18 @@ instructions the docs already answer.
   - Cleaning pasted AI replies: `api/ai_normalize.py` (`POST ai/normalize/`).
   - Keyword matching: `api/keywords.py`, mirrored by `frontend-kit/src/lib/keywords.js`.
     Change both together.
-  - Section types: `SECTION_SCHEMA` in `api/dynamic_pages.py`. Adding a type
-    also needs a renderer in `frontend-kit/src/components/dynamic/registry.js`
-    plus an adapter.
+  - Section types: `SECTION_SCHEMA` in `api/dynamic_pages.py` (placeholder
+    content: `STARTER_CONTENT`). Adding a type also needs a renderer in
+    `frontend-kit/src/components/dynamic/registry.js` plus an adapter.
+  - SEO rules: `prompts.seo_rule_checks`, mirrored id-for-id by
+    `frontend-kit/src/lib/seoChecks.js`. Change both together.
+  - Collections (the only pages admins create from the site):
+    `api/site_collections.py` (config, template fitting, blank entries) and
+    `api/collection_views.py`.
+  - **Prompt-writing rule:** every prompt states its rules, then ends with
+    `final_check(...)`, which repeats the hard constraints as the last thing
+    the model reads. A new prompt without a FINAL CHECK fails
+    `PromptRepetitionTests`.
   - Drafts: `ComponentData.draft_data`, `DynamicSection.draft_content`, and
     `api/draft_views.py`.
   - Cache invalidation: `api/revalidation.py` (signals → signed webhook, and
@@ -64,7 +73,10 @@ instructions the docs already answer.
 ## Product principles (for any new feature)
 
 - **Inline first:** click the thing to change it. Panels exist for bulk, AI,
-  JSON and history.
+  JSON and history. Edit tools appear on hover; nothing covers the page.
+- **Build only what repeats:** collections (articles, services, projects…)
+  get "＋ New" on their index page, with one template. One-off pages keep
+  their structure.
 - **Draft, then publish;** everything reversible (revisions, SEO history,
   discard).
 - **AI is a copy/paste loop with any chat model:** the backend writes the
