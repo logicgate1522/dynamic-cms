@@ -536,6 +536,12 @@ SEO_FIELD_KEYS = (
 )
 
 
+def _site_default_og_image():
+    from .models import SiteSettings
+    row = SiteSettings.objects.filter(pk=1).first()
+    return (((row.data if row else {}) or {}).get("seoDefaults") or {}).get("defaultOgImage") or ""
+
+
 SEO_CHECKS_FOR_PAGE_ASSIST = ("keyword-set", "title-keyword", "desc-keyword", "title-length", "desc-length", "schema-enabled")
 
 
@@ -582,8 +588,9 @@ def seo_rule_checks(seo, keyword=None):
              "Set an SEO title (social reuses it) or a dedicated social title."),
         rule("og-desc", "Social description is available", (social.get("ogDescription") or desc), "social.ogDescription",
              "sharing", "Set a meta description (social reuses it) or a dedicated social description."),
-        rule("og-image", "Social share image is set", social.get("ogImage"), "social.ogImage", "sharing",
-             "Upload a 1200×630 social share image."),
+        rule("og-image", "Social share image is set (this page's or the site default)",
+             social.get("ogImage") or _site_default_og_image(), "social.ogImage", "sharing",
+             "Upload a 1200×630 image for this page, or a site default in Settings → SEO defaults."),
         rule("og-alt", "Social image has alt text", (not social.get("ogImage")) or social.get("ogImageAlt"),
              "social.ogImageAlt", "sharing", "Describe the social image in one short sentence."),
         rule("indexable", "Page can be indexed", robots.get("index", True) is not False, "robots.index", "sharing",

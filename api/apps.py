@@ -6,5 +6,6 @@ class ApiConfig(AppConfig):
     name = 'api'
 
     def ready(self):
-        from . import revalidation
+        from . import cleanup, revalidation
         revalidation.connect()
+        cleanup.connect()

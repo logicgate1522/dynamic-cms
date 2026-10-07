@@ -863,7 +863,7 @@ class FormSubmissionExportView(APIView):
 
 
 class FormSubmissionDetailView(APIView):
-    """PATCH forms/<name>/submissions/<id>/ — toggle is_read / is_spam (admin)."""
+    """PATCH forms/<name>/submissions/<id>/ — toggle is_read / is_spam; DELETE — remove it (admin)."""
     permission_classes = [IsAdminUser]
 
     def patch(self, request, *args, **kwargs):
@@ -877,3 +877,8 @@ class FormSubmissionDetailView(APIView):
                 setattr(sub, field, bool(request.data[field]))
         sub.save()
         return Response(FormSubmissionSerializer(sub).data)
+
+    def delete(self, request, *args, **kwargs):
+        """DELETE — remove a test or spam submission for good."""
+        FormSubmission.objects.filter(form_name=kwargs.get("name"), pk=kwargs.get("pk")).delete()
+        return Response(status=204)

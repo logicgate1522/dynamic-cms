@@ -1991,3 +1991,67 @@ class IntegrationSpecTests(APITestCase):
             for where in ("§0", "§11", "§13"):
                 self.assertRegex(sections[where], rf"\bR{n}\b", f"R{n} is missing from {where}")
         self.assertIn(f"R1–R{rules[-1]}", sections["§12"], "the fill-in prompt must name every rule")
+        stale = {m for m in re.findall(r"R1–R(\d+)", spec) if int(m) != rules[-1]}
+        self.assertFalse(stale, f"stale rule ranges in the spec: R1–R{', R1–R'.join(sorted(stale))}")
+
+
+class TitleTemplateTests(APITestCase):
+    def test_brand_is_not_doubled_and_long_titles_drop_it(self):
+        from .seo_resolve import apply_title_template as t
+        tpl = "%s | AccountEdge UK"
+        self.assertEqual(t("VAT Returns", tpl), "VAT Returns | AccountEdge UK")
+        self.assertEqual(t("UK Accountants | AccountEdge UK", tpl), "UK Accountants | AccountEdge UK")
+        long = "Preparing Your Annual Accounts: Key Deadlines for 2026"
+        self.assertEqual(t(long, tpl), long)
+        self.assertEqual(t("Anything", "%s"), "Anything")
+
+
+class DeleteCleanupTests(AdminAuthMixin, APITestCase):
+    def test_deleting_a_page_or_post_removes_its_seo_and_sections(self):
+        ContentPage.objects.create(path="gone", title="Gone", status="draft")
+        self.admin_client.post("/api/content/gone/sections/", [{"section_type": "rich_text", "content": {"content": "x"}}], format="json")
+        self.admin_client.patch("/api/seo/gone/", {"seoTitle": "Gone"}, format="json")
+        post = BlogPost.objects.create(title="Old post", status="draft")
+        self.admin_client.patch(f"/api/seo/blog/{post.slug}/", {"seoTitle": "Old"}, format="json")
+        self.assertEqual(self.admin_client.delete("/api/content/pages/gone/").status_code, 204)
+        post.delete()
+        self.assertFalse(PageSEO.objects.filter(path__in=["gone", f"blog/{post.slug}"]).exists())
+        self.assertFalse(DynamicSection.objects.filter(content__content="x").exists())
+
+
+class LaunchCheckTests(AdminAuthMixin, APITestCase):
+    def _ids(self):
+        r = self.admin_client.get("/api/launch-check/")
+        self.assertEqual(r.status_code, 200)
+        return r.data, {i["id"]: i for i in r.data["items"]}
+
+    @override_settings(FORM_NOTIFICATION_EMAIL="", EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_blocks_a_site_that_is_not_ready(self):
+        self.admin_client.patch("/api/settings/site/", {"seoDefaults": {"siteUrl": "http://localhost:3000"}}, format="json")
+        self.admin_client.patch("/api/home/footer/", {"email": "info@example.co.uk", "regulatory": ["ICO: [Insert ICO number]"]}, format="json")
+        data, ids = self._ids()
+        self.assertFalse(data["ready"])
+        for blocker in ("site-url", "lead-email", "email-backend", "placeholders"):
+            self.assertEqual(ids[blocker]["level"], "blocker", blocker)
+        self.assertIn("footer", ids["placeholders"]["detail"])
+
+    @override_settings(FORM_NOTIFICATION_EMAIL="leads@acme.test", EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend",
+                       FRONTEND_REVALIDATE_URL="https://acme.test/api/revalidate", REVALIDATE_SECRET="s", DEBUG=False)
+    def test_ready_when_configured(self):
+        self.admin_client.patch("/api/settings/site/", {"seoDefaults": {"siteUrl": "https://acme.test", "defaultOgImage": "/og.png"}}, format="json")
+        self.admin_client.patch("/api/home/footer/", {"email": "hello@acme.test"}, format="json")
+        data, ids = self._ids()
+        self.assertTrue(data["ready"], data)
+        self.assertNotIn("og-default", ids)
+
+    def test_admin_only(self):
+        self.assertEqual(self.client.get("/api/launch-check/").status_code, 401)
+
+
+class SubmissionDeleteTests(AdminAuthMixin, APITestCase):
+    def test_admin_can_delete_a_submission_visitors_cannot(self):
+        from .models import FormSubmission
+        sub = FormSubmission.objects.create(form_name="quote", data={"name": "x"})
+        self.assertEqual(self.client.delete(f"/api/forms/quote/submissions/{sub.pk}/").status_code, 401)
+        self.assertEqual(self.admin_client.delete(f"/api/forms/quote/submissions/{sub.pk}/").status_code, 204)
+        self.assertFalse(FormSubmission.objects.filter(pk=sub.pk).exists())

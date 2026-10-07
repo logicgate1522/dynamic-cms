@@ -288,3 +288,13 @@ class CollectionEntryApplyView(APIView):
             "sections": [serialize_section(s, request) for s in
                          _sections_qs(host, published_only=False).prefetch_related("media__image")],
         })
+
+
+class LaunchCheckView(APIView):
+    """GET launch-check/ — blockers and warnings before going live
+    (see api/launch_check.py)."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from .launch_check import run_launch_check
+        return Response(run_launch_check())

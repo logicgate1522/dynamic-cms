@@ -49,6 +49,26 @@ def bump_cache_version(name):
         cache.set(key, 2, None)
 
 
+TITLE_LIMIT = 60
+
+
+def apply_title_template(title, template):
+    """`template` ("%s | Brand") applied to `title`, without the two classic
+    mistakes: doubling the brand when the title already carries it, and
+    pushing a good title past ~60 characters (where search results cut it)
+    just to append the brand."""
+    title = (title or "").strip()
+    if not template or "%s" not in template or not title:
+        return title
+    fixed = [part.strip(" |–—-:") for part in template.split("%s") if part.strip(" |–—-:")]
+    if any(part.lower() in title.lower() for part in fixed):
+        return title
+    full = template.replace("%s", title)
+    if len(full) > TITLE_LIMIT and len(title) <= TITLE_LIMIT:
+        return title
+    return full
+
+
 def resolve_seo(path, base_url=""):
     path = (path or "").strip("/")
     # The home page is stored under "home" but lives at "/": resolve both
@@ -84,7 +104,7 @@ def resolve_seo(path, base_url=""):
         "path": path,
         "title": title,
         "titleTemplate": template,
-        "fullTitle": (template.replace("%s", title) if title else
+        "fullTitle": (apply_title_template(title, template) if title else
                       seo_defaults.get("defaultTitle") or ""),
         "description": _first(page_data.get("metaDescription"),
                               blog_seo.get("metaDescription"),

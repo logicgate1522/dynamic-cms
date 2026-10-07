@@ -11,6 +11,7 @@ from .collection_views import (
     CollectionForPathView,
     CollectionListView,
     CollectionPromptView,
+    LaunchCheckView,
 )
 from .ai_views import (
     BlogBuildPromptView,
@@ -88,6 +89,7 @@ urlpatterns = [
     path('sitemap/report/', SitemapReportView.as_view(), name='sitemap-report'),
     path('drafts/publish/', DraftPublishView.as_view(), name='drafts-publish'),
     path('drafts/discard/', DraftDiscardView.as_view(), name='drafts-discard'),
+    path('launch-check/', LaunchCheckView.as_view(), name='launch-check'),
     path('collections/', CollectionListView.as_view(), name='collections'),
     path('collections/for-path/', CollectionForPathView.as_view(), name='collection-for-path'),
     path('collections/<slug:key>/prompt/', CollectionPromptView.as_view(), name='collection-prompt'),
