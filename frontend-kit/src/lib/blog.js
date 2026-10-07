@@ -17,6 +17,7 @@ import { articles as localArticles } from "@/data/articles";
 
 export const ARTICLE_CATEGORIES = [
     "VAT",
+    "Payroll",
     "Accounting",
     "Personal Tax",
     "Compliance",

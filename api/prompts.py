@@ -284,7 +284,7 @@ OUTPUT FORMAT — {output} {JSON_ONLY}
   "sections": [ {{ "type": "<section type>", ...fields }} ]
 }}
 
-SECTION TYPES — use only these; "required"/"required_list" fields must be present, "optional" may be omitted:
+SECTION TYPES — use only these; "required"/"required_list" fields must be present, "optional"/"optional_list" may be omitted:
 {schema}
 
 SECTION RULES:

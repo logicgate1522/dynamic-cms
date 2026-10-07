@@ -78,33 +78,70 @@ function CmsImage({ image, className = "", sizes = "(max-width: 1024px) 100vw, 5
 const items = (list) => (Array.isArray(list) ? list : []);
 
 /* ------------------------------------------------ hero */
-export function Hero({ heading, description, eyebrow, button_text, button_href, media }) {
+// Optional extras: `secondary_text`/`secondary_href` (an outline button, e.g.
+// to the matching guide) and `highlights` [{label, value}] — an "at a glance"
+// card beside the copy when the hero has no image.
+export function Hero({ heading, description, eyebrow, button_text, button_href, secondary_text, secondary_href, highlights, highlights_title, media }) {
     const image = slotImage(media, "image");
+    const facts = items(highlights);
+    const aside = Boolean(image || facts.length);
     return (
         <section className="relative overflow-hidden bg-[linear-gradient(180deg,#061120_0%,#08152A_50%,#071224_100%)] pt-[110px] text-white">
+            <div className="pointer-events-none absolute -right-40 -top-40 h-[480px] w-[480px] rounded-full bg-[#0F9E86]/10 blur-3xl" aria-hidden="true" />
+            <div className="pointer-events-none absolute -bottom-48 -left-32 h-[420px] w-[420px] rounded-full bg-[#123A5C]/40 blur-3xl" aria-hidden="true" />
             <SlotUpload slot="image" className="right-4 top-24" />
-            <div className={`${container} grid items-center gap-10 pb-16 lg:pb-24 ${image ? "lg:grid-cols-2" : ""}`}>
-                <div className={image ? "max-w-[560px]" : "max-w-[760px] py-6 lg:py-10"}>
-                    {eyebrow ? <p className={eyebrowClass}>{eyebrow}</p> : null}
-                    <h1 className="mt-3 text-[36px] font-bold leading-[1.02] tracking-[-0.04em] sm:text-[46px] lg:text-[56px]"><T path="heading" value={heading} /></h1>
+            <div className={`${container} relative grid items-center gap-10 pb-16 lg:pb-24 ${aside ? "lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:gap-14" : ""}`}>
+                <div className={aside ? "max-w-[620px]" : "max-w-[760px] py-6 lg:py-10"}>
+                    {eyebrow ? <p className={eyebrowClass}><T path="eyebrow" value={eyebrow} /></p> : null}
+                    <h1 className="mt-3 text-[36px] font-bold leading-[1.04] tracking-[-0.04em] sm:text-[46px] lg:text-[56px]"><T path="heading" value={heading} /></h1>
                     <div className="mt-5">
-                        <Body path="description" text={description} className="text-[15px] leading-7 text-[#DFE7F3] sm:text-[16px]" />
+                        <Body path="description" text={description} className="text-[15px] leading-7 text-[#DFE7F3] sm:text-[17px] sm:leading-8" />
                     </div>
-                    {button_text ? <div className="mt-8"><Button text={button_text} href={button_href} /></div> : null}
+                    {button_text || secondary_text ? (
+                        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                            <Button text={button_text} href={button_href} />
+                            <Button text={secondary_text} href={secondary_href} variant="outline" textPath="secondary_text" />
+                        </div>
+                    ) : null}
                 </div>
                 {image ? <CmsImage image={image} priority className="aspect-[4/3] rounded-[28px] shadow-[0_30px_80px_rgba(0,0,0,0.35)]" /> : null}
+                {!image && facts.length ? (
+                    <aside className="relative w-full rounded-[28px] border border-white/10 bg-white/[0.06] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.35)] backdrop-blur-md sm:p-8 lg:max-w-[460px] lg:justify-self-end">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#5EEAD4]"><T path="highlights_title" value={highlights_title || "At a glance"} /></p>
+                        <dl className="mt-5 divide-y divide-white/10">
+                            {facts.map((fact, i) => (
+                                <div key={i} className="relative flex items-start gap-4 py-4 first:pt-0 last:pb-0">
+                                    <ItemTools path="highlights" index={i} />
+                                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#0F9E86]/15 text-[15px] text-[#5EEAD4]" aria-hidden="true">✓</span>
+                                    <div className="min-w-0">
+                                        <dt className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9FB3C8]"><T path={`highlights.${i}.label`} value={fact.label} /></dt>
+                                        <dd className="mt-1 text-[16px] font-semibold leading-6 text-white"><T path={`highlights.${i}.value`} value={fact.value} /></dd>
+                                    </div>
+                                </div>
+                            ))}
+                        </dl>
+                        <AddItem path="highlights" label="Add highlight" />
+                    </aside>
+                ) : null}
             </div>
         </section>
     );
 }
 
 /* ------------------------------------------------ rich_text */
-export function RichText({ heading, content }) {
+// The heading sits beside the text on large screens. A paragraph whose lines
+// all start with "- " renders as a ticked list (EditableParagraphs).
+export function RichText({ heading, eyebrow, content }) {
     return (
         <section className={`bg-white ${sectionY}`}>
-            <div className={`${container} max-w-[860px]`}>
-                {heading ? <h2 className={`${h2Class} mb-6`}><T path="heading" value={heading} /></h2> : null}
-                <Body text={content} />
+            <div className={`${container} ${heading ? "grid gap-8 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16" : "max-w-[860px]"}`}>
+                {heading ? (
+                    <div>
+                        {eyebrow ? <p className={`${eyebrowClass} mb-3`}><T path="eyebrow" value={eyebrow} /></p> : null}
+                        <h2 className={`${h2Class} lg:sticky lg:top-28`}><T path="heading" value={heading} /></h2>
+                    </div>
+                ) : null}
+                <div className="min-w-0"><Body text={content} /></div>
             </div>
         </section>
     );
@@ -169,9 +206,9 @@ export function Features({ heading, eyebrow, items: list }) {
         <section className={`bg-[#F4F7F8] ${sectionY}`}>
             <div className={container}>
                 <Heading heading={heading} eyebrow={eyebrow} center />
-                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                <div className={`grid gap-5 sm:grid-cols-2 ${items(list).length % 3 === 0 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
                     {items(list).map((item, i) => (
-                        <div key={i} className="relative rounded-[20px] bg-white p-6 shadow-[0_10px_30px_rgba(18,58,92,0.07)]">
+                        <div key={i} className="relative rounded-[20px] bg-white p-6 shadow-[0_10px_30px_rgba(18,58,92,0.07)] transition hover:-translate-y-1 hover:shadow-[0_18px_40px_rgba(18,58,92,0.12)]">
                             <ItemTools index={i} />
                             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#0F9E86]/10 text-[18px] text-[#0F9E86]" aria-hidden="true">
                                 {item.icon && item.icon.length <= 2 ? item.icon : "✓"}
@@ -418,16 +455,20 @@ export function Steps({ heading, eyebrow, items: list, media }) {
 }
 
 /* ------------------------------------------------ cta */
-export function Cta({ heading, description, button_text, button_href }) {
+export function Cta({ heading, description, button_text, button_href, secondary_text, secondary_href }) {
     return (
         <section className="bg-white py-14 sm:py-16">
             <div className={container}>
-                <div className="flex flex-col items-start justify-between gap-6 rounded-[30px] bg-[#06182F] px-8 py-10 text-white shadow-[0_30px_80px_rgba(6,24,47,0.3)] sm:px-12 lg:flex-row lg:items-center">
-                    <div className="max-w-[640px]">
+                <div className="relative flex flex-col items-start justify-between gap-6 overflow-hidden rounded-[30px] bg-[#06182F] px-8 py-10 text-white shadow-[0_30px_80px_rgba(6,24,47,0.3)] sm:px-12 lg:flex-row lg:items-center">
+                    <div className="pointer-events-none absolute -right-20 -top-24 h-[260px] w-[260px] rounded-full bg-[#0F9E86]/15 blur-2xl" aria-hidden="true" />
+                    <div className="relative max-w-[640px]">
                         <h2 className="font-serif text-[30px] font-bold leading-tight sm:text-[38px]"><T path="heading" value={heading} /></h2>
                         {description ? <p className="mt-3 text-[15px] leading-7 text-[#D7E2EE]"><T path="description" value={description} /></p> : null}
                     </div>
-                    <Button text={button_text} href={button_href} />
+                    <div className="relative flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+                        <Button text={button_text} href={button_href} />
+                        <Button text={secondary_text} href={secondary_href} variant="outline" textPath="secondary_text" />
+                    </div>
                 </div>
             </div>
         </section>

@@ -126,7 +126,13 @@ def tags_for(instance):
         host = instance.host
         return _host_tags(host) if host is not None else []
     if isinstance(instance, m.SectionMedia):
-        host = getattr(instance.section, "host", None)
+        # Deleting a page cascades: its sections may already be gone when
+        # their media's post_delete fires. The page's own signal covers it.
+        try:
+            section = instance.section
+        except m.DynamicSection.DoesNotExist:
+            return []
+        host = getattr(section, "host", None)
         return _host_tags(host) if host is not None else []
     if isinstance(instance, m.Redirect):
         return ["cms:redirects"]
@@ -137,7 +143,8 @@ def _on_change(sender, instance, **kwargs):
     from . import models as m
     from .seo_resolve import bump_cache_version
     # Backend resolver caches must not outlive a write, webhook or not.
-    if isinstance(instance, (m.PageSEO, m.SiteSettings, m.BlogPost, m.ContentPage)):
+    # Sections feed structured data (FAQPage, Service), so they count too.
+    if isinstance(instance, (m.PageSEO, m.SiteSettings, m.BlogPost, m.ContentPage, m.DynamicSection)):
         bump_cache_version("seo")
     if isinstance(instance, m.Redirect):
         bump_cache_version("redirects")

@@ -231,7 +231,8 @@ try {
             const el = document.activeElement;
             return {
                 id: el?.dataset?.cmsBlock ? `${el.dataset.cmsBlock}::${el.dataset.cmsPath}` : el?.tagName,
-                text: el?.innerText || el?.value || "",
+                // textContent, not innerText: CSS text-transform must not change what we compare.
+                text: el?.textContent || el?.value || "",
                 sameElement: el?.dataset?.cmsFocusProbe === "1",
             };
         });
@@ -546,13 +547,28 @@ try {
         if (!form) check(`a visible form on ${FORM_PAGE} (set FORM_PAGE)`, false);
         else {
             const tag = `Lead ${STAMP}`;
+            // Fill every kind of field a definition-driven form can have.
+            const soon = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+            const VALUE = { email: "lead@example.org", tel: "07700 900123", date: soon, time: "10:30", "datetime-local": `${soon}T10:30`, number: "1", url: "https://example.org" };
             const inputs = form.locator("input:visible, textarea:visible");
             for (let i = 0; i < (await inputs.count()); i++) {
                 const el = inputs.nth(i);
-                const type = (await el.getAttribute("type")) || "text";
-                if (["submit", "button", "hidden", "file", "checkbox", "radio"].includes(type)) continue;
                 if (await el.evaluate((n) => n.tabIndex < 0 || !!n.closest('[aria-hidden="true"]'))) continue;
-                await el.fill(type === "email" ? "lead@example.org" : type === "tel" ? "07700 900123" : tag);
+                if (["submit", "button", "hidden", "file", "checkbox", "radio", "range"].includes((await el.getAttribute("type")) || "text")) continue;
+                await el.focus(); // pickers may switch from a text placeholder to their real type on focus
+                const type = (await el.getAttribute("type")) || "text";
+                await el.fill(VALUE[type] || tag);
+            }
+            const selects = form.locator("select:visible");
+            for (let i = 0; i < (await selects.count()); i++) {
+                const values = await selects.nth(i).locator("option").evaluateAll((os) => os.map((o) => o.value).filter(Boolean));
+                if (values.length) await selects.nth(i).selectOption(values[0]);
+            }
+            // One choice per checkbox / radio group (covers required groups and consent boxes).
+            const groups = await form.locator('input[type="checkbox"]:visible, input[type="radio"]:visible').evaluateAll((els) => [...new Set(els.map((e) => e.name).filter(Boolean))]);
+            for (const name of groups) {
+                const group = form.locator(`input[name="${name}"]:visible`);
+                if (!(await group.evaluateAll((els) => els.some((e) => e.checked)))) await group.first().check();
             }
             await form.locator('button[type="submit"], input[type="submit"]').first().click();
             const emailed = await poll(async () => emails.length > 0, { tries: 20, every: 400 });

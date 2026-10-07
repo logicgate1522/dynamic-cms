@@ -1097,7 +1097,19 @@ the §3 recipe instead.
   - `SlotUpload` for images
   - `EditableParagraphs` for `content`
 - Video `src` is allowlisted to YouTube/Vimeo embeds. Rich text = blank-line
-  paragraphs (R10).
+  paragraphs (R10); lines starting `- ` render as a ticked list (still plain
+  text).
+- Optional fields every adapter supports (all plain text, all inline-editable):
+  - `hero`: `eyebrow`, `secondary_text` / `secondary_href` (an outline button,
+    e.g. to the matching guide), `highlights_title` + `highlights`
+    `[{label, value}]` (an "at a glance" card beside the copy)
+  - `rich_text`: `eyebrow`; the heading sits beside the text on large screens
+  - `cta`: `secondary_text` / `secondary_href`
+  Collection templates should use them consistently across every entry (R14):
+  e.g. every service page's hero has the same four highlights.
+- Service pages (`page_type: "service"`) and any page with a `faq` section get
+  Service / FAQPage JSON-LD automatically from their published content —
+  don't configure it by hand.
 
 ---
 

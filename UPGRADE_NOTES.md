@@ -1,3 +1,28 @@
+# Upgrade Notes — richer service pages, automatic Service/FAQ schema
+
+- Section adapters (pull with `sync_kit.py`):
+  - `hero` gains an optional `eyebrow`, a second button
+    (`secondary_text`/`secondary_href`) and an "at a glance" card
+    (`highlights_title` + `highlights: [{label, value}]`).
+  - `rich_text` puts the heading beside the text on large screens and takes an
+    `eyebrow`.
+  - `cta` gains a second button.
+  - `features` lays out 3 or 6 items in rows of three.
+  - Paragraph text renders lines starting with `- ` as a ticked list (still
+    plain text; an intro line can share the paragraph).
+- `SECTION_SCHEMA` lists the new optional fields, and adds an
+  `optional_list` rule.
+- `seo/resolve` adds FAQPage (from published `faq` sections) and Service (on
+  `page_type: "service"` pages) automatically. Explicit PageSEO config still
+  wins. Section edits now refresh the resolver cache.
+- Fixed: deleting a page whose sections have image slots crashed in the
+  revalidation signal.
+- Acceptance and site-audit fill every field type a form can have
+  (selects, checkbox/radio groups, date/time pickers that start as text).
+  The focus check compares raw text, so CSS uppercase can't break it.
+
+---
+
 # Upgrade Notes — audits at every level
 
 - Every phase P0–P8 ends with an **Exit check**. The next phase starts only

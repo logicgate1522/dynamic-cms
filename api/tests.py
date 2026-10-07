@@ -2149,6 +2149,61 @@ class TrackingAndFormSettingsTests(AdminAuthMixin, APITestCase):
         self.assertEqual(self.patch({"forms": {"notifyEmail": "a1b2c3d4e5f6a7b8c9d0"}}).status_code, 200)
 
 
+class SectionOptionalFieldTests(APITestCase):
+    def test_hero_highlights_and_secondary_buttons_validate(self):
+        from .dynamic_pages import _validate_section_fields, SECTION_SCHEMA
+        ok = {"heading": "Payroll", "description": "Run monthly.", "secondary_text": "Guide", "secondary_href": "/blog/x",
+              "highlights": [{"label": "How often", "value": "Monthly"}]}
+        self.assertEqual(_validate_section_fields(ok, SECTION_SCHEMA["hero"]), [])
+        bad = {**ok, "highlights": "monthly"}
+        self.assertTrue(_validate_section_fields(bad, SECTION_SCHEMA["hero"]))
+        self.assertIn("secondary_text", SECTION_SCHEMA["cta"])
+
+
+class DeletePageWithMediaTests(AdminAuthMixin, APITestCase):
+    def test_deleting_a_page_whose_sections_have_media_does_not_crash(self):
+        from .models import SectionMedia
+        page = ContentPage.objects.create(path="gone-with-media", title="Gone", status="published")
+        self.admin_client.post("/api/content/gone-with-media/sections/", {"sections": [
+            {"section_type": "hero", "content": {"heading": "Hi", "description": "There"},
+             "media": [{"slot": "image", "required": False, "image_prompt": "A photo"}]},
+        ]}, format="json")
+        self.assertTrue(SectionMedia.objects.filter(section__object_id=page.pk).exists())
+        self.assertEqual(self.admin_client.delete("/api/content/pages/gone-with-media/").status_code, 204)
+        self.assertFalse(ContentPage.objects.filter(path="gone-with-media").exists())
+
+
+class ContentSchemaTests(AdminAuthMixin, APITestCase):
+    """Service pages get Service + FAQPage structured data from their own
+    published sections, with no per-page configuration."""
+
+    def _types(self, path):
+        graph = self.client.get(f"/api/seo/resolve/{path}/").data["jsonLd"]["@graph"]
+        return {node.get("@type"): node for node in graph}
+
+    def test_service_page_gets_service_and_faq_from_its_sections(self):
+        ContentPage.objects.create(path="services/payroll", title="Monthly Payroll", page_type="service", status="published")
+        self.admin_client.post("/api/content/services/payroll/sections/", [
+            {"section_type": "hero", "content": {"heading": "Payroll", "description": "Monthly payroll, run for you."}},
+            {"section_type": "faq", "content": {"items": [
+                {"question": "Do you handle RTI?", "answer": "Yes, every pay run."},
+                {"question": "Hidden?", "answer": "Not shown.", "_hidden": True},
+            ]}},
+        ], format="json")
+        self.admin_client.patch("/api/seo/services/payroll/", {"metaDescription": "Payroll run monthly for UK employers."}, format="json")
+        nodes = self._types("services/payroll")
+        self.assertEqual(nodes["Service"]["name"], "Monthly Payroll")
+        self.assertEqual(nodes["Service"]["description"], "Payroll run monthly for UK employers.")
+        questions = [q["name"] for q in nodes["FAQPage"]["mainEntity"]]
+        self.assertEqual(questions, ["Do you handle RTI?"])
+
+    def test_explicit_config_wins_and_drafts_get_nothing(self):
+        ContentPage.objects.create(path="services/draft", title="Draft", page_type="service", status="draft")
+        self.assertNotIn("Service", self._types("services/draft"))
+        ContentPage.objects.create(path="about-us", title="About", page_type="generic", status="published")
+        self.assertNotIn("Service", self._types("about-us"))
+
+
 class HiddenContentTests(AdminAuthMixin, APITestCase):
     @override_settings(FORM_NOTIFICATION_EMAIL="x@acme.test")
     def test_hidden_placeholders_do_not_block_launch(self):

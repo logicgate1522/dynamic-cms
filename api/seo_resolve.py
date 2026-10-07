@@ -11,7 +11,7 @@ prompt and mirrored here:
 never a re-implementation of the precedence.
 """
 
-from .models import BlogPost, PageSEO, SiteSettings
+from .models import BlogPost, ContentPage, PageSEO, SiteSettings
 from . import schema_builders
 
 BUILTIN_DEFAULTS = {
@@ -162,6 +162,7 @@ def resolve_seo(path, base_url=""):
             "schema_type": "BlogPosting",
         }
 
+    page_data = _with_content_schema(path, blog, page_data, site_data, resolved["description"])
     graph = schema_builders.assemble(
         path, page_seo_data=page_data, site_data=site_data,
         article_ctx=article_ctx, base_url=base_url,
@@ -177,3 +178,57 @@ def _resolve_canonical(page_data, path, base_url):
     if page_data.get("canonicalSelf", True) and base_url:
         return base_url.rstrip("/") + "/" + path if path else base_url
     return ""
+
+
+def _with_content_schema(path, blog, page_data, site_data, description):
+    """Structured data that follows from a page's own published content, so
+    nobody has to configure it by hand:
+
+    - FAQPage from the page's published `faq` sections
+    - Service on service pages (page_type "service", e.g. a services
+      collection entry), named after the page
+
+    Anything configured explicitly in PageSEO (faqItems, service, schema
+    builders) wins; this only fills what is missing.
+    """
+    host = blog
+    if host is None and path:
+        host = ContentPage.objects.filter(path=path, status="published").first()
+    if host is None or getattr(host, "status", "published") != "published":
+        return page_data
+
+    data = dict(page_data)
+    schema_cfg = dict(data.get("schema") or {})
+    builders = list(schema_cfg.get("builders") or [])
+
+    if not data.get("faqItems") and "FAQPage" not in builders:
+        items = []
+        sections = host.dynamic_sections if isinstance(host, BlogPost) else host.sections
+        for section in sections.filter(section_type="faq").order_by("order"):
+            content = section.content or {}
+            if content.get("_hidden"):
+                continue
+            for item in content.get("items") or []:
+                if isinstance(item, dict) and not item.get("_hidden"):
+                    items.append(item)
+        if items:
+            data["faqItems"] = items
+            builders.append("FAQPage")
+
+    if (isinstance(host, ContentPage) and host.page_type == "service"
+            and not data.get("service") and "Service" not in builders):
+        org = site_data.get("organization") or {}
+        ai = site_data.get("ai") or {}
+        data["service"] = {
+            "name": host.title,
+            "description": description,
+            "serviceType": host.title,
+            "areaServed": org.get("areaServed") or ai.get("location") or "",
+        }
+        builders.append("Service")
+
+    if builders != list(schema_cfg.get("builders") or []):
+        schema_cfg["builders"] = builders
+        data["schema"] = schema_cfg
+    return data
+

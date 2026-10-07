@@ -9,12 +9,17 @@ a one-line change here with no migration.
 import json
 import re
 
-# type -> {field: "required" | "optional" | "required_list"}
+# type -> {field: "required" | "optional" | "required_list" | "optional_list"}
 # list/dict fields are checked for presence + basic shape only.
 SECTION_SCHEMA = {
-    "hero": {"heading": "required", "description": "required",
-             "button_text": "optional", "button_href": "optional"},
-    "rich_text": {"heading": "optional", "content": "required"},
+    # secondary_* = an outline button (e.g. to a related guide); highlights =
+    # [{label, value}] shown as an "at a glance" card beside the copy.
+    "hero": {"heading": "required", "description": "required", "eyebrow": "optional",
+             "button_text": "optional", "button_href": "optional",
+             "secondary_text": "optional", "secondary_href": "optional",
+             "highlights_title": "optional", "highlights": "optional_list"},
+    # content: blank lines split paragraphs; lines starting "- " are a ticked list.
+    "rich_text": {"eyebrow": "optional", "heading": "optional", "content": "required"},
     "image_text": {"heading": "required", "content": "required",
                    "image_position": "optional"},
     "cards": {"heading": "optional", "items": "required_list"},
@@ -29,7 +34,8 @@ SECTION_SCHEMA = {
     "logos": {"heading": "optional", "items": "required_list"},
     "steps": {"heading": "optional", "items": "required_list"},
     "cta": {"heading": "required", "description": "optional",
-            "button_text": "required", "button_href": "optional"},
+            "button_text": "required", "button_href": "optional",
+            "secondary_text": "optional", "secondary_href": "optional"},
     "banner": {"text": "required", "link_text": "optional", "link_href": "optional"},
     "video": {"heading": "optional", "video_url": "required"},
     "contact_block": {"heading": "optional", "email": "optional",
@@ -135,6 +141,10 @@ def _validate_section_fields(section, schema):
             v = section.get(field)
             if not isinstance(v, list) or not v:
                 errors.append(f'"{field}" is required and must be a non-empty array.')
+        elif rule == "optional_list":
+            v = section.get(field)
+            if v is not None and not isinstance(v, list):
+                errors.append(f'"{field}" must be an array when present.')
     return errors
 
 

@@ -192,16 +192,21 @@ if (CMS_USER && CMS_PASSWORD) {
         const inputs = form.locator("input:visible, textarea:visible, select:visible");
         for (let i = 0; i < (await inputs.count()); i++) {
             const el = inputs.nth(i);
-            const type = (await el.getAttribute("type")) || (await el.evaluate((n) => n.tagName.toLowerCase()));
-            if (["submit", "button", "hidden", "file"].includes(type)) continue;
+            if ((await el.getAttribute("type")) === "file") continue;
             // Spam traps are visible to bots, not people — never fill them.
             if (await el.evaluate((n) => n.tabIndex < 0 || !!n.closest('[aria-hidden="true"]'))) continue;
+            // Date/time pickers may show a text placeholder until focused.
+            await el.focus().catch(() => {});
+            const type = (await el.getAttribute("type")) || (await el.evaluate((n) => n.tagName.toLowerCase()));
+            if (["submit", "button", "hidden", "file"].includes(type)) continue;
             if (type === "checkbox" || type === "radio") await el.check().catch(() => {});
             else if (type === "select") await el.selectOption({ index: 1 }).catch(() => {});
             else if (type === "email") await el.fill("audit@example.org");
             else if (type === "tel") await el.fill("07700 900123");
             else if (type === "number" || type === "range") await el.fill("1");
             else if (type === "date") await el.fill("2030-01-01");
+            else if (type === "time") await el.fill("10:30");
+            else if (type === "datetime-local") await el.fill("2030-01-01T10:30");
             else if (type === "url") await el.fill("https://example.org");
             else await el.fill(tag);
         }
