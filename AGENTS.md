@@ -41,8 +41,8 @@ instructions the docs already answer.
      credentials, "fixed fees" (R26)
    - hard-code or publish a contact channel the owner didn't approve, or
      show the form-notification address (R27)
-   - build pages for services the owner doesn't offer, or thin, unlinked
-     service pages (R28)
+   - build pages for things the owner doesn't offer, or thin, unlinked
+     entry pages (R28)
    - mix CTA wordings, ship a form-only contact page, or use slogan-only H1s
      (R29)
 

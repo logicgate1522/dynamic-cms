@@ -3,7 +3,8 @@
 - **R26 Every claim is true.**
   - The launch check warns "Confirm these claims are true". It covers
     client counts, ratings, percentages, years of experience, "trusted by",
-    "fixed fees", "chartered" and "registered agents" in published content,
+    "fixed fees" and credential words (certified, accredited, chartered) in
+    published content,
     plus any visible testimonials.
   - site-audit flags the same in every rendered page (code defaults
     included). With `LAUNCH=1` these fail until `CLAIMS_CONFIRMED=1`.
@@ -19,7 +20,7 @@
 - **R29 One primary action and keyword-led structure.** site-audit fails:
   - a first visible heading that isn't the H1
   - h1–h3 inside `<footer>`
-  - a booking page with fewer than 120 words besides the form
+  - a contact page with fewer than 120 words besides the form
 
 ---
 

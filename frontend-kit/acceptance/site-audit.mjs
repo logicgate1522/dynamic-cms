@@ -51,7 +51,7 @@ const { CMS_USER, CMS_PASSWORD } = process.env;
 const FORM_PAGE = process.env.FORM_PAGE || "/contact";
 const LAUNCH = process.env.LAUNCH === "1";
 // Mirrors CLAIMS in api/launch_check.py (R26).
-const CLAIMS = /\b\d{2,}[,\d]*\s?\+(?=\s|$|[^\w])|\b\d(?:\.\d)?\s?\/\s?5\b|★{3,}|\b\d{2,3}\s?%\s*(?:client|customer|satisf|success|retention)|\b\d+\+?\s*years?\s+(?:of\s+)?experience|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d|\bfixed[- ](?:fees?|prices?|pricing)\b|\baward[- ]winning\b|\bchartered\b|\bregistered\s+agents?\b/gi;
+const CLAIMS = /\b\d{2,}[,\d]*\s?\+(?=\s|$|[^\w])|\b\d(?:\.\d)?\s?\/\s?5\b|★{3,}|\b\d{2,3}\s?%\s*(?:client|customer|satisf|success|retention)|\b\d+\+?\s*years?\s+(?:of\s+)?experience|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d|\bfixed[- ](?:fees?|prices?|pricing)\b|\baward[- ]winning\b|\b(?:certified|accredited|chartered)\b/gi;
 const ENTRY_MIN_WORDS = Number(process.env.ENTRY_MIN_WORDS || 600);
 const PLACEHOLDER = /\[(?:insert|registered|company|your|add|todo)[^\]]*\]|\b0{4}\s?0{6}\b|@example\.(?:com|org|co\.uk)\b|lorem ipsum|\bTBD\b|\bNew section\b|Write the first paragraph|Describe the offer in one|\bEyebrow\b/gi;
 

@@ -32,7 +32,7 @@ CLAIMS = re.compile(
     r"|\b\d+\+?\s*years?\s+(?:of\s+)?experience"                          # 15 years experience
     r"|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d"                    # trusted by 500
     r"|\bfixed[- ](?:fees?|prices?|pricing)\b"                             # fixed fees
-    r"|\baward[- ]winning\b|\bchartered\b|\bregistered\s+agents?\b",     # credentials
+    r"|\baward[- ]winning\b|\b(?:certified|accredited|chartered)\b",      # credentials
     re.IGNORECASE,
 )
 EMAIL_LIKE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -62,7 +62,7 @@ def placeholder_hits():
 
 def claim_hits():
     """Unverified-looking claims (R26) in published content, plus any
-    testimonials visitors can see — reviews must be real (UK DMCC Act)."""
+    testimonials visitors can see — reviews must be genuine (consumer law)."""
     from .models import BlogPost, ComponentData, ContentPage, DynamicSection
     hits = [h for h in published_hits(CLAIMS, whole=True) if "testimonial" not in h["where"].lower()]
     for row in ComponentData.objects.all():
