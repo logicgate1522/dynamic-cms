@@ -435,7 +435,7 @@ try {
     const countIn = async (path, text) => (await visitorHtml(path)).split(text).length - 1;
     const longestString = (value) => {
         let best = "";
-        JSON.stringify(value, (k, v) => { if (typeof v === "string" && k !== "_hidden" && !/href|image|icon|url/i.test(k) && v.length > best.length) best = v; return v; });
+        JSON.stringify(value, (k, v) => { if (typeof v === "string" && k !== "_hidden" && !/href|image|icon|url|logo/i.test(k) && !/^(\/|https?:|mailto:|tel:)|\.(png|jpe?g|webp|svg|avif|gif)$/i.test(v) && v.length > best.length) best = v; return v; });
         return best;
     };
     await page.goto(`${SITE}${PAGE}`);

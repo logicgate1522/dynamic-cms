@@ -21,6 +21,8 @@
   - a first visible heading that isn't the H1
   - h1–h3 inside `<footer>`
   - a contact page with fewer than 120 words besides the form
+- Organization JSON-LD resolves a site-relative `organization.logo` against `seoDefaults.siteUrl` (search engines need an absolute URL).
+- acceptance: the hide-block probe ignores paths/URLs (a shared logo path is in header and footer).
 
 ---
 

@@ -2149,6 +2149,16 @@ class TrackingAndFormSettingsTests(AdminAuthMixin, APITestCase):
         self.assertEqual(self.patch({"forms": {"notifyEmail": "a1b2c3d4e5f6a7b8c9d0"}}).status_code, 200)
 
 
+class OrganizationLogoTests(APITestCase):
+    def test_relative_logo_becomes_absolute(self):
+        from .schema_builders import organization
+        node = organization({"organization": {"name": "Acme", "logo": "/images/brand/logo.png"},
+                             "seoDefaults": {"siteUrl": "https://acme.test/"}})
+        self.assertEqual(node["logo"]["url"], "https://acme.test/images/brand/logo.png")
+        node = organization({"organization": {"name": "Acme", "logo": "https://cdn.test/l.png"}, "seoDefaults": {"siteUrl": "https://acme.test"}})
+        self.assertEqual(node["logo"]["url"], "https://cdn.test/l.png")
+
+
 class ClaimsCheckTests(AdminAuthMixin, APITestCase):
     def _claims(self):
         items = {i["id"]: i for i in self.admin_client.get("/api/launch-check/").data["items"]}

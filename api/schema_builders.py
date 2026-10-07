@@ -41,6 +41,12 @@ def _image_object(url, alt=""):
     return node
 
 
+def _absolute(url, base_url):
+    if url and base_url and str(url).startswith("/") and not str(url).startswith("//"):
+        return base_url.rstrip("/") + str(url)
+    return url
+
+
 def organization(site):
     """Organization / LocalBusiness / <type> node from SiteSettings.data."""
     site = site or {}
@@ -61,7 +67,9 @@ def organization(site):
         "url": base_url,
         "description": org.get("description") or seo.get("defaultDescription") or "",
         "foundingDate": org.get("foundingDate") or "",
-        "logo": _image_object(org.get("logo"), org.get("logoAlt")),
+        # Search engines need an absolute logo URL; site-relative paths
+        # ("/images/brand/logo.png") resolve against the site URL.
+        "logo": _image_object(_absolute(org.get("logo"), base_url), org.get("logoAlt")),
         "sameAs": [s for s in (org.get("sameAs") or []) if s],
     }
 
