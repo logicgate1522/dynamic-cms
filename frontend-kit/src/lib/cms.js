@@ -16,9 +16,15 @@ export const REVALIDATE = {
     blog: 300,
 };
 
+// The site's server identifies itself with the shared REVALIDATE_SECRET so
+// the backend doesn't rate-limit it as one anonymous visitor (every page
+// render comes from this one IP). Server-only: never reaches the browser.
+const SERVER_HEADERS = process.env.REVALIDATE_SECRET ? { "X-CMS-Frontend": process.env.REVALIDATE_SECRET } : {};
+
 async function cmsFetch(path, { revalidate = REVALIDATE.content, tags = [], fallback = {} } = {}) {
     try {
         const res = await fetch(`${API}/${path}`, {
+            headers: SERVER_HEADERS,
             next: { revalidate, tags: ["cms", ...tags] },
         });
         if (!res.ok) return fallback;

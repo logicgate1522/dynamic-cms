@@ -62,6 +62,7 @@ CORE = [
     "lib/cms.js",
     "lib/keywords.js",
     "lib/seoChecks.js",
+    "middleware.js",
     "lib/seo.js",
 ]
 ADAPT = [

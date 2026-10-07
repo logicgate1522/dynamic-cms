@@ -281,8 +281,8 @@ function TypePicker({ types, onPick, onCancel }) {
     return (
         <div className="cms-ui relative z-[57] flex flex-wrap items-center gap-1 border-y border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
             <span className="mr-1 text-[12px] font-semibold text-[#475569]">Add below:</span>
-            {types.map((t) => (
-                <button key={t} type="button" onClick={() => onPick(t)} className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-semibold hover:border-[var(--cms-accent)]">
+            {types.map((t, index) => (
+                <button key={index} type="button" onClick={() => onPick(t)} className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-semibold hover:border-[var(--cms-accent)]">
                     {humanize(t)}
                 </button>
             ))}

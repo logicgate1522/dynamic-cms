@@ -95,6 +95,12 @@ async function typeInto(locator, text) {
     await page.keyboard.type(text);
     await page.locator("body").click({ position: { x: 2, y: 2 } });
 }
+// Wait for a publish/discard to finish. Never waits for "All published":
+// a real site may have unrelated drafts on other pages.
+async function settle() {
+    await poll(async () => !(await bar().getByText(/Saving draft…/).count()), { tries: 20, every: 300 });
+    await sleep(800);
+}
 async function publishMenu(item) {
     await bar().getByRole("button", { name: /^Publish \(\d+\)/ }).click();
     await bar().getByRole("button", { name: item }).click();
@@ -143,8 +149,8 @@ try {
 
     /* ---------- 4. Publish -> webhook -> visitors see it ---------- */
     await publishMenu(/Publish this page/);
-    await bar().getByRole("button", { name: "All published" }).waitFor({ timeout: 15000 });
-    check("publish copies the draft live", (await publicJson(`home/${block}/`))[field] === `${STAMP} inline`);
+    await settle();
+    check("publish copies the draft live", !!(await poll(async () => (await publicJson(`home/${block}/`))[field] === `${STAMP} inline`)));
     const fresh = await poll(async () => (await (await fetch(`${SITE}${PAGE}`)).text()).includes(`${STAMP} inline`), { tries: 30, every: 700 });
     check("visitor HTML updated (revalidate webhook)", !!fresh);
 
@@ -179,8 +185,66 @@ try {
 
     /* ---------- 6. Discard ---------- */
     await publishMenu(/Discard this page/);
-    await bar().getByRole("button", { name: "All published" }).waitFor({ timeout: 15000 });
-    check("discard drops the draft", (await admin(`home/${block}/?mode=draft`)).body?.[field] === `${STAMP} inline`);
+    await settle();
+    check("discard drops the draft", !!(await poll(async () => (await admin(`home/${block}/?mode=draft`)).body?.[field] === `${STAMP} inline`)));
+
+    /* ---------- 6b. Typing never loses focus ---------- */
+    // Type character by character — across an autosave round trip — into a
+    // field inside a LIST (the classic failure: a list keyed by its own text
+    // re-creates the element on every keystroke), then into a panel input.
+    async function typesWithoutLosingFocus(locator, label) {
+        await locator.click();
+        // Caret to the end, and mark the element so a re-mount is detectable.
+        const id = await locator.evaluate((el) => {
+            el.dataset.cmsFocusProbe = "1";
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return `${el.dataset.cmsBlock}::${el.dataset.cmsPath}`;
+        });
+        for (const ch of "focus") await page.keyboard.type(ch, { delay: 60 });
+        await sleep(1500); // autosave fires and the block re-renders
+        for (const ch of "kept") await page.keyboard.type(ch, { delay: 60 });
+        const state = await page.evaluate(() => {
+            const el = document.activeElement;
+            return {
+                id: el?.dataset?.cmsBlock ? `${el.dataset.cmsBlock}::${el.dataset.cmsPath}` : el?.tagName,
+                text: el?.innerText || el?.value || "",
+                sameElement: el?.dataset?.cmsFocusProbe === "1",
+            };
+        });
+        check(`typing keeps focus: ${label}`, state.id === id && state.text.endsWith("focuskept"), `${state.id} “${state.text.slice(-20)}”`);
+        check(`the field is never re-created while typing: ${label}`, state.sameElement, state.sameElement ? "" : "re-created mid-typing — is the list keyed by the item's text? use the index");
+        await page.keyboard.press("Escape"); // reverts the field
+    }
+    const listCandidates = await page.locator('[data-cms-block]:not([data-cms-block^="section:"])').evaluateAll((els) =>
+        els.map((el, i) => ({ i, path: el.dataset.cmsPath, visible: el.offsetParent !== null && el.innerText.trim().length > 0 }))
+            .filter((c) => /\.\d+(\.|$)/.test(c.path) && c.visible).map((c) => c.i));
+    if (listCandidates.length) {
+        await typesWithoutLosingFocus(page.locator('[data-cms-block]:not([data-cms-block^="section:"])').nth(listCandidates[0]), "inline field inside a list");
+    } else {
+        check("page has an inline-editable list field to test focus on", false);
+    }
+    const plainField = page.locator(`[data-cms-block="${block}"][data-cms-path="${field}"]`).first();
+    await typesWithoutLosingFocus(plainField, "inline field");
+    // The "All fields" panel: a regular form input.
+    await page.locator(`button[title^="All fields"]`).first().click({ force: true });
+    const panelInput = page.getByRole("dialog").locator('input[type="text"], input:not([type]), textarea').first();
+    await panelInput.click();
+    await page.keyboard.press("End");
+    for (const ch of "focuskept") await page.keyboard.type(ch, { delay: 40 });
+    const panelOk = await panelInput.evaluate((el) => document.activeElement === el && el.value.endsWith("focuskept"));
+    check("typing keeps focus: All fields panel input", panelOk);
+    await closeDrawer();
+    // Discard what the focus checks left on THIS page only.
+    await bar().getByRole("button", { name: /^Publish \(\d+\)|All published/ }).first().click();
+    const discardPage = bar().getByRole("button", { name: /Discard this page/ });
+    if (await discardPage.isEnabled()) await discardPage.click();
+    else await bar().getByRole("button", { name: /^Publish \(\d+\)|All published/ }).first().click();
+    await settle();
 
     /* ---------- 7. SEO panel: Ask AI is the first action ---------- */
     const seoButton = bar().getByRole("button", { name: "SEO", exact: true });
@@ -218,6 +282,9 @@ try {
         const sectionText = page.locator('[data-cms-block^="section:"]').first();
         await sectionText.waitFor({ timeout: 10000 });
         const before = (await sectionText.innerText()).trim();
+        const sectionListIdx = await page.locator('[data-cms-block^="section:"]').evaluateAll((els) =>
+            els.findIndex((el) => /\.\d+(\.|$)/.test(el.dataset.cmsPath) && el.offsetParent !== null && el.innerText.trim()));
+        if (sectionListIdx >= 0) await typesWithoutLosingFocus(page.locator('[data-cms-block^="section:"]').nth(sectionListIdx), "CMS-page section list field");
         await typeInto(sectionText, `${STAMP} section`);
         const listed = await poll(async () => ((await admin("drafts/")).body?.hosts || []).length > 0);
         check("section edit saved as a host draft", !!listed);

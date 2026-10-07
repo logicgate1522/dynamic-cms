@@ -25,7 +25,7 @@ export function Faq({ heading, eyebrow, items }) {
                         const panelId = `${baseId}-panel-${i}`;
                         return (
                             <div key={i} className="relative overflow-hidden rounded-[18px] bg-white shadow-[0_8px_24px_rgba(18,58,92,0.06)]">
-                                <ItemTools index={i} className="right-14 top-4" />
+                                <ItemTools index={i}/>
                                 <h3>
                                     <button
                                         type="button"

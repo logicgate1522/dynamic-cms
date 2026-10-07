@@ -18,6 +18,7 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 | Styles + theme | `app/cms.css` | The five `--cms-*` theme variables (set them to the site palette — the only styling you change), editable outlines, hover-only edit tools. Import it in the root layout after `globals.css`. |
 | Cache | `app/api/revalidate/route.js` | Verifies the backend's HMAC webhook and calls `revalidateTag` for `cms*` tags. |
 | API | `lib/api.js` | Session + CSRF client: `apiFetch`, `apiRequest`, `getSession`, `login`, `logout`, `uploadImage`, `mediaUrl`, `getPath`/`setPath`, `mergeDefaults`. |
+| Redirects | `middleware.js` | CMS redirects, matched from a list cached for a minute. Sends `X-CMS-Frontend` like `lib/cms.js`. |
 | Server reads | `lib/cms.js` | Tagged ISR reads (`getContent(s)`, `getSiteSettings`, `resolveSeo`, `getBlogPost(s)`, `getContentPage(s)`, `getPageSeoList`). |
 | SEO | `lib/seo.js`, `components/seo/*` | `pageMetadata`, `metadataFromResolved`, `pageJsonLd`, `<PageSeo>`, `<JsonLd>`, `<Analytics>`. |
 | Keywords | `lib/keywords.js` | Keyword matching, mirroring `api/keywords.py`. Used by the coverage badge. |
@@ -52,7 +53,7 @@ their classes to match the site, but you must keep every `T`, `ItemTools`,
 
 | File | Run | Gate |
 |---|---|---|
-| `scripts/check-inline.mjs` | `node scripts/check-inline.mjs src` | Fails on any literal copy left in a `useCms` component (unless marked `cms-static`). |
+| `scripts/check-inline.mjs` | `node scripts/check-inline.mjs src` | Fails on any literal copy left in a `useCms` component (unless marked `cms-static`), and on any list keyed by its items' own text (fields would lose focus while typing). |
 | `scripts/check-sections.mjs` | `node scripts/check-sections.mjs` (backend running) | Fails when `registry.js` differs from `ai/section-schema/`. |
 | `acceptance/acceptance.mjs` | See its header | End-to-end test: visitor isolation, session login, inline edit → draft → publish → webhook, AI paste normalisation, discard, SEO AI, CMS-page section editing, create page, admin pages, sign out. Cleans up after itself. |
 

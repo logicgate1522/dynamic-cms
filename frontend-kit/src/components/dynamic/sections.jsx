@@ -481,8 +481,8 @@ export function ContactBlock({ heading, email, phone, address, hours }) {
             <div className={container}>
                 <Heading heading={heading || "Get in touch"} />
                 <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                    {rows.map(([label, value, href, field]) => (
-                        <div key={label} className="rounded-[20px] bg-white p-6 shadow-[0_10px_30px_rgba(18,58,92,0.07)]">
+                    {rows.map(([label, value, href, field], index) => (
+                        <div key={index} className="rounded-[20px] bg-white p-6 shadow-[0_10px_30px_rgba(18,58,92,0.07)]">
                             <dt className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#0F9E86]">{label}</dt>
                             <dd className="mt-2 whitespace-pre-line text-[15px] font-medium text-[#123A5C]">
                                 {href ? <a href={href} className="hover:underline"><T path={field} value={value} /></a> : <T path={field} value={value} multiline />}
