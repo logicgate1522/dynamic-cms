@@ -1,4 +1,5 @@
 import { mediaUrl } from "@/lib/api";
+import { SITE_NAME } from "@/lib/brand";
 import { articles as localArticles } from "@/data/articles";
 
 /* =========================================
@@ -49,7 +50,7 @@ export function postToArticle(post) {
         slug: post.slug,
         title: post.title,
         description: post.excerpt || "",
-        author: post.author || "AccountEdge UK Team",
+        author: post.author || `${SITE_NAME} Team`,
         category: content.category || "Accounting",
         image: mediaUrl(content.coverImage) || "/images/resources/article-1.png",
         imageAlt: content.coverImageAlt || post.title,

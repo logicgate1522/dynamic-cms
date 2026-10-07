@@ -2047,9 +2047,9 @@ class IntegrationSpecTests(APITestCase):
 class TitleTemplateTests(APITestCase):
     def test_brand_is_not_doubled_and_long_titles_drop_it(self):
         from .seo_resolve import apply_title_template as t
-        tpl = "%s | AccountEdge UK"
-        self.assertEqual(t("VAT Returns", tpl), "VAT Returns | AccountEdge UK")
-        self.assertEqual(t("UK Accountants | AccountEdge UK", tpl), "UK Accountants | AccountEdge UK")
+        tpl = "%s | Acme Ltd"
+        self.assertEqual(t("VAT Returns", tpl), "VAT Returns | Acme Ltd")
+        self.assertEqual(t("UK Accountants | Acme Ltd", tpl), "UK Accountants | Acme Ltd")
         long = "Preparing Your Annual Accounts: Key Deadlines for 2026"
         self.assertEqual(t(long, tpl), long)
         self.assertEqual(t("Anything", "%s"), "Anything")

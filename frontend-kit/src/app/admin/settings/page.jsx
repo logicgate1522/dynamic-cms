@@ -50,7 +50,7 @@ const HINTS = {
     "organization.logo": { type: "image", category: "brand" },
     "organization.sameAs": { label: "Social profile URLs" },
     "organization.description": { type: "textarea" },
-    "seoDefaults.siteUrl": { label: "Public site URL", help: "e.g. https://www.accountedge.co.uk — used for canonical URLs and the sitemap." },
+    "seoDefaults.siteUrl": { label: "Public site URL", help: "e.g. https://www.yourdomain.co.uk — used for canonical URLs and the sitemap." },
     "seoDefaults.titleTemplate": { help: "%s is replaced by each page's title." },
     "seoDefaults.defaultDescription": { type: "textarea" },
     "seoDefaults.defaultOgImage": { label: "Default social share image (1200×630)", type: "image", category: "seo" },
