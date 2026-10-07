@@ -21,8 +21,10 @@ instructions the docs already answer.
    `next build`, `npm run check:inline`, `npm run check:sections` (backend
    running), `frontend-kit/acceptance/acceptance.mjs` and
    `frontend-kit/acceptance/site-audit.mjs` (0 failures) against the
-   production build. Paste their output in your report, plus any launch-check
-   blockers that need the owner.
+   production build. Every phase ends with its Exit check; P8 verifies in three
+   passes (fix until green → clean re-verification with no code changes →
+   rule-by-rule audit against §13 and §11). Paste the Pass 2 output in your
+   report, plus any launch-check blockers that need the owner.
 5. Never:
    - put a token in browser storage
    - build modal-first editing

@@ -22,6 +22,14 @@ this file wins.
    builds, so nothing is left for "later".
 4. **Rely on the gates, not memory.** Most rules have an automatic gate. Where
    a rule says "(review)", you check it by hand and say how in your report.
+5. **Audit at three levels, not once at the end:**
+   - **every change:** after each component, `npm run check:inline` and a
+     visual comparison (P3);
+   - **every phase:** each phase ends with an **Exit check**. Don't start the
+     next phase until it passes;
+   - **at the end:** P8 runs three passes: fix until green, a clean
+     re-verification with no code changes, then a rule-by-rule audit against
+     §13 and §11. Only Pass 2 output counts.
 
 **Definition of done (no exceptions).** All five gates pass against the
 running **production build** (`next build && next start`, never `next dev`):
@@ -29,7 +37,7 @@ running **production build** (`next build && next start`, never `next dev`):
 | Gate | Command | Proves |
 |---|---|---|
 | 1. Build | `next build` | compiles, prerenders, no server/client import mistakes |
-| 2. Inline | `npm run check:inline` | no hard-coded copy, index keys, `hidden` guard, no raw `url(`, forms only via `submitForm`, tracking only via `track` |
+| 2. Inline | `npm run check:inline` | no hard-coded copy, index keys, `hidden` guard, no raw `url(`, forms only via `submitForm`, tracking only via `track`, no `dangerouslySetInnerHTML`, no secret / `X-CMS-Frontend` in browser code, no prompt wording, no token in browser storage |
 | 3. Sections | `npm run check:sections` (backend running) | renderer registry = backend section types |
 | 4. Acceptance | `node frontend-kit/acceptance/acceptance.mjs` | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, auth |
 | 5. Site audit | `node frontend-kit/acceptance/site-audit.mjs` → **0 failures** | SEO on every page, links, contact consistency, placeholders, forms end to end |
@@ -54,13 +62,13 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R1 | Foundation | Install the kit verbatim; change only ADAPT files and the theme block | review, `check:sections` | P1 |
 | R2 | Editing | Inline editing first: `E.Text` / `E.Image` / `E.Item` + `E.Add` / `E.Link` | `check:inline`, acceptance | P3 |
 | R3 | Editing | Every edit is a draft; only Publish goes live | acceptance | P3 |
-| R4 | Foundation | Session cookie + CSRF auth only | acceptance | P1 |
-| R5 | AI | The backend owns every AI prompt | review (grep), acceptance | P1, P8 |
+| R4 | Foundation | Session cookie + CSRF auth only | `check:inline`, acceptance | P1 |
+| R5 | AI | The backend owns every AI prompt | `check:inline`, acceptance | P1, P8 |
 | R6 | AI | Every pasted AI/JSON reply goes through `ai/normalize` | acceptance | P1, P8 |
 | R7 | Foundation | The signed backend webhook refreshes caches | acceptance | P1 |
 | R8 | Foundation | Visitors get zero CMS UI and zero CMS cost | acceptance | P1, P3 |
 | R9 | Editing | Defaults = the original copy, verbatim | review (screenshots) | P3 |
-| R10 | Editing | Plain text only; no `dangerouslySetInnerHTML` for CMS text | review (grep) | P3 |
+| R10 | Editing | Plain text only; no `dangerouslySetInnerHTML` for CMS text | `check:inline` | P3 |
 | R11 | Editing | Images are uploaded, never typed | review | P3 |
 | R12 | Process | No clarifying questions; take the stated default | report | P0–P8 |
 | R13 | Pages | Only collections are buildable from the site | acceptance | P5 |
@@ -69,7 +77,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R16 | AI | SEO panel and whole-page assist are the kit's, unchanged | acceptance | P2, P8 |
 | R17 | Look | Admin UI themed via `--cms-*`, never restyled; ≥4.5:1 contrast | acceptance (axe) | P1 |
 | R18 | Editing | Typing never loses focus: lists keyed by index | `check:inline`, acceptance | P3 |
-| R19 | Foundation | The site's server sends `X-CMS-Frontend` | review, acceptance | P1 |
+| R19 | Foundation | The site's server sends `X-CMS-Frontend` | `check:inline`, acceptance | P1 |
 | R20 | Look | Responsive at 390 / 768 / 1280 / 1920px, admin included | acceptance | P3 |
 | R21 | Quality | Every page passes the site audit | site-audit | P2, P6, P7 |
 | R22 | Launch | No launch-check blockers; never invent business details | `LAUNCH=1` site-audit | P7, P8 |
@@ -122,8 +130,9 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   `SESSION_COOKIE_SAMESITE=None` + `Secure` (§6.1).
 - **Never:** a token in `localStorage` / `sessionStorage` / a cookie you set;
   `isAdmin` derived from client storage; token login in the browser.
-- **Proven by:** acceptance "session cookie is httpOnly; nothing token-like
-  in web storage", "sign out ends the server session".
+- **Proven by:** `check:inline` (no auth token written to browser storage);
+  acceptance "session cookie is httpOnly; nothing token-like in web
+  storage", "sign out ends the server session".
 
 #### R5 — The backend owns every AI prompt
 - **Must:** prompts come from `ai/*-prompt/`, `content/<key>/build-prompt/`
@@ -131,8 +140,8 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   goes into `SiteSettings.ai` (seeded in P7), not into frontend strings.
   Every backend prompt ends with its FINAL CHECK.
 - **Never:** prompt wording in the frontend; a prompt without a FINAL CHECK.
-- **Proven by:** review (grep the frontend for prompt wording); acceptance
-  "prompt restates its rules at the end (FINAL CHECK)".
+- **Proven by:** `check:inline` (fails on prompt wording in the frontend);
+  acceptance "prompt restates its rules at the end (FINAL CHECK)".
 
 #### R6 — Every pasted reply is normalised by the backend
 - **Must:** pasted AI or JSON goes through `POST ai/normalize/` (or
@@ -171,7 +180,8 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Must:** CMS and AI text renders as text; paragraphs come from blank-line
   splits (`EditableParagraphs`).
 - **Never:** `dangerouslySetInnerHTML` for CMS or AI text.
-- **Proven by:** review (grep for `dangerouslySetInnerHTML`).
+- **Proven by:** `check:inline` (fails on `dangerouslySetInnerHTML` anywhere
+  but `components/seo/JsonLd.jsx`).
 
 #### R11 — Images are uploaded, never typed
 - **Must:** `<E.Image>`, `SlotUpload` or `uploadImage()`; alt text in its own
@@ -258,7 +268,9 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   IP rendering every page isn't rate-limited as an anonymous visitor.
 - **Never:** this header from browser code; the secret in a `NEXT_PUBLIC_`
   variable.
-- **Proven by:** review; acceptance runs without 429s.
+- **Proven by:** `check:inline` (fails on the header or secret outside
+  `lib/cms.js` / `middleware.js` / the revalidate route, in a client file, or
+  in a `NEXT_PUBLIC_` variable); acceptance runs without 429s.
 
 #### R20 — Responsive on every screen
 - **Must:** every converted section keeps its behaviour at 390px, 768px,
@@ -383,6 +395,8 @@ height (R15), and every phone number / email / address in the code (R21,
 R22). Output one table: `file → what's hard-coded → useCms name → phase`, and
 a list of the business details you'll need from the owner.
 
+**Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists. No file changed (`git status` clean).
+
 **P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25.**
 1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
    that aren't in the manifest; if a path collides, stop and report it. The
@@ -431,11 +445,15 @@ a list of the business details you'll need from the owner.
    `/admin/login?next=<current path>` with `rel="nofollow"`. Use `usePathname`;
    on `/admin*` routes, link without `next`.
 
+**Exit check P1:** `next build` passes; `npm run check:inline` runs (it may still list unconverted copy); `/admin/login` signs in and the admin bar appears; `grep -rn "gtag\|fbq\|GTM-" src/app` finds no hard-coded tag; the site looks unchanged.
+
 **P2 — Per-route metadata. Rules: R16, R21.** Every route:
 `generateMetadata()` = `pageMetadata("/<path>", fallback)` (from
 `lib/seo.js`, which reads `seo/resolve/`), and `<PageSeo path="/<path>" />`
 once in the page. That emits JSON-LD and gives the admin bar its SEO button
 (R16). Fix heading structure now: one `<h1>`, no skipped levels (R21).
+
+**Exit check P2:** every route file exports `generateMetadata` and renders `<PageSeo>` (grep both, compare counts with the route list); the SEO button opens on each route.
 
 **P3 — Convert every section (§3 recipe). Rules: R2, R3, R8, R9, R10, R11,
 R15, R18, R20, R23.** One component at a time. After each one,
@@ -444,10 +462,14 @@ returns `null` when `hidden` (R23), its lists are index-keyed (R18), and it
 works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
 `SiteSettings.contact` or one shared block, never typed twice (R21).
 
+**Exit check P3:** `npm run check:inline` reports **0 problems** for the whole of `src`; `next build` passes; side-by-side screenshots of every page at 390px and 1280px match the originals (R9); with editing on, each converted block shows Hide and All fields on hover.
+
 **P4 — Forms (§5.4). Rules: R24.** Every form submits with `submitForm()`
 from `lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
 notifications). Delete all old submit code (fetch, `mailto:`, EmailJS,
 Formspree, a hard-coded FormSubmit URL).
+
+**Exit check P4:** `grep -rn "fetch(.*submit\|formsubmit\|mailto:.*body" src --include=*.jsx` finds nothing outside `lib/forms.js`; each form submits once in the browser and the entry appears in Dashboard → Form inbox.
 
 **P5 — Collections, CMS pages and blog. Rules: R13, R14, R23.** First decide
 the collections (R13). A page type IS a collection when there is an index page
@@ -477,12 +499,16 @@ inline section editing, per-section AI, section Hide (R23) and (on collection
 entries) the collection panel. Dynamic blog posts work the same way with
 `kind="blog"`.
 
+**Exit check P5:** `npm run check:sections` passes; `GET collections/` lists every collection with the right `count`; "＋ New …" shows only on the collection index pages; every existing detail page renders from the CMS identically.
+
 **P6 — Sitemap, robots, redirects. Rules: R21.** `app/sitemap.js` builds
 from static routes, `seo/`, `blog/` and `content/pages/`, honouring
 `sitemap.include:false` and `robots.index:false`. `app/robots.js` reads
 `settings/site/`. The middleware calls `redirects/resolve/?path=`. Add the
 static routes to `SiteSettings.sitemap.extraPaths` so the backend sitemap
 report covers them.
+
+**Exit check P6:** `/sitemap.xml` lists every public route and no noindex page; `/robots.txt` has a Sitemap line on the canonical origin; a CMS redirect returns its status.
 
 **P7 — Seed. Rules: R5, R21, R22, R24, R25.** A `scripts/seed-cms.mjs` that
 fills the CMS:
@@ -502,16 +528,39 @@ It must be idempotent. Without `--force` it fills only what is still missing
 (at any depth) and never overwrites an admin's edit. It never writes invented
 business details (R22).
 
-**P8 — Verify. Rules: all, R1–R25.** Run the five gates of the Definition of
-done against the production build. Fix and rerun until all five are green
-(site-audit: 0 failures). Grep for prompt wording (R5),
-`dangerouslySetInnerHTML` (R10) and image-URL inputs (R11). Then report:
-1. the five gate outputs, verbatim
-2. the §13 checklist, one line per rule, ticked, with its evidence
+**Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written.
+
+**P8 — Verify (three passes). Rules: all, R1–R25.** One green run is not
+proof: a fix for one gate can break another, and some rules have no
+automatic gate. Do all three passes, in order.
+
+1. **Pass 1 — fix until green.** Production build (`rm -rf .next && next
+   build && next start`), backend running, seed applied. Run the five gates.
+   Fix every failure at its cause (never by weakening a gate, skipping a
+   check or deleting content), then rerun **all five**, not just the one that
+   failed. Repeat until all five are green in the same run.
+2. **Pass 2 — clean re-verification.** Without touching the code: delete
+   `.next`, rebuild, restart, rerun the seed (it must change nothing), then run
+   all five gates again from scratch. If anything fails, or you change any file
+   during this pass, go back to Pass 1. The outputs you report come from this
+   pass.
+3. **Pass 3 — rule-by-rule audit.** Walk §13 line by line. For each rule, write
+   its evidence: the gate output line that proves it, or for "(review)" lines
+   what you checked and how (screenshots compared for R9, the upload path for
+   R11, the MANIFEST diff for R1). Then read §11 top to bottom and confirm that
+   none of the anti-patterns exist in the code (search for each one). Any gap
+   sends you back to Pass 1.
+
+Then report:
+1. the five gate outputs from Pass 2, verbatim
+2. the §13 checklist, one line per rule, ticked, with its evidence (Pass 3)
 3. "Defaults taken" (R12)
 4. "Needs from the owner": every launch-check blocker that needs real
    business data or production config (R22), plus the FormSubmit activation
    step (R24)
+
+**Exit check P8:** Pass 2 ran with no file changes after it; every §13 line
+has evidence; nothing in §11 exists in the code.
 
 ---
 
@@ -1302,20 +1351,21 @@ site-audit.mjs (0 failures). Then report, in this order:
 
 ## §13 — Final checklist (every rule, one more time)
 
-Walk this list before reporting. Every line must be true. Each line names the
+Walk this list in P8 Pass 3, after the clean re-verification. Every line
+must be true and carry evidence. Each line names the
 gate that proves it; a "(review)" line is yours to verify by hand — say how.
 
 **The rules**
 - [ ] **R1** The kit is installed verbatim; only MANIFEST ADAPT files, the `cms.css` theme block and adapter classes changed. (review, `check:sections`)
 - [ ] **R2** Every visible string in a CMS component is `<E.Text>`; images, lists and links use `E.Image` / `E.Item` + `E.Add` / `E.Link`; backgrounds use `bgImage()`. No modal-first editing. (`check:inline`, acceptance)
 - [ ] **R3** Every edit saves as a draft; only Publish makes it live. (acceptance "public data unchanged before publish")
-- [ ] **R4** Session cookie + CSRF only; no token in browser storage. (acceptance "session cookie…")
-- [ ] **R5** No prompt text in the frontend; prompts come from the backend and end with a FINAL CHECK. (review grep, acceptance "FINAL CHECK")
+- [ ] **R4** Session cookie + CSRF only; no token in browser storage. (`check:inline`, acceptance "session cookie…")
+- [ ] **R5** No prompt text in the frontend; prompts come from the backend and end with a FINAL CHECK. (`check:inline`, acceptance "FINAL CHECK")
 - [ ] **R6** Every pasted AI/JSON reply goes through `ai/normalize/` or a server paste endpoint. (acceptance "AI paste normalised")
 - [ ] **R7** The webhook route is installed, and visitors see a publish without a rebuild. (acceptance "visitor HTML updated")
 - [ ] **R8** Visitors get zero CMS UI and no extra content fetches. (acceptance "visitor: no admin bar")
 - [ ] **R9** Defaults are the original copy, verbatim; the page looks identical before any edit. (review: screenshots)
-- [ ] **R10** No `dangerouslySetInnerHTML` for CMS/AI text. (review: grep)
+- [ ] **R10** No `dangerouslySetInnerHTML` for CMS/AI text. (`check:inline`)
 - [ ] **R11** Images are uploaded, never typed as URLs. (review)
 - [ ] **R12** No clarifying questions were needed; defaults are listed in the report; no business detail was invented. (report)
 - [ ] **R13** Collections are decided and seeded; "＋ New …" appears only on their index pages; one-off pages are structure-locked. (acceptance "collections…", "structure is locked")
@@ -1324,7 +1374,7 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R16** The SEO panel opens on Ask AI with its prompt built and shows 18 checks; the whole-page assist shows coverage %, chips and 6 rules, live after Apply. (acceptance SEO + AI assist checks)
 - [ ] **R17** The `--cms-*` theme variables are set to the site palette, at ≥4.5:1 contrast with white. (acceptance "admin panels meet WCAG AA contrast")
 - [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus")
-- [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (review; acceptance shows no 429s)
+- [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (`check:inline`; acceptance shows no 429s)
 - [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
 - [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
 - [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner". (`LAUNCH=1` site-audit, dashboard card)

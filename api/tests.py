@@ -2021,6 +2021,19 @@ class IntegrationSpecTests(APITestCase):
             self.assertRegex(sections["§11"], rf"(?m)^- \*\*R{n}\*\* ", f"R{n} has no anti-pattern in §11")
             self.assertRegex(sections["§13"], rf"(?m)^- \[ \] \*\*R{n}\*\* .+\(.+\)$", f"R{n} has no checklist line with its gate in §13")
 
+    def test_the_agent_audits_at_every_level(self):
+        """Every phase ends with an Exit check, and P8 verifies in three passes
+        (fix until green → clean re-verification → rule-by-rule audit)."""
+        _, spec, sections, _ = self._spec()
+        for i in range(9):
+            self.assertIn(f"**Exit check P{i}:**", sections["§2"], f"P{i} has no Exit check")
+        p8 = sections["§2"][sections["§2"].index("**P8 — "):]
+        for marker in ("**Pass 1 — fix until green.**", "**Pass 2 — clean re-verification.**", "**Pass 3 — rule-by-rule audit.**",
+                       "rerun **all five**", "go back to Pass 1"):
+            self.assertIn(marker, p8)
+        self.assertIn("Audit at three levels", spec)
+        self.assertIn("Pass 3", sections["§13"], "the checklist must be walked in the final audit pass")
+
     def test_companion_docs_name_the_current_rule_range(self):
         import re
         root, _, _, rules = self._spec()

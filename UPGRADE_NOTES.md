@@ -1,3 +1,23 @@
+# Upgrade Notes — audits at every level
+
+- Every phase P0–P8 ends with an **Exit check**. The next phase starts only
+  when it passes.
+- P8 verifies in three passes:
+  1. fix until all five gates are green in one run (rerun all five after
+     every fix);
+  2. a clean re-verification with no code changes (rebuild, reseed, all
+     gates); the reported output comes from this pass;
+  3. a rule-by-rule audit against §13 with evidence, plus a sweep of §11.
+- Four "review by hand" rules are now automatic in `check-inline.mjs`:
+  - R4: no auth token in browser storage
+  - R5: no AI prompt wording in the frontend
+  - R10: no `dangerouslySetInnerHTML` outside `JsonLd`
+  - R19: no secret or `X-CMS-Frontend` in browser code or a `NEXT_PUBLIC_`
+    variable
+- `IntegrationSpecTests` fails if any Exit check or pass is removed.
+
+---
+
 # Upgrade Notes — spec v3: every rule stated five times
 
 - `FRONTEND_INTEGRATION_PROMPT.md` is restructured. "How to use this file"

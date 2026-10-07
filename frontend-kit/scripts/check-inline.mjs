@@ -13,6 +13,11 @@
       React would replace the element and the field would lose focus after
       one keystroke. Use the map index (or a stable item.id / item.slug).
 
+   3. site-wide (every file): forms only via lib/forms (R24), tracking only via
+      lib/track (R25), no dangerouslySetInnerHTML outside JsonLd (R10), no
+      secret or X-CMS-Frontend in browser code (R19), no AI prompt wording
+      (R5), no auth token in browser storage (R4).
+
    To keep a string fixed on purpose (a unit, a legal mark, a screen-reader
    label, admin-only chrome), put a JSX comment containing "cms-static" on
    the same line or the line above:   {/* cms-static: currency symbol *\/}
@@ -128,6 +133,31 @@ function siteWideRules(file, source, lines, report) {
     }
 }
 
+// Rules that used to be "review by hand" (R4, R5, R10, R19), now automatic.
+const SAFE_HTML = /components\/seo\/JsonLd\.(jsx|tsx)$/; // escaped JSON-LD only
+const SERVER_SECRET_FILES = /lib\/cms\.(js|ts)$|middleware\.(js|ts)$|app\/api\/revalidate\/route\.(js|ts)$/;
+function contractRules(file, source, lines, report) {
+    const isClient = /^\s*["']use client["']/.test(source);
+    lines.forEach((line, i) => {
+        if (/cms-static/.test(line)) return;
+        if (/dangerouslySetInnerHTML/.test(line) && !SAFE_HTML.test(file)) {
+            report(i + 1, "dangerouslySetInnerHTML — CMS and AI text renders as plain text (R10); JSON-LD goes through <JsonLd>");
+        }
+        if (/NEXT_PUBLIC_\w*(SECRET|TOKEN|PASSWORD)/.test(line)) {
+            report(i + 1, "secret exposed to the browser through a NEXT_PUBLIC_ variable (R19)");
+        }
+        if (/X-CMS-Frontend|REVALIDATE_SECRET/.test(line) && (isClient || !SERVER_SECRET_FILES.test(file))) {
+            report(i + 1, "X-CMS-Frontend / REVALIDATE_SECRET outside lib/cms.js, middleware.js and the revalidate route (R19)");
+        }
+        if (/FINAL CHECK|Return ONLY|Respond (only )?with (valid )?JSON|You are an? (expert|senior|SEO|copywriter|content)/i.test(line)) {
+            report(i + 1, "AI prompt wording in the frontend — prompts come from the backend ai/* endpoints (R5)");
+        }
+        if (/(local|session)Storage\.setItem\(\s*[^,]*(token|auth|csrf|jwt|session)/i.test(line) || /document\.cookie\s*=.*(token|auth)/i.test(line)) {
+            report(i + 1, "auth token in browser storage — session cookie + CSRF only (R4)");
+        }
+    });
+}
+
 // A component that renders a useCms block must honour `hidden`
 // (if (hidden) return null;) — otherwise "Hide" does nothing for visitors.
 function hiddenGuard(ast, source, report) {
@@ -150,6 +180,10 @@ for (const file of files) {
     {
         const lines = source.split("\n");
         siteWideRules(file, source, lines, (line, message) => {
+            problems++;
+            console.log(`${relativePath}:${line}  ${message}`);
+        });
+        contractRules(file, source, lines, (line, message) => {
             problems++;
             console.log(`${relativePath}:${line}  ${message}`);
         });
@@ -202,4 +236,4 @@ if (problems) {
     console.log("Forms → submitForm() from @/lib/forms. Tracking → track() from @/lib/track. Hide → if (hidden) return null.");
     process.exit(1);
 }
-console.log(`check-inline: OK — ${scanned} CMS component file(s): no hard-coded copy, no text-derived list keys, hidden honoured; forms and tracking use their helpers.`);
+console.log(`check-inline: OK — ${scanned} CMS component file(s): no hard-coded copy, no text-derived list keys, hidden honoured; forms and tracking use their helpers; no unsafe HTML, client secrets, prompt text or stored tokens.`);
