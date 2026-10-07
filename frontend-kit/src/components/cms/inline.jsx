@@ -27,7 +27,7 @@ import { blankLike } from "@/components/cms/FieldEditor";
 ========================================= */
 
 const toolButton =
-    "inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-white px-1.5 text-[11px] font-bold text-[#0F172A] shadow-sm ring-1 ring-black/10 hover:bg-[#ECFDF5] disabled:opacity-30";
+    "inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-white px-1.5 text-[11px] font-bold text-[#0F172A] shadow-sm ring-1 ring-black/10 hover:bg-[var(--cms-accent-soft)] disabled:opacity-30";
 
 function stop(event) {
     event.preventDefault();
@@ -144,8 +144,8 @@ export function createInline(stateRef) {
         const [error, setError] = useState("");
         if (!editMode) return null;
         return (
-            <span className={`cms-ui absolute z-[55] flex flex-col items-start gap-1 ${className}`}>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 backdrop-blur hover:bg-[#0F9E86]">
+            <span className={`cms-ui ${busy || error ? "" : "cms-hover-tools"} absolute z-[55] flex flex-col items-start gap-1 ${className}`}>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 backdrop-blur hover:bg-[var(--cms-accent)]">
                     {busy ? "Uploading…" : "Replace image"}
                     <input
                         type="file"
@@ -187,7 +187,7 @@ export function createInline(stateRef) {
             write(next);
         };
         return (
-            <span className={`cms-ui cms-item-tools absolute z-[55] flex gap-1 ${className}`} onClick={stop} onMouseDown={(e) => e.stopPropagation()}>
+            <span className={`cms-ui cms-hover-tools absolute z-[55] flex gap-1 ${className}`} onClick={stop} onMouseDown={(e) => e.stopPropagation()}>
                 <button type="button" title="Move earlier" aria-label="Move earlier" className={toolButton} disabled={index === 0} onClick={(e) => { stop(e); move(-1); }}>↑</button>
                 <button type="button" title="Move later" aria-label="Move later" className={toolButton} disabled={index === list.length - 1} onClick={(e) => { stop(e); move(1); }}>↓</button>
                 <button type="button" title="Duplicate" aria-label="Duplicate" className={toolButton} onClick={(e) => { stop(e); write([...list.slice(0, index + 1), structuredClone(list[index]), ...list.slice(index + 1)]); }}>⧉</button>
@@ -209,7 +209,7 @@ export function createInline(stateRef) {
                     const current = getPath(stateRef.current.data, path);
                     stateRef.current.update(path, [...(Array.isArray(current) ? current : []), blankLike(sample)]);
                 }}
-                className={`cms-ui inline-flex items-center gap-1.5 rounded-full border-2 border-dashed border-[#0F9E86] bg-white/90 px-4 py-2 text-[12px] font-semibold text-[#0B7A68] shadow-sm hover:bg-[#ECFDF5] ${className}`}
+                className={`cms-ui cms-hover-tools inline-flex items-center gap-1.5 rounded-full border-2 border-dashed border-[var(--cms-accent)] bg-white/90 px-4 py-2 text-[12px] font-semibold text-[var(--cms-accent-strong)] shadow-sm hover:bg-[var(--cms-accent-soft)] ${className}`}
             >
                 + {label}
             </button>
@@ -223,7 +223,7 @@ export function createInline(stateRef) {
         if (!editMode) return null;
         const current = getPath(data, path) || "";
         return (
-            <span className={`cms-ui relative inline-flex align-middle ${className}`} onClick={stop} onMouseDown={(e) => e.stopPropagation()}>
+            <span className={`cms-ui ${open ? "" : "cms-hover-tools"} relative inline-flex align-middle ${className}`} onClick={stop} onMouseDown={(e) => e.stopPropagation()}>
                 <button
                     type="button"
                     title={`Link: ${current || "not set"}`}
@@ -252,11 +252,11 @@ export function createInline(stateRef) {
                                 if (e.key === "Escape") setOpen(false);
                             }}
                             placeholder="/contact or https://…"
-                            className="min-w-0 flex-1 rounded-md border border-[#CBD5E1] px-2 py-1 text-[12px] font-normal text-[#0F172A] outline-none focus:border-[#0F9E86]"
+                            className="min-w-0 flex-1 rounded-md border border-[#CBD5E1] px-2 py-1 text-[12px] font-normal text-[#0F172A] outline-none focus:border-[var(--cms-accent)]"
                         />
                         <button
                             type="button"
-                            className="rounded-md bg-[#0F9E86] px-2 text-[11px] font-semibold text-white"
+                            className="rounded-md bg-[var(--cms-accent)] px-2 text-[11px] font-semibold text-white"
                             onClick={(e) => {
                                 stop(e);
                                 stateRef.current.update(path, value.trim());

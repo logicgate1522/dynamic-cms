@@ -36,11 +36,11 @@ export default function SiteTools() {
         <Drawer open width={900} title="Site tools" subtitle={label} onClose={closePanel}>
             <div className="mb-5 flex flex-wrap items-center gap-1">
                 {TOOLS.map(([key, name]) => (
-                    <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${tab === key ? "bg-[#123A5C] text-white" : "text-[#475569] hover:bg-[#F1F5F9]"}`}>
+                    <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${tab === key ? "bg-[var(--cms-primary)] text-white" : "text-[#475569] hover:bg-[#F1F5F9]"}`}>
                         {name}
                     </button>
                 ))}
-                <Link href={href} onClick={closePanel} className="ml-auto text-[12px] font-semibold text-[#0F9E86] hover:underline">Open full page →</Link>
+                <Link href={href} onClick={closePanel} className="ml-auto text-[12px] font-semibold text-[var(--cms-accent)] hover:underline">Open full page →</Link>
             </div>
             <Body />
         </Drawer>

@@ -54,7 +54,7 @@ export function blankLike(value) {
 const inputClass = `
     w-full rounded-lg border border-[#D6DEE8] bg-white px-3 py-2
     text-[13px] text-[#1E293B] outline-none
-    focus:border-[#0F9E86] focus:ring-2 focus:ring-[#0F9E86]/20
+    focus:border-[var(--cms-accent)] focus:ring-2 focus:ring-[var(--cms-accent)]/20
 `;
 
 function Label({ children, hint }) {
@@ -97,7 +97,7 @@ function ImageField({ value, onChange, label, hint }) {
                     )}
                 </div>
                 <div className="flex flex-col gap-1.5">
-                    <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-[#123A5C] px-3 py-1.5 text-[12px] font-semibold text-white hover:brightness-110">
+                    <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-[var(--cms-primary)] px-3 py-1.5 text-[12px] font-semibold text-white hover:brightness-110">
                         {busy ? "Uploading…" : value ? "Replace image" : "Upload image"}
                         <input type="file" accept="image/*" className="hidden" onChange={onFile} disabled={busy} />
                     </label>
@@ -192,7 +192,7 @@ function ListField({ value, onChange, label, path, hints, template }) {
             <button
                 type="button"
                 onClick={add}
-                className="mt-2 rounded-lg border border-dashed border-[#94A3B8] px-3 py-1.5 text-[12px] font-semibold text-[#334155] hover:border-[#0F9E86] hover:text-[#0F9E86]"
+                className="mt-2 rounded-lg border border-dashed border-[#94A3B8] px-3 py-1.5 text-[12px] font-semibold text-[#334155] hover:border-[var(--cms-accent)] hover:text-[var(--cms-accent)]"
             >
                 + Add {isObjectList ? "item" : "entry"}
             </button>

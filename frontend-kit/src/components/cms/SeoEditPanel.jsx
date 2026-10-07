@@ -3,21 +3,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdmin } from "@/components/cms/AdminProvider";
-import { INTENT_OPTIONS, Notice, PasteBox, PromptBox, Step, pageTextExcerpt } from "@/components/cms/ai";
+import { INTENT_OPTIONS, Notice, PasteBox, PromptBox, Segmented, pageTextExcerpt } from "@/components/cms/ai";
 import Drawer, { buttonStyles } from "@/components/cms/Drawer";
+import { SEO_SAVED_EVENT, useKeywordCoverage } from "@/components/cms/PageAssist";
 import { apiRequest, mediaUrl, uploadImage } from "@/lib/api";
-import { containsKeyword } from "@/lib/keywords";
-import { useKeywordCoverage, CoverageBadge } from "@/components/cms/PageAssist";
+import { SITE_NAME } from "@/lib/brand";
+import { seoChecks, seoScore } from "@/lib/seoChecks";
 
 /* =========================================
-   Per-page SEO (seo/<path>/). Saves publish
+   Per-page SEO (seo/<path>/). Saves go live
    immediately — this is metadata, not page copy.
    Mounted once per route via <PageSeo path>; the
    admin bar's "SEO" button opens it.
+
+   The first thing an admin sees is ASK AI: the audit
+   prompt is already built (every field, the failing
+   checks with their fixes, the visible page text) —
+   copy, paste the reply, done. The score bar and the
+   full check list (lib/seoChecks.js, mirrored by the
+   backend) stay visible on every tab.
 ========================================= */
 
 const SCHEMA_BUILDERS = ["Service", "FAQPage", "HowTo", "Product", "Event", "Person", "VideoObject"];
 const CHANGEFREQ = ["always", "hourly", "daily", "weekly", "monthly", "yearly", "never"];
+const TAB_LABELS = { essentials: "Essentials", sharing: "Sharing & indexing", advanced: "Advanced" };
 
 const EMPTY = {
     seoTitle: "",
@@ -29,7 +38,7 @@ const EMPTY = {
     social: { ogTitle: "", ogDescription: "", ogImage: "", ogImageAlt: "", twitterTitle: "", twitterDescription: "", twitterImage: "", twitterCard: "summary_large_image" },
     robots: { index: true, follow: true, noarchive: false, nosnippet: false, noimageindex: false },
     sitemap: { include: true, priority: 0.5, changefreq: "monthly" },
-    schema: { builders: [] },
+    schema: { enabled: true, builders: [] },
     breadcrumbLabels: {},
     notes: "",
 };
@@ -56,24 +65,21 @@ function deepMergePatch(base, patch) {
     return out;
 }
 
-// Same rules as the backend's prompts.seo_rule_checks, plus where to fix each.
-function localChecks(seo) {
-    const kw = seo.keywords.primary;
-    const t = seo.seoTitle;
-    const d = seo.metaDescription;
-    return [
-        { id: "keyword-set", label: "Primary keyword is set", pass: Boolean(kw), field: "keywords.primary", tab: "essentials" },
-        { id: "title-keyword", label: "SEO title contains the keyword", pass: Boolean(kw && t && containsKeyword(t, kw)), skip: !kw, field: "seoTitle", tab: "essentials" },
-        { id: "title-length", label: `SEO title is 30–60 characters (now ${t.length})`, pass: t.length >= 30 && t.length <= 60, field: "seoTitle", tab: "essentials" },
-        { id: "desc-keyword", label: "Meta description contains the keyword", pass: Boolean(kw && d && containsKeyword(d, kw)), skip: !kw, field: "metaDescription", tab: "essentials" },
-        { id: "desc-length", label: `Meta description is 120–160 characters (now ${d.length})`, pass: d.length >= 120 && d.length <= 160, field: "metaDescription", tab: "essentials" },
-        { id: "intent-set", label: "Search intent is set", pass: INTENT_OPTIONS.includes(seo.searchIntent) && Boolean(seo.searchIntent), field: "searchIntent", tab: "essentials" },
-        { id: "secondary", label: "At least 3 secondary keywords", pass: seo.keywords.secondary.length >= 3, field: "keywords.secondary", tab: "essentials" },
-        { id: "og-image", label: "Social share image is set", pass: Boolean(seo.social.ogImage), field: "social.ogImage", tab: "sharing" },
-        { id: "og-alt", label: "Social image has alt text", pass: !seo.social.ogImage || Boolean(seo.social.ogImageAlt), field: "social.ogImageAlt", tab: "sharing" },
-        { id: "indexable", label: "Page can be indexed", pass: seo.robots.index !== false, field: "robots.index", tab: "sharing" },
-        { id: "sitemap", label: "Included in the sitemap", pass: seo.sitemap.include !== false, field: "sitemap.include", tab: "sharing" },
-    ];
+const titleCase = (text) => String(text).replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Mechanical suggestions for EMPTY fields only (never overwrites what an
+// admin wrote). Real judgment is Ask AI's job.
+function autoFill(form, path) {
+    const h1 = (typeof document !== "undefined" && document.querySelector("main h1, h1")?.innerText) || "";
+    const keyword = form.keywords.primary || h1.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 60);
+    const firstSentence = pageTextExcerpt(1200).replace(h1, "").split(/(?<=[.!?])\s+/).find((t) => t.length > 60) || "";
+    const patch = {};
+    if (!form.keywords.primary && keyword) patch.keywords = { primary: keyword };
+    if (!form.seoTitle && keyword) patch.seoTitle = `${titleCase(keyword)} | ${SITE_NAME}`.slice(0, 60);
+    if (!form.metaDescription && firstSentence) patch.metaDescription = firstSentence.length > 160 ? `${firstSentence.slice(0, 156).trimEnd()}…` : firstSentence;
+    if (!form.searchIntent) patch.searchIntent = /^(blog|resources|guides)\b/.test(path) ? "informational" : "commercial";
+    if (!form.breadcrumbLabels[path] && h1) patch.breadcrumbLabels = { [path]: h1.trim().slice(0, 60) };
+    return patch;
 }
 
 export default function SeoEditPanel({ path }) {
@@ -88,7 +94,7 @@ export default function SeoEditPanel({ path }) {
     return <SeoDrawer path={path} initialTab={panel.tab} onClose={closePanel} />;
 }
 
-function SeoDrawer({ path, initialTab = "essentials", onClose }) {
+function SeoDrawer({ path, initialTab = "ai", onClose }) {
     const [stored, setStored] = useState(null);
     const [form, setForm] = useState(null);
     const [tab, setTab] = useState(initialTab);
@@ -130,6 +136,7 @@ function SeoDrawer({ path, initialTab = "essentials", onClose }) {
             setStored(data);
             setForm(data);
             setNotice("SEO saved and live.");
+            window.dispatchEvent(new Event(SEO_SAVED_EVENT));
             return true;
         } catch (err) {
             setError(err.message);
@@ -139,8 +146,9 @@ function SeoDrawer({ path, initialTab = "essentials", onClose }) {
         }
     }
 
-    const checks = useMemo(() => (form ? localChecks(form) : []), [form]);
+    const checks = useMemo(() => (form ? seoChecks(form) : []), [form]);
     const failing = checks.filter((c) => !c.pass && !c.skip);
+    const score = seoScore(checks);
 
     const goTo = (check) => {
         setTab(check.tab);
@@ -162,50 +170,60 @@ function SeoDrawer({ path, initialTab = "essentials", onClose }) {
         );
     }
 
+    const issuesOn = (t) => failing.filter((c) => c.tab === t).length;
     const tabs = [
-        ["essentials", "Essentials"],
-        ["sharing", "Sharing & indexing"],
-        ["advanced", "Advanced"],
-        ["checks", `Checks${failing.length ? ` (${failing.length})` : ""}`],
-        ["ai", "AI"],
+        ["ai", "✦ Ask AI"],
+        ["essentials", `Essentials${issuesOn("essentials") ? ` · ${issuesOn("essentials")}` : ""}`],
+        ["sharing", `Sharing & indexing${issuesOn("sharing") ? ` · ${issuesOn("sharing")}` : ""}`],
+        ["advanced", `Advanced${issuesOn("advanced") ? ` · ${issuesOn("advanced")}` : ""}`],
+        ["checks", `Checks${failing.length ? ` · ${failing.length}` : ""}`],
         ["history", "History"],
     ];
-    const score = Math.round((checks.filter((c) => c.pass || c.skip).length / checks.length) * 100);
     const segment = path.split("/").pop() || "home";
     const fieldProps = (field) => ({ field, flash: flash === field });
+    const fill = autoFill(form, path);
+    const canFill = Object.keys(fill).length > 0;
 
     return (
         <Drawer
             open
-            width={600}
+            width={620}
             title="Page SEO"
-            subtitle={`/${path === "home" ? "" : path} · ${score}% of checks pass`}
+            subtitle={`/${path === "home" ? "" : path}`}
             onClose={() => {
                 if (dirty && !window.confirm("Discard unsaved SEO changes?")) return;
                 onClose();
             }}
             footer={
                 ["essentials", "sharing", "advanced"].includes(tab) ? (
-                    <div className="flex items-center justify-between gap-2">
-                        <CoverageBadge percent={coverage.percent} />
-                        <div className="flex gap-2">
-                            <button type="button" className={buttonStyles.secondary} disabled={!dirty || saving} onClick={() => setForm(stored)}>Undo</button>
-                            <button type="button" className={buttonStyles.primary} disabled={!dirty || saving} onClick={() => save()}>{saving ? "Saving…" : "Save SEO"}</button>
-                        </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button type="button" className={buttonStyles.secondary} disabled={!dirty || saving} onClick={() => setForm(stored)}>Undo</button>
+                        <button type="button" className={buttonStyles.primary} disabled={!dirty || saving} onClick={() => save()}>{saving ? "Saving…" : "Save SEO"}</button>
                     </div>
                 ) : null
             }
         >
-            <div ref={bodyRef} className="space-y-4">
-                <div className="flex flex-wrap gap-1">
+            <div ref={bodyRef} className="space-y-4" data-cms-panel="seo">
+                <ScoreBar score={score} passing={checks.filter((c) => c.pass && !c.skip).length} total={checks.filter((c) => !c.skip).length} coverage={coverage} onChecks={() => setTab("checks")} />
+
+                <div className="flex gap-1 overflow-x-auto rounded-xl bg-[#F1F5F9] p-1">
                     {tabs.map(([key, label]) => (
-                        <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${tab === key ? "bg-[#123A5C] text-white" : "text-[#475569] hover:bg-[#F1F5F9]"}`}>
+                        <button key={key} type="button" data-cms-tab={key} onClick={() => setTab(key)} className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12px] font-semibold ${tab === key ? (key === "ai" ? "bg-[var(--cms-accent)] text-white shadow-sm" : "bg-white text-[#0F172A] shadow-sm") : key === "ai" ? "text-[var(--cms-accent-strong)]" : "text-[#475569] hover:bg-white/60"}`}>
                             {label}
                         </button>
                     ))}
                 </div>
                 <Notice tone="error">{error}</Notice>
                 <Notice tone="success">{notice}</Notice>
+
+                {["essentials", "sharing", "advanced"].includes(tab) && canFill ? (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-[#CBD5E1] px-3 py-2">
+                        <p className="text-[12px] text-[#475569]">Some fields are empty. Auto-fill suggests them from the page (mechanical — review before saving).</p>
+                        <button type="button" className={buttonStyles.secondary} onClick={() => setForm((f) => deepMergePatch(f, fill))}>Auto-fill</button>
+                    </div>
+                ) : null}
+
+                {tab === "ai" ? <SeoAi path={path} form={form} failing={failing} onApplied={async (patch) => save(deepMergePatch(form, patch))} /> : null}
 
                 {tab === "essentials" ? (
                     <>
@@ -246,10 +264,11 @@ function SeoDrawer({ path, initialTab = "essentials", onClose }) {
 
                 {tab === "advanced" ? (
                     <>
-                        <fieldset className="space-y-2 rounded-xl border border-[#E2E8F0] p-3" data-field="schema.builders">
+                        <fieldset className="space-y-2 rounded-xl border border-[#E2E8F0] p-3" data-field="schema.enabled">
                             <legend className="px-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#475569]">Structured data on this page</legend>
+                            <Toggle label="Structured data (schema) enabled" checked={form.schema.enabled} onChange={(v) => set({ schema: { enabled: v } })} {...fieldProps("schema.enabled")} />
                             <p className="text-[12px] text-[#64748B]">Organization, WebSite and breadcrumbs are always included. Add only types the visible content supports.</p>
-                            <div className="grid grid-cols-2 gap-1.5">
+                            <div className="grid grid-cols-2 gap-1.5" data-field="schema.builders">
                                 {SCHEMA_BUILDERS.map((b) => (
                                     <label key={b} className="flex items-center gap-2 text-[13px]">
                                         <input
@@ -267,19 +286,38 @@ function SeoDrawer({ path, initialTab = "essentials", onClose }) {
                     </>
                 ) : null}
 
-                {tab === "checks" ? <ChecksTab checks={checks} onGo={goTo} path={path} coverage={coverage} /> : null}
-                {tab === "ai" ? <SeoAi path={path} form={form} onApplied={async (patch) => save(deepMergePatch(form, patch))} /> : null}
+                {tab === "checks" ? <ChecksTab checks={checks} onGo={goTo} path={path} /> : null}
                 {tab === "history" ? <SeoHistory path={path} onRestored={load} /> : null}
             </div>
         </Drawer>
     );
 }
 
+function ScoreBar({ score, passing, total, coverage, onChecks }) {
+    const tone = score >= 80 ? "bg-[#16A34A]" : score >= 50 ? "bg-[#F59E0B]" : "bg-[#DC2626]";
+    return (
+        <button type="button" onClick={onChecks} className="block w-full rounded-xl border border-[#E2E8F0] p-3 text-left hover:border-[#CBD5E1]" data-cms-seo-score={score}>
+            <div className="flex items-center justify-between text-[12px]">
+                <span className="font-bold text-[#0F172A]">{score}% SEO score</span>
+                <span className="text-[#64748B]">
+                    {passing}/{total} checks pass
+                    {coverage.percent !== null ? ` · keyword in ${coverage.percent}% of sections` : ""}
+                </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#E2E8F0]">
+                <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${score}%` }} />
+            </div>
+        </button>
+    );
+}
+
 /* ---------------- tabs ---------------- */
 
-function ChecksTab({ checks, onGo, path, coverage }) {
+function ChecksTab({ checks, onGo, path }) {
     const [audit, setAudit] = useState(null);
     const [error, setError] = useState("");
+    const failing = checks.filter((c) => !c.pass && !c.skip);
+    const passing = checks.filter((c) => c.pass || c.skip);
     const run = async () => {
         setError("");
         setAudit(null);
@@ -291,22 +329,31 @@ function ChecksTab({ checks, onGo, path, coverage }) {
     };
     return (
         <div className="space-y-3">
-            <ul className="space-y-1">
-                {checks.map((c) => (
-                    <li key={c.id}>
-                        <button type="button" onClick={() => onGo(c)} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-[#F1F5F9] ${c.skip ? "text-[#94A3B8]" : c.pass ? "text-[#067647]" : "text-[#B54708]"}`}>
-                            <span className="w-4 shrink-0">{c.skip ? "–" : c.pass ? "✓" : "✕"}</span>
-                            {c.label}
-                            {!c.pass && !c.skip ? <span className="ml-auto text-[11px] font-semibold text-[#0F9E86]">Fix →</span> : null}
+            {failing.length ? (
+                <div className="space-y-1.5">
+                    {failing.map((c) => (
+                        <button key={c.id} type="button" data-cms-check={c.id} onClick={() => onGo(c)} className="flex w-full items-start gap-2.5 rounded-lg border border-[#FCD34D] bg-[#FFFBEB] px-3 py-2 text-left hover:border-[#F59E0B]">
+                            <span className="mt-0.5 text-[#B45309]">✕</span>
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-[13px] font-semibold text-[#92400E]">{c.label}</span>
+                                <span className="block text-[12px] text-[#B45309]">→ {c.fix}</span>
+                            </span>
+                            <span className="shrink-0 rounded border border-[#FCD34D] bg-white px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#B45309]">{TAB_LABELS[c.tab]}</span>
                         </button>
-                    </li>
-                ))}
-            </ul>
-            <div className="flex items-center justify-between rounded-lg bg-[#F8FAFC] px-3 py-2 text-[12px]">
-                <span>Page copy keyword coverage</span>
-                <CoverageBadge percent={coverage.percent} />
-            </div>
-            <button type="button" className={buttonStyles.secondary} onClick={run}>Run full audit on the live page</button>
+                    ))}
+                </div>
+            ) : (
+                <Notice tone="success">Every check passes.</Notice>
+            )}
+            <details>
+                <summary className="cursor-pointer text-[12px] font-semibold text-[#64748B]">{passing.length} check{passing.length === 1 ? "" : "s"} passing</summary>
+                <ul className="mt-2 space-y-1">
+                    {passing.map((c) => (
+                        <li key={c.id} data-cms-check={c.id} className="flex gap-2 text-[12px] text-[#15803D]"><span>{c.skip ? "—" : "✓"}</span>{c.label}</li>
+                    ))}
+                </ul>
+            </details>
+            <button type="button" className={buttonStyles.secondary} onClick={run}>Run the full audit on the live page</button>
             <Notice tone="error">{error}</Notice>
             {audit ? (
                 <div className="space-y-2">
@@ -315,7 +362,7 @@ function ChecksTab({ checks, onGo, path, coverage }) {
                         <div key={i.id} className="rounded-lg border border-[#E2E8F0] px-3 py-2 text-[12px]">
                             <p className="font-medium">{i.label}</p>
                             {i.message ? <p className="text-[#475569]">{i.message}</p> : null}
-                            {i.fix ? <p className="text-[#0F9E86]">Fix: {i.fix}</p> : null}
+                            {i.fix ? <p className="text-[var(--cms-accent-strong)]">Fix: {i.fix}</p> : null}
                         </div>
                     ))}
                 </div>
@@ -324,7 +371,7 @@ function ChecksTab({ checks, onGo, path, coverage }) {
     );
 }
 
-function SeoAi({ path, form, onApplied }) {
+function SeoAi({ path, form, failing, onApplied }) {
     const [mode, setMode] = useState("audit");
     const [prompt, setPrompt] = useState("");
     const [busy, setBusy] = useState(false);
@@ -333,12 +380,12 @@ function SeoAi({ path, form, onApplied }) {
     const [brief, setBrief] = useState({ location: "", audience: "" });
     const { openPanel } = useAdmin();
 
-    async function build() {
+    const build = useCallback(async (which = mode) => {
         setBusy(true);
         setError("");
         try {
             const body = { path, page_text: pageTextExcerpt() };
-            const data = mode === "audit"
+            const data = which === "audit"
                 ? await apiRequest("ai/seo-prompt/", { method: "POST", body: { ...body, html: document.documentElement.outerHTML, url: window.location.href } })
                 : await apiRequest("ai/keyword-prompt/", { method: "POST", body: { ...body, ...brief } });
             setPrompt(data.prompt);
@@ -347,7 +394,15 @@ function SeoAi({ path, form, onApplied }) {
         } finally {
             setBusy(false);
         }
-    }
+    }, [mode, path, brief]);
+
+    // Ask AI is the first action: the prompt is ready the moment the tab opens.
+    const first = useRef(true);
+    useEffect(() => {
+        if (!first.current) return;
+        first.current = false;
+        build("audit");
+    }, [build]);
 
     async function apply(raw) {
         setError("");
@@ -355,7 +410,7 @@ function SeoAi({ path, form, onApplied }) {
         try {
             const data = await apiRequest("ai/normalize/", { method: "POST", body: { kind: mode === "audit" ? "seo" : "keywords", raw, path } });
             if (!data.fields) {
-                setResult("The AI found nothing to change.");
+                setResult("The AI found nothing to change — every field is already good.");
                 return true;
             }
             const ok = await onApplied(data.patch);
@@ -368,42 +423,37 @@ function SeoAi({ path, form, onApplied }) {
     }
 
     return (
-        <div className="space-y-5">
-            <div className="flex gap-1">
-                {[["audit", "Audit & improve fields"], ["keywords", "Find keywords"]].map(([key, label]) => (
-                    <button key={key} type="button" onClick={() => { setMode(key); setPrompt(""); setResult(""); }} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${mode === key ? "bg-[#0F9E86] text-white" : "bg-[#F1F5F9] text-[#475569]"}`}>
-                        {label}
-                    </button>
-                ))}
+        <div className="space-y-4" data-cms-seo-ai>
+            <div className="rounded-xl bg-[var(--cms-bar)] p-4 text-white">
+                <p className="text-[13px] font-bold">Ask AI to review this page</p>
+                <p className="mt-1 text-[12px] leading-5 text-white/70">
+                    {mode === "audit"
+                        ? `One prompt with every SEO field, ${failing.length ? `the ${failing.length} failing check${failing.length === 1 ? "" : "s"} and how to fix them, ` : ""}and the visible page text. The AI audits like an expert editor and returns only the fields worth changing — paste its reply below to apply and save.`
+                        : `Keyword research for this page${form.keywords.primary ? ` (current: “${form.keywords.primary}”)` : ""}: one primary keyword, secondary keywords, variations and search intent.`}
+                </p>
+                <div className="mt-3">
+                    <Segmented value={mode} onChange={(m) => { setMode(m); setPrompt(""); setResult(""); build(m); }} options={[["audit", "Audit & improve"], ["keywords", "Find keywords"]]} />
+                </div>
             </div>
-            <p className="text-[12px] text-[#64748B]">
-                {mode === "audit"
-                    ? "Sends this page's SEO fields, the failing checks and the visible page text. The AI explains what's weak and returns only the fields worth changing."
-                    : `Researches the best primary keyword, secondary keywords, variations and intent for this page${form.keywords.primary ? ` (current: “${form.keywords.primary}”)` : ""}.`}
-            </p>
             {mode === "keywords" ? (
                 <div className="grid grid-cols-2 gap-2">
                     <input value={brief.location} onChange={(e) => setBrief({ ...brief, location: e.target.value })} placeholder="Location (optional)" className="rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px]" />
                     <input value={brief.audience} onChange={(e) => setBrief({ ...brief, audience: e.target.value })} placeholder="Audience (optional)" className="rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px]" />
+                    <button type="button" className={`${buttonStyles.link} col-span-2 text-left`} onClick={() => build("keywords")}>↻ Rebuild with location / audience</button>
                 </div>
             ) : null}
-            <Step number={1} title="Build the prompt">
-                <button type="button" className={buttonStyles.primary} onClick={build} disabled={busy}>{busy ? "Building…" : "Build prompt"}</button>
-            </Step>
+            {busy && !prompt ? <p className="text-[12px] text-[#64748B]">Building the prompt…</p> : null}
             {prompt ? (
                 <>
-                    <Step number={2} title="Copy it into your AI chat"><PromptBox prompt={prompt} /></Step>
-                    <Step number={3} title="Paste the whole reply (the ```json block is picked out automatically)">
-                        <PasteBox onApply={apply} applyLabel="Apply & save SEO" />
-                    </Step>
+                    <PromptBox prompt={prompt} />
+                    <PasteBox onApply={apply} applyLabel="Apply & save these fields" placeholder="Paste the AI's whole reply — the ```json block is picked out automatically…" />
                 </>
             ) : null}
             <Notice tone="error">{error}</Notice>
             <Notice tone="success">{result}</Notice>
-            <p className="text-[12px] text-[#64748B]">
-                Page copy doesn&apos;t back up the keyword?{" "}
-                <button type="button" className={buttonStyles.link} onClick={() => openPanel("assist")}>Open whole-page AI assist →</button>
-            </p>
+            <button type="button" className={`${buttonStyles.secondary} w-full`} onClick={() => openPanel("assist")}>
+                If the AI says the content needs work → Open whole-page AI assist
+            </button>
         </div>
     );
 }
@@ -426,13 +476,14 @@ function SeoHistory({ path, onRestored }) {
                 <div key={row.id} className="flex items-center justify-between rounded-lg border border-[#E2E8F0] px-3 py-2">
                     <div>
                         <p className="text-[13px] font-medium">{row.new_data?.seoTitle || "SEO change"}</p>
-                        <p className="text-[11px] text-[#64748B]">{new Date(row.created_at).toLocaleString("en-GB")}{row.changed_by ? ` · ${row.changed_by}` : ""}</p>
+                        <p className="text-[11px] text-[#64748B]">{new Date(row.created_at).toLocaleString()}{row.changed_by ? ` · ${row.changed_by}` : ""}</p>
                     </div>
                     <button
                         type="button"
                         className={buttonStyles.link}
                         onClick={async () => {
                             await apiRequest(`seo/${path}/revert/${row.id}/`, { method: "POST" });
+                            window.dispatchEvent(new Event(SEO_SAVED_EVENT));
                             await onRestored();
                         }}
                     >
@@ -446,11 +497,11 @@ function SeoHistory({ path, onRestored }) {
 
 /* ---------------- fields ---------------- */
 
-const inputClass = "w-full rounded-lg border border-[#D6DEE8] bg-white px-3 py-2 text-[13px] text-[#1E293B] outline-none focus:border-[#0F9E86] focus:ring-2 focus:ring-[#0F9E86]/20";
+const inputClass = "w-full rounded-lg border border-[#D6DEE8] bg-white px-3 py-2 text-[13px] text-[#1E293B] outline-none focus:border-[var(--cms-accent)] focus:ring-2 focus:ring-[var(--cms-accent)]/20";
 
 function Wrap({ label, help, count, field, flash, children }) {
     return (
-        <div data-field={field} className={`rounded-lg transition ${flash ? "bg-[#ECFDF5] ring-2 ring-[#0F9E86] ring-offset-2" : ""}`}>
+        <div data-field={field} className={`rounded-lg transition ${flash ? "bg-[var(--cms-accent-soft)] ring-2 ring-[var(--cms-accent)] ring-offset-2" : ""}`}>
             <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#475569]">{label}</span>
                 {count !== undefined ? <span className="text-[11px] text-[#94A3B8]">{count}</span> : null}
@@ -485,7 +536,7 @@ function SelectField({ label, value, options, onChange, field, flash }) {
 
 function Toggle({ label, checked, onChange, field, flash }) {
     return (
-        <label data-field={field} className={`flex items-center gap-2 rounded-md text-[13px] ${flash ? "bg-[#ECFDF5] ring-2 ring-[#0F9E86]" : ""}`}>
+        <label data-field={field} className={`flex items-center gap-2 rounded-md text-[13px] ${flash ? "bg-[var(--cms-accent-soft)] ring-2 ring-[var(--cms-accent)]" : ""}`}>
             <input type="checkbox" checked={checked !== false} onChange={(e) => onChange(e.target.checked)} />
             {label}
         </label>
@@ -534,7 +585,7 @@ function ImageField({ label, value, onChange, field, flash }) {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     {value ? <img src={mediaUrl(value)} alt="" className="h-full w-full object-cover" /> : <span className="text-[11px] text-[#94A3B8]">None</span>}
                 </div>
-                <label className="cursor-pointer rounded-lg bg-[#123A5C] px-3 py-1.5 text-[12px] font-semibold text-white">
+                <label className="cursor-pointer rounded-lg bg-[var(--cms-primary)] px-3 py-1.5 text-[12px] font-semibold text-white">
                     {busy ? "Uploading…" : value ? "Replace" : "Upload"}
                     <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
                         const file = e.target.files?.[0];

@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiRequest, getSession, login as apiLogin, logout as apiLogout } from "@/lib/api";
@@ -39,6 +40,10 @@ export function AdminProvider({ children }) {
     const [panel, setPanel] = useState(null); // {type, ...props}
     const [seoPath, setSeoPath] = useState(null);
     const [dynamicHost, setDynamicHost] = useState(null);
+    // The collection this route belongs to ({collection, role: "index"|"entry", entry?}),
+    // so "+ New <item>" and entry settings appear only where they make sense.
+    const pathname = usePathname();
+    const [collection, setCollection] = useState({ collection: null, role: null });
 
     const refreshSession = useCallback(async () => {
         const session = await getSession();
@@ -70,6 +75,27 @@ export function AdminProvider({ children }) {
     useEffect(() => {
         if (isAdmin) refreshDrafts();
     }, [isAdmin, refreshDrafts]);
+
+    const refreshCollection = useCallback(async () => {
+        if (!isAdmin || !pathname || pathname.startsWith("/admin")) {
+            setCollection({ collection: null, role: null });
+            return;
+        }
+        try {
+            setCollection(await apiRequest(`collections/for-path/?path=${encodeURIComponent(pathname)}`));
+        } catch {
+            setCollection({ collection: null, role: null });
+        }
+    }, [isAdmin, pathname]);
+
+    useEffect(() => {
+        refreshCollection();
+    }, [refreshCollection]);
+
+    // Panels belong to the page they were opened on.
+    useEffect(() => {
+        setPanel(null);
+    }, [pathname]);
 
     const setEditMode = useCallback((value) => {
         setEditModeState(value);
@@ -161,8 +187,10 @@ export function AdminProvider({ children }) {
         setSeoPath,
         dynamicHost,
         setDynamicHost,
+        collection,
+        refreshCollection,
     }), [isAdmin, checked, user, editMode, setEditMode, signIn, signOut, refreshSession, editables, register, addFlusher,
-        drafts, refreshDrafts, publish, discard, publishEpoch, discardEpoch, panel, seoPath, dynamicHost]);
+        drafts, refreshDrafts, publish, discard, publishEpoch, discardEpoch, panel, seoPath, dynamicHost, collection, refreshCollection]);
 
     return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
@@ -194,6 +222,8 @@ const OUTSIDE = {
     setSeoPath: NOOP,
     dynamicHost: null,
     setDynamicHost: NOOP,
+    collection: { collection: null, role: null },
+    refreshCollection: NOOP,
 };
 
 export function useAdmin() {

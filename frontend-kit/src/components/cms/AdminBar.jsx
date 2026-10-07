@@ -6,20 +6,24 @@ import { useEffect, useRef, useState } from "react";
 
 import { useAdmin } from "@/components/cms/AdminProvider";
 import { currentSeoPath } from "@/components/cms/ai";
-import CreatePage from "@/components/cms/CreatePage";
+import CollectionPanel from "@/components/cms/CollectionPanel";
 import PageAssist, { CoverageBadge, useKeywordCoverage } from "@/components/cms/PageAssist";
-import PageBuilder from "@/components/cms/PageBuilder";
 import SectionEditor from "@/components/cms/SectionEditor";
 import SiteTools from "@/components/cms/SiteTools";
 
 /* =========================================
    The admin bar (bottom centre, admins only):
    editing on/off · unpublished changes + Publish ·
-   whole-page AI (live keyword %) · SEO · page
-   builder (CMS pages) · new page · site tools.
-   It also mounts every admin panel, so a page only
-   needs <AdminProvider> + <AdminBar /> in the layout.
+   whole-page AI (live keyword %) · SEO · the page's
+   collection ("＋ New article" on a collection's index
+   page, "Article settings" on an entry — nothing on
+   one-off pages) · site tools · dashboard.
+   It can be minimised to a small pill so it never
+   covers the page. It also mounts every admin panel,
+   so a page only needs <AdminProvider> + <AdminBar />.
 ========================================= */
+
+const MINIMISED_KEY = "cmsBarMinimised";
 
 const pill = "rounded-full px-3 py-1.5 text-[12px] font-semibold transition whitespace-nowrap";
 
@@ -35,15 +39,30 @@ export default function AdminBar() {
             {onDashboard ? null : <Bar admin={admin} pathname={pathname} />}
             <SectionEditor />
             <PageAssist />
-            <PageBuilder />
-            <CreatePage />
+            <CollectionPanel />
             <SiteTools />
         </>
     );
 }
 
 function Bar({ admin, pathname }) {
-    const { editMode, setEditMode, editables, drafts, publish, discard, openPanel, seoPath, dynamicHost, signOut, user } = admin;
+    const { editMode, setEditMode, editables, drafts, publish, discard, openPanel, seoPath, dynamicHost, signOut, user, collection } = admin;
+    const [minimised, setMinimisedState] = useState(false);
+    useEffect(() => {
+        try {
+            setMinimisedState(localStorage.getItem(MINIMISED_KEY) === "1");
+        } catch {
+            // storage unavailable
+        }
+    }, []);
+    const setMinimised = (value) => {
+        setMinimisedState(value);
+        try {
+            localStorage.setItem(MINIMISED_KEY, value ? "1" : "0");
+        } catch {
+            // ignore
+        }
+    };
     const coverage = useKeywordCoverage(currentSeoPath(pathname));
     const [menu, setMenu] = useState(null);
     const [more, setMore] = useState(false);
@@ -60,7 +79,8 @@ function Bar({ admin, pathname }) {
         return () => document.removeEventListener("mousedown", onClick);
     }, [menu]);
 
-    const pageNames = Object.keys(editables);
+    // Sections publish through their page (hosts); only useCms blocks are "components".
+    const pageNames = Object.keys(editables).filter((name) => editables[name].kind !== "section");
     const pageScope = { components: pageNames, hosts: dynamicHost ? [dynamicHost] : [] };
     const pagePending =
         drafts.components.filter((c) => pageNames.includes(c.name)).length +
@@ -85,18 +105,37 @@ function Bar({ admin, pathname }) {
         }
     }
 
+    const cfg = collection.collection;
+    const entry = collection.entry;
+
+    if (minimised) {
+        return (
+            <div data-cms-adminbar className="cms-ui fixed bottom-4 right-4 z-[1500] font-sans">
+                <button
+                    type="button"
+                    onClick={() => setMinimised(false)}
+                    aria-label="Show the admin bar"
+                    className="flex items-center gap-2 rounded-full bg-[var(--cms-bar)] px-3.5 py-2 text-[12px] font-semibold text-white shadow-[0_12px_32px_rgba(2,6,23,0.4)] hover:brightness-110"
+                >
+                    <span className={`h-2 w-2 rounded-full ${drafts.total ? "bg-[#F59E0B]" : "bg-[var(--cms-accent)]"}`} />
+                    CMS{drafts.total ? ` · ${drafts.total} unpublished` : ""}
+                </button>
+            </div>
+        );
+    }
+
     return (
         <div ref={ref} data-cms-adminbar className="cms-ui fixed bottom-4 left-1/2 z-[1500] max-w-[calc(100vw-1rem)] -translate-x-1/2 font-sans">
             {message ? (
                 <div className="mb-2 rounded-xl bg-[#0F172A] px-4 py-2 text-center text-[12px] text-white shadow-lg">{message}</div>
             ) : null}
-            <div className="flex flex-wrap items-center justify-center gap-1 rounded-[22px] border border-white/10 bg-[#0B1A2E]/95 p-1.5 text-white shadow-[0_18px_50px_rgba(2,6,23,0.45)] backdrop-blur">
+            <div className="relative flex flex-wrap items-center justify-center gap-1 rounded-[22px] border border-white/10 bg-[var(--cms-bar)]/95 p-1.5 text-white shadow-[0_18px_50px_rgba(2,6,23,0.45)] backdrop-blur">
                 <button
                     type="button"
                     onClick={() => setEditMode(!editMode)}
                     aria-pressed={editMode}
                     title="Click any outlined text on the page to edit it"
-                    className={`${pill} ${editMode ? "bg-[#0F9E86]" : "bg-white/10 text-white/80 hover:bg-white/15"}`}
+                    className={`${pill} ${editMode ? "bg-[var(--cms-accent)]" : "bg-white/10 text-white/80 hover:bg-white/15"}`}
                 >
                     {editMode ? "✎ Editing" : "Editing off"}
                 </button>
@@ -157,11 +196,17 @@ function Bar({ admin, pathname }) {
                     <button type="button" onClick={() => openPanel("seo")} className={`${pill} bg-white/10 hover:bg-white/15`}>SEO</button>
                 ) : null}
 
-                {dynamicHost ? (
-                    <button type="button" onClick={() => openPanel("builder")} className={`${pill} bg-white/10 hover:bg-white/15`}>Page builder</button>
+                {cfg && collection.role === "index" ? (
+                    <button type="button" data-cms-collection="index" onClick={() => openPanel("collection")} className={`${pill} bg-[var(--cms-accent)] hover:brightness-110`}>
+                        ＋ New {cfg.label.toLowerCase()}
+                    </button>
                 ) : null}
-
-                <button type="button" onClick={() => openPanel("create")} className={`${pill} bg-white/10 hover:bg-white/15`}>+ New page</button>
+                {cfg && collection.role === "entry" && entry ? (
+                    <button type="button" data-cms-collection="entry" onClick={() => openPanel("collection")} className={`${pill} flex items-center gap-1.5 bg-white/10 hover:bg-white/15`}>
+                        <span className={`h-2 w-2 rounded-full ${entry.status === "published" ? "bg-[#4ADE80]" : "bg-[#F59E0B]"}`} />
+                        {cfg.label} settings
+                    </button>
+                ) : null}
                 <button type="button" onClick={() => openPanel("tools")} className={`${pill} bg-white/10 hover:bg-white/15`}>Site tools</button>
                 <Link href="/admin" className={`${pill} bg-white/10 hover:bg-white/15`}>Dashboard</Link>
 
@@ -176,6 +221,9 @@ function Bar({ admin, pathname }) {
                     ) : null}
                 </div>
                 </div>
+                <button type="button" onClick={() => setMinimised(true)} aria-label="Minimise the admin bar" title="Minimise" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-[14px] font-bold leading-none text-[#0F172A] shadow ring-1 ring-black/10 hover:bg-[#F1F5F9]">
+                    –
+                </button>
             </div>
         </div>
     );

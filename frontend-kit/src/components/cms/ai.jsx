@@ -77,7 +77,7 @@ export function PasteBox({ onApply, placeholder = "Paste the AI's reply here…"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={placeholder}
-                className="w-full rounded-lg border border-[#CBD5E1] p-2.5 font-mono text-[11px] leading-4 outline-none focus:border-[#0F9E86]"
+                className="w-full rounded-lg border border-[#CBD5E1] p-2.5 font-mono text-[11px] leading-4 outline-none focus:border-[var(--cms-accent)]"
             />
             <button
                 type="button"
@@ -86,7 +86,7 @@ export function PasteBox({ onApply, placeholder = "Paste the AI's reply here…"
                     const ok = await onApply(value);
                     if (ok !== false) setValue("");
                 }}
-                className="w-full rounded-lg border-2 border-[#0F9E86] bg-white px-3 py-2 text-[12px] font-semibold text-[#0B7A68] hover:bg-[#ECFDF5] disabled:opacity-40"
+                className="w-full rounded-lg border-2 border-[var(--cms-accent)] bg-white px-3 py-2 text-[12px] font-semibold text-[var(--cms-accent-strong)] hover:bg-[var(--cms-accent-soft)] disabled:opacity-40"
             >
                 {busy ? "Applying…" : applyLabel}
             </button>

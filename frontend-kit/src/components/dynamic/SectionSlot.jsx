@@ -15,17 +15,30 @@ import { apiRequest, setPath } from "@/lib/api";
 /* =========================================
    One dynamic section, as an admin sees it:
    - text is click-to-edit in place (adapters use <T>)
-   - hover toolbar: ↑ ↓ · + add below · AI · Fields ·
-     Copy JSON · delete
+   - hover toolbar: AI · Fields · Copy JSON — plus
+     ↑ ↓ ＋ ✕ ONLY when the page belongs to a collection
+     whose template allows adding this section type
+     (`allowAdd`). Standalone pages and fixed templates
+     keep their structure; admins change copy, not layout.
    - edits autosave to the section's DRAFT
      (PATCH …/sections/<id>/?mode=draft)
+   - registers with the page registry, so the
+     whole-page AI assist covers CMS pages too
 ========================================= */
 
-const AUTOSAVE_MS = 700;
-const chip = "pointer-events-auto rounded-md bg-white px-2 py-1 text-[11px] font-bold text-[#0F172A] shadow ring-1 ring-black/10 hover:bg-[#ECFDF5] disabled:opacity-30";
+// Starter content comes from the backend (one source for every client).
+let startersPromise = null;
+function loadStarters() {
+    startersPromise ||= apiRequest("ai/section-schema/").then((d) => d.starters || {}).catch(() => ({}));
+    return startersPromise;
+}
 
-export default function SectionSlot({ base, host, section, index, total, siblingIds, onChanged }) {
-    const { editMode, refreshDrafts, addFlusher } = useAdmin();
+const AUTOSAVE_MS = 700;
+const chip = "pointer-events-auto rounded-md bg-white px-2 py-1 text-[11px] font-bold text-[#0F172A] shadow ring-1 ring-black/10 hover:bg-[var(--cms-accent-soft)] disabled:opacity-30";
+
+export default function SectionSlot({ base, host, section, index, total, siblingIds, onChanged, allowAdd = [] }) {
+    const { editMode, refreshDrafts, register } = useAdmin();
+    const canRestructure = allowAdd.includes(section.section_type);
     const [content, setContent] = useState(section.draft_content ?? section.content ?? {});
     const [saveState, setSaveState] = useState("idle");
     const [error, setError] = useState("");
@@ -62,7 +75,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
     useEffect(() => () => {
         if (pending.current) persist();
     }, [persist]);
-    useEffect(() => addFlusher(persist), [addFlusher, persist]);
+
 
     const stateRef = useRef({});
     const replace = useCallback((next) => {
@@ -75,8 +88,22 @@ export default function SectionSlot({ base, host, section, index, total, sibling
     }, [persist]);
     const update = useCallback((path, value) => replace(setPath(stateRef.current.data, path, value)), [replace]);
 
+    const label = `${index + 1}. ${humanize(section.section_type)}`;
     stateRef.current = { data: content, editMode, update, defaults: {}, label: humanize(section.section_type), block: `section:${section.id}` };
     const [E] = useState(() => createInline(stateRef));
+
+    // Page registry: whole-page AI assist + keyword coverage + flush before publish.
+    useEffect(() => register(`section:${section.id}`, {
+        name: `section:${section.id}`,
+        kind: "section",
+        label,
+        defaults: {},
+        data: content,
+        saveState,
+        update,
+        replace,
+        flush: persist,
+    }), [register, section.id, label, content, saveState, update, replace, persist]);
 
     /* ---------- structure ---------- */
     async function act(fn) {
@@ -98,7 +125,8 @@ export default function SectionSlot({ base, host, section, index, total, sibling
         act(() => apiRequest(`${base}/sections/${section.id}/`, { method: "DELETE" }));
     const addBelow = (type) => act(async () => {
         setAdding(false);
-        await apiRequest(`${base}/sections/add/`, { method: "POST", body: { section_type: type, content: starterContent(type), position: index + 1 } });
+        const starters = await loadStarters();
+        await apiRequest(`${base}/sections/add/`, { method: "POST", body: { section_type: type, content: starters[type] || {}, position: index + 1 } });
     });
 
     const uploadSlot = (slot, file) => act(() => {
@@ -112,7 +140,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
 
     return (
         <SectionEditContext.Provider value={{ E, editMode, uploadSlot }}>
-            <div className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[#0F9E86]/60" : ""}`}>
+            <div className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
                 {editMode ? (
                     <>
                         <span className="cms-ui pointer-events-none absolute left-3 top-3 z-[56] rounded bg-[#0F172A] px-1.5 py-0.5 text-[10px] font-bold uppercase text-white opacity-0 transition group-hover/slot:opacity-100">
@@ -120,9 +148,13 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                             {saveState === "saving" || saveState === "dirty" ? " · saving…" : section.draft_content || saveState === "saved" ? " · draft" : ""}
                         </span>
                         <div className="cms-ui pointer-events-none absolute right-3 top-3 z-[56] flex gap-1 opacity-0 transition group-hover/slot:opacity-100">
-                            <button type="button" className={chip} disabled={index === 0} onClick={() => move(-1)} title="Move up">↑</button>
-                            <button type="button" className={chip} disabled={index === total - 1} onClick={() => move(1)} title="Move down">↓</button>
-                            <button type="button" className={chip} onClick={() => setAdding((v) => !v)} title="Add a section below">＋</button>
+                            {canRestructure ? (
+                                <>
+                                    <button type="button" className={chip} disabled={index === 0} onClick={() => move(-1)} title="Move up">↑</button>
+                                    <button type="button" className={chip} disabled={index === total - 1} onClick={() => move(1)} title="Move down">↓</button>
+                                </>
+                            ) : null}
+                            {allowAdd.length ? <button type="button" className={chip} onClick={() => setAdding((v) => !v)} title="Add a section below">＋</button> : null}
                             <button type="button" className={chip} onClick={() => setPanel("ai")}>✦ AI</button>
                             <button type="button" className={chip} onClick={() => setPanel("fields")}>Fields</button>
                             <button
@@ -136,7 +168,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                             >
                                 {copied ? "Copied" : "JSON"}
                             </button>
-                            <button type="button" className={`${chip} text-[#B42318]`} onClick={remove} title="Delete section">✕</button>
+                            {canRestructure ? <button type="button" className={`${chip} text-[#B42318]`} onClick={remove} title="Delete section">✕</button> : null}
                         </div>
                     </>
                 ) : null}
@@ -150,7 +182,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
 
                 {Component ? <Component {...content} media={section.media || []} /> : <Fallback type={section.section_type} />}
 
-                {adding && editMode ? <TypePicker onPick={addBelow} onCancel={() => setAdding(false)} /> : null}
+                {adding && editMode ? <TypePicker types={allowAdd} onPick={addBelow} onCancel={() => setAdding(false)} /> : null}
             </div>
 
             {panel === "fields" ? (
@@ -245,44 +277,12 @@ function SlotAi({ host, section, content, onApply }) {
     );
 }
 
-const STARTERS = {
-    hero: { heading: "New heading", description: "Describe the offer in one or two sentences.", button_text: "Get started", button_href: "/contact" },
-    rich_text: { heading: "New section", content: "Write the first paragraph here." },
-    image_text: { heading: "New section", content: "Write the copy here.", image_position: "right" },
-    cta: { heading: "Ready to get started?", description: "", button_text: "Contact us", button_href: "/contact" },
-    banner: { text: "Announcement text", link_text: "", link_href: "" },
-    video: { heading: "", video_url: "https://www.youtube.com/embed/" },
-    contact_block: { heading: "Get in touch", email: "", phone: "", address: "" },
-    map_block: { heading: "Find us", embed_url: "https://www.google.com/maps/embed?pb=" },
-    newsletter: { heading: "Stay in the loop", description: "", form_name: "newsletter" },
-};
-const LIST_STARTER = {
-    cards: { title: "Card title", description: "Card text", href: "" },
-    features: { title: "Feature", description: "What it does" },
-    statistics: { value: "100+", label: "Label" },
-    testimonials: { quote: "Quote", author: "Name", role: "Role", rating: 5 },
-    faq: { question: "Question?", answer: "Answer." },
-    gallery: { caption: "" },
-    team: { name: "Name", role: "Role", bio: "" },
-    timeline: { date: "2026", title: "Milestone", description: "" },
-    pricing: { name: "Plan", price: "£0", period: "month", features: ["Feature"], button_text: "Choose", button_href: "/contact" },
-    logos: { name: "Partner" },
-    steps: { title: "Step", description: "What happens" },
-};
-
-export function starterContent(type) {
-    if (STARTERS[type]) return structuredClone(STARTERS[type]);
-    if (LIST_STARTER[type]) return { heading: "New section", items: [structuredClone(LIST_STARTER[type])] };
-    return {};
-}
-
-function TypePicker({ onPick, onCancel }) {
-    const types = Object.keys(SECTION_REGISTRY);
+function TypePicker({ types, onPick, onCancel }) {
     return (
         <div className="cms-ui relative z-[57] flex flex-wrap items-center gap-1 border-y border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
             <span className="mr-1 text-[12px] font-semibold text-[#475569]">Add below:</span>
             {types.map((t) => (
-                <button key={t} type="button" onClick={() => onPick(t)} className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-semibold hover:border-[#0F9E86]">
+                <button key={t} type="button" onClick={() => onPick(t)} className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-semibold hover:border-[var(--cms-accent)]">
                     {humanize(t)}
                 </button>
             ))}

@@ -34,12 +34,12 @@ CORE = [
     "components/cms/ai.jsx",
     "components/cms/CmsDataProvider.jsx",
     "components/cms/CmsSection.jsx",
+    "components/cms/CollectionPanel.jsx",
     "components/cms/CreatePage.jsx",
     "components/cms/Drawer.jsx",
     "components/cms/FieldEditor.jsx",
     "components/cms/inline.jsx",
     "components/cms/PageAssist.jsx",
-    "components/cms/PageBuilder.jsx",
     "components/cms/SectionEditor.jsx",
     "components/cms/SeoEditPanel.jsx",
     "components/cms/SiteTools.jsx",
@@ -61,6 +61,7 @@ CORE = [
     "lib/api.js",
     "lib/cms.js",
     "lib/keywords.js",
+    "lib/seoChecks.js",
     "lib/seo.js",
 ]
 ADAPT = [

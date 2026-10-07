@@ -1,6 +1,21 @@
-/* ===== CMS inline editing (admins only; classes never render for visitors) ===== */
+/* =========================================================================
+   CMS admin styles (only ever rendered for signed-in admins).
+
+   THEME — set these five variables to the site's own palette. Every admin
+   control (bar, panels, outlines, buttons) reads them, so the CMS looks
+   native on each site while its structure stays identical everywhere.
+   ========================================================================= */
+:root {
+    --cms-accent: #0f9e86;        /* primary admin actions, outlines, focus rings */
+    --cms-accent-strong: #0b7a68; /* accent-coloured text on light backgrounds */
+    --cms-accent-soft: #ecfdf5;   /* accent tint (hover / selected backgrounds) */
+    --cms-bar: #0b1a2e;           /* admin bar and dark panel surfaces */
+    --cms-primary: #123a5c;       /* secondary brand colour: active tabs, admin headings */
+}
+
+/* ===== Inline editing: click any outlined text and type ===== */
 .cms-editable {
-    outline: 1px dashed rgb(15 158 134 / 0.55);
+    outline: 1px dashed color-mix(in srgb, var(--cms-accent) 55%, transparent);
     outline-offset: 2px;
     border-radius: 2px;
     cursor: text;
@@ -8,31 +23,34 @@
     transition: outline-color 0.15s, background-color 0.15s;
 }
 .cms-editable:hover {
-    outline: 2px dashed #0f9e86;
-    background-color: rgb(15 158 134 / 0.06);
+    outline: 2px dashed var(--cms-accent);
+    background-color: color-mix(in srgb, var(--cms-accent) 6%, transparent);
 }
 .cms-editable:focus {
-    outline: 2px solid #0f9e86;
-    background-color: rgb(15 158 134 / 0.08);
+    outline: 2px solid var(--cms-accent);
+    background-color: color-mix(in srgb, var(--cms-accent) 8%, transparent);
 }
 .cms-editable:empty::before {
     content: attr(data-placeholder);
     opacity: 0.45;
     font-style: italic;
 }
-/* List-item tools show on hover / keyboard focus of their item only,
-   so they never cover the text being edited. */
-.cms-item-tools {
+
+/* ===== Edit tools never cover the page =====
+   Block pills ("All fields"), list-item tools (↑ ↓ ⧉ ✕) and "Replace image"
+   chips appear only while their own block / item / image is hovered or has
+   keyboard focus. Touch screens (no hover) always show them. */
+.cms-hover-tools {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;
 }
-:hover > .cms-item-tools,
-:focus-within > .cms-item-tools,
-.cms-item-tools:focus-within {
+:hover > .cms-hover-tools,
+:focus-within > .cms-hover-tools,
+.cms-hover-tools:focus-within {
     opacity: 1;
     pointer-events: auto;
 }
 @media (hover: none) {
-    .cms-item-tools { opacity: 1; pointer-events: auto; }
+    .cms-hover-tools { opacity: 1; pointer-events: auto; }
 }

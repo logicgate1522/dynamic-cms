@@ -73,7 +73,7 @@ export default function ImagesPage() {
             <Notice error={error} success={success} />
             <div className="mb-4 flex gap-1">
                 {FILTERS.map(([key, label]) => (
-                    <button key={key} type="button" onClick={() => { setFilter(key); setPage(1); }} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${filter === key ? "bg-[#123A5C] text-white" : "bg-white text-[#475569]"}`}>
+                    <button key={key} type="button" onClick={() => { setFilter(key); setPage(1); }} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${filter === key ? "bg-[var(--cms-primary)] text-white" : "bg-white text-[#475569]"}`}>
                         {label}
                     </button>
                 ))}
@@ -142,7 +142,7 @@ function ImageCard({ image, onChanged, onError }) {
                         value={alt}
                         onChange={(e) => setAlt(e.target.value)}
                         placeholder="Alt text — describe the image"
-                        className={`min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus:border-[#0F9E86] ${alt ? "border-[#CBD5E1]" : "border-[#FEC84B] bg-[#FFFAEB]"}`}
+                        className={`min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus:border-[var(--cms-accent)] ${alt ? "border-[#CBD5E1]" : "border-[#FEC84B] bg-[#FFFAEB]"}`}
                     />
                     <button type="button" className={buttonStyles.link} disabled={saving || alt === (image.alt_text || "")} onClick={saveAlt}>{saving ? "…" : "Save"}</button>
                 </div>

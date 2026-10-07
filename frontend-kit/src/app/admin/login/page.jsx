@@ -30,12 +30,12 @@ function LoginForm() {
         }
     }
 
-    const input = "h-11 w-full rounded-xl border border-[#D6DEE8] px-4 text-[14px] outline-none focus:border-[#0F9E86] focus:ring-2 focus:ring-[#0F9E86]/20";
+    const input = "h-11 w-full rounded-xl border border-[#D6DEE8] px-4 text-[14px] outline-none focus:border-[var(--cms-accent)] focus:ring-2 focus:ring-[var(--cms-accent)]/20";
 
     return (
         <div className="flex min-h-screen items-center justify-center px-4">
             <form onSubmit={onSubmit} className="w-full max-w-[400px] rounded-3xl bg-white p-8 shadow-[0_30px_80px_rgba(15,23,42,0.12)]">
-                <p className="text-[20px] font-bold text-[#123A5C]">{SITE_NAME}</p>
+                <p className="text-[20px] font-bold text-[var(--cms-primary)]">{SITE_NAME}</p>
                 <h1 className="mt-6 text-[22px] font-bold text-[#0F172A]">Sign in to the CMS</h1>
                 <p className="mt-1 text-[13px] text-[#64748B]">Staff accounts only.</p>
 

@@ -36,7 +36,7 @@ export default function AdminShell({ children }) {
 
     return (
         <div className="cms-ui flex min-h-screen bg-[#F1F5F9] font-sans text-[#1E293B]">
-            <aside className="hidden w-60 shrink-0 flex-col bg-[#0B1A2E] text-white md:flex">
+            <aside className="hidden w-60 shrink-0 flex-col bg-[var(--cms-bar)] text-white md:flex">
                 <Link href="/" className="px-5 py-5 text-[18px] font-bold">
                     {SITE_NAME}
                     <span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-[0.2em] text-white/50">CMS</span>
@@ -67,7 +67,7 @@ export default function AdminShell({ children }) {
             </aside>
 
             <div className="min-w-0 flex-1">
-                <div className="flex gap-2 overflow-x-auto bg-[#0B1A2E] px-3 py-2 md:hidden">
+                <div className="flex gap-2 overflow-x-auto bg-[var(--cms-bar)] px-3 py-2 md:hidden">
                     {NAV.map((item) => (
                         <Link key={item.href} href={item.href} className={`whitespace-nowrap rounded-md px-3 py-1.5 text-[12px] ${pathname === item.href ? "bg-white/15 text-white" : "text-white/70"}`}>
                             {item.label}

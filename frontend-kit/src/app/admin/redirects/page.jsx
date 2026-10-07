@@ -73,7 +73,7 @@ export default function RedirectsPage() {
         URL.revokeObjectURL(url);
     }
 
-    const input = "h-10 w-full rounded-lg border border-[#D6DEE8] px-3 text-[13px] outline-none focus:border-[#0F9E86]";
+    const input = "h-10 w-full rounded-lg border border-[#D6DEE8] px-3 text-[13px] outline-none focus:border-[var(--cms-accent)]";
 
     return (
         <>

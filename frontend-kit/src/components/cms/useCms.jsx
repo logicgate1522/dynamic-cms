@@ -181,7 +181,7 @@ export function useCms(name, defaults, options = {}) {
 const STATE_DOT = {
     dirty: "bg-[#F59E0B]",
     saving: "bg-[#F59E0B] animate-pulse",
-    saved: "bg-[#0F9E86]",
+    saved: "bg-[var(--cms-accent)]",
     error: "bg-[#DC2626]",
     idle: "bg-white/70",
 };
@@ -193,12 +193,12 @@ function AllFieldsButton({ label, saveState, onClick, position = "right-3 top-3"
             onClick={onClick}
             title={`All fields, AI and history for “${label}”`}
             className={`
-                cms-ui absolute z-[60] ${position}
+                cms-ui ${["dirty", "saving", "error"].includes(saveState) ? "" : "cms-hover-tools"} absolute z-[60] ${position}
                 inline-flex items-center gap-2 rounded-full
                 border border-white/40 bg-[#0F172A]/85 px-3 py-1.5
                 text-[11px] font-semibold text-white backdrop-blur
                 shadow-[0_8px_24px_rgba(0,0,0,0.25)]
-                transition hover:bg-[#0F9E86]
+                transition hover:bg-[var(--cms-accent)]
             `}
         >
             <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />

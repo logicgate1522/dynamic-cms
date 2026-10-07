@@ -15,17 +15,20 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 
 | Area | Files | What it does |
 |---|---|---|
-| Styles | `app/cms.css` | Editable outlines, placeholders, hover-only item tools. Import it in the root layout after `globals.css`. |
+| Styles + theme | `app/cms.css` | The five `--cms-*` theme variables (set them to the site palette — the only styling you change), editable outlines, hover-only edit tools. Import it in the root layout after `globals.css`. |
 | Cache | `app/api/revalidate/route.js` | Verifies the backend's HMAC webhook and calls `revalidateTag` for `cms*` tags. |
 | API | `lib/api.js` | Session + CSRF client: `apiFetch`, `apiRequest`, `getSession`, `login`, `logout`, `uploadImage`, `mediaUrl`, `getPath`/`setPath`, `mergeDefaults`. |
 | Server reads | `lib/cms.js` | Tagged ISR reads (`getContent(s)`, `getSiteSettings`, `resolveSeo`, `getBlogPost(s)`, `getContentPage(s)`, `getPageSeoList`). |
 | SEO | `lib/seo.js`, `components/seo/*` | `pageMetadata`, `metadataFromResolved`, `pageJsonLd`, `<PageSeo>`, `<JsonLd>`, `<Analytics>`. |
 | Keywords | `lib/keywords.js` | Keyword matching, mirroring `api/keywords.py`. Used by the coverage badge. |
+| SEO checks | `lib/seoChecks.js` | The 18 SEO rules (id, tab, field, fix), mirroring `api/prompts.py#seo_rule_checks`. Used by the SEO panel and the whole-page assist. |
 | Admin state | `components/cms/AdminProvider.jsx` | Session, edit mode, editables registry, drafts, publish/discard (flushes pending saves first), panels. |
 | Inline editing | `components/cms/useCms.jsx`, `components/cms/inline.jsx` | `useCms(name, defaults, options)` → `{data, E, editButton}`, with draft autosave; `E.Text/Image/Item/Add/Link`. |
 | Admin bar | `components/cms/AdminBar.jsx`, `SiteTools.jsx`, `Drawer.jsx` | Floating dock plus Site tools (it embeds the `/admin/*` pages). |
 | Block editor | `components/cms/SectionEditor.jsx`, `FieldEditor.jsx` | All fields, AI assist, JSON, History. |
-| AI | `components/cms/ai.jsx`, `PageAssist.jsx`, `SeoEditPanel.jsx`, `CreatePage.jsx`, `PageBuilder.jsx` | Prompt/paste UI. Every prompt comes from the backend; every paste goes through `ai/normalize`. |
+| AI | `components/cms/ai.jsx`, `PageAssist.jsx`, `SeoEditPanel.jsx` | Prompt/paste UI. Every prompt comes from the backend; every paste goes through `ai/normalize`. The SEO panel opens on Ask AI; the whole-page assist builds on open and shows live coverage + SEO rules. |
+| Collections | `components/cms/CollectionPanel.jsx` | "＋ New <item>" on a collection's index page, entry settings / AI rewrite on its entries. Driven by `SiteSettings.collections`. |
+| One-off pages | `components/cms/CreatePage.jsx` | Brief → prompt → paste form, used only by Dashboard → Pages. |
 | SSR data | `components/cms/CmsSection.jsx`, `CmsDataProvider.jsx` | Server-fetches published blocks so visitors need no client fetch. |
 | Dynamic pages | `components/dynamic/*` (except DynamicContentPage) | Renderer, registry, section adapters (`sections.jsx`, `interactive.jsx`), admin wrapper, per-section tools. |
 | Full admin | `app/admin/**`, `components/admin/*` | Dashboard, login, pages, blog, SEO, images, settings, sitemap, redirects, submissions. |

@@ -88,7 +88,7 @@ function SectionEditorDrawer({ entry, initialTab = "fields", onClose }) {
                         key={key}
                         type="button"
                         onClick={() => setTab(key)}
-                        className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${tab === key ? "bg-[#123A5C] text-white" : "text-[#475569] hover:bg-[#F1F5F9]"}`}
+                        className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${tab === key ? "bg-[var(--cms-primary)] text-white" : "text-[#475569] hover:bg-[#F1F5F9]"}`}
                     >
                         {label}
                     </button>
@@ -172,14 +172,14 @@ function SectionAi({ entry }) {
                     value={keyword}
                     onChange={(e) => setKeyword(e.target.value)}
                     placeholder="Keyword to work in (defaults to the page's SEO keyword)"
-                    className="w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[#0F9E86]"
+                    className="w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[var(--cms-accent)]"
                 />
                 <textarea
                     rows={2}
                     value={instruction}
                     onChange={(e) => setInstruction(e.target.value)}
                     placeholder="Optional: what to change (e.g. “make it more specific to landlords”)"
-                    className="w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[#0F9E86]"
+                    className="w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[var(--cms-accent)]"
                 />
                 <button type="button" className={buttonStyles.primary} onClick={build} disabled={busy}>
                     {busy ? "Building…" : prompt ? "Rebuild prompt" : "Build prompt"}

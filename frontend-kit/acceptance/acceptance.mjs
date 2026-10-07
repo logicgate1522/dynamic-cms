@@ -16,9 +16,11 @@
    (and REVALIDATE_SECRET must match), or the "visitor sees the publish"
    check fails — that is a real integration failure.
 
-   Everything the test changes is put back at the end: the edited block is
-   restored to its original published data and the page it creates is
-   deleted.
+   At least one collection must be configured (SiteSettings.collections);
+   the test creates, publishes, rewrites and deletes one entry in it.
+
+   Everything the test changes is put back at the end: the edited block and
+   the page keyword are restored and the entry it creates is deleted.
 ========================================================================= */
 
 import { chromium } from "playwright";
@@ -101,7 +103,8 @@ const closeDrawer = () => page.locator('[role="dialog"] [aria-label="Close"]').f
 
 let block = null;
 let original = null;
-let createdPath = null;
+let originalSeo = null;
+let createdEntry = null;
 
 try {
     /* ---------- 1. Visitors get zero CMS UI ---------- */
@@ -145,21 +148,33 @@ try {
     const fresh = await poll(async () => (await (await fetch(`${SITE}${PAGE}`)).text()).includes(`${STAMP} inline`), { tries: 30, every: 700 });
     check("visitor HTML updated (revalidate webhook)", !!fresh);
 
-    /* ---------- 5. Whole-page AI assist: prompt + messy paste ---------- */
+    /* ---------- 5. Whole-page AI assist (Prometheus parity) ---------- */
+    // A unique keyword so coverage starts at 0% and must rise after Apply.
+    const seoKey = PAGE.replace(/^\/+|\/+$/g, "") || "home";
+    originalSeo = (await admin(`seo/${seoKey}/`)).body || {};
+    const KW = `kw${STAMP.toLowerCase()}`;
+    await adminWrite(`seo/${seoKey}/`, "PATCH", { keywords: { primary: KW } });
+    await page.reload();
+    await bar().waitFor({ timeout: 15000 });
     await bar().getByRole("button", { name: /AI assist/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: /Build prompt/ }).click();
-    const prompt = page.getByRole("dialog").locator("textarea[readonly]").first();
+    const dialog5 = page.getByRole("dialog");
+    const prompt = dialog5.locator("textarea[readonly]").first();
     await prompt.waitFor({ timeout: 10000 });
     const promptText = await prompt.inputValue();
-    check("page-assist prompt built by the backend", promptText.length > 500 && promptText.includes(block), `${promptText.length} chars`);
-    const reply = `Here you go!\n\n\`\`\`json\n${JSON.stringify({ [block]: { content: { [field]: `${STAMP} ai [link](https://example.com) ok` } } })}\n\`\`\`\nAnything else?`;
-    await page.getByRole("dialog").locator("textarea:not([readonly])").last().fill(reply);
-    await page.getByRole("dialog").getByRole("button", { name: /Apply/ }).click();
+    check("opening AI assist builds the prompt (no extra click)", promptText.length > 500 && promptText.includes(block), `${promptText.length} chars`);
+    check("prompt restates its rules at the end (FINAL CHECK)", promptText.slice(-2500).includes("FINAL CHECK"));
+    check("keyword coverage card shows a percentage", (await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) === "0");
+    check("“Other SEO rules” list is always shown (6 rules)", (await dialog5.locator("[data-cms-rule]").count()) === 6);
+    const reply = `Here you go!\n\n\`\`\`json\n${JSON.stringify({ [block]: { content: { [field]: `${STAMP} ai [link](https://example.com) ok ${KW}` } } })}\n\`\`\`\nAnything else?`;
+    await dialog5.locator("textarea:not([readonly])").last().fill(reply);
+    await dialog5.getByRole("button", { name: /Apply/ }).click();
     const aiValue = await poll(async () => {
         const v = (await admin(`home/${block}/?mode=draft`)).body?.[field];
         return v && v.startsWith(`${STAMP} ai`) ? v : null;
     });
-    check("AI paste normalised (prose, fences, wrapper, markdown link)", aiValue === `${STAMP} ai link ok`, aiValue || "no draft");
+    check("AI paste normalised (prose, fences, wrapper, markdown link)", aiValue === `${STAMP} ai link ok ${KW}`, aiValue || "no draft");
+    const livePercent = await poll(async () => Number(await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) > 0);
+    check("coverage updates live after Apply (no rebuild)", !!livePercent);
     await closeDrawer();
 
     /* ---------- 6. Discard ---------- */
@@ -167,19 +182,34 @@ try {
     await bar().getByRole("button", { name: "All published" }).waitFor({ timeout: 15000 });
     check("discard drops the draft", (await admin(`home/${block}/?mode=draft`)).body?.[field] === `${STAMP} inline`);
 
-    /* ---------- 7. SEO panel + its AI prompts ---------- */
+    /* ---------- 7. SEO panel: Ask AI is the first action ---------- */
     const seoButton = bar().getByRole("button", { name: "SEO", exact: true });
     if (await seoButton.count()) {
         await seoButton.click();
-        await page.getByRole("dialog").getByRole("button", { name: /^AI/ }).first().click();
-        const build = page.getByRole("dialog").getByRole("button", { name: /Build|prompt/i });
-        if (await build.count()) await build.first().click();
-        const seoPrompt = await poll(async () => (await page.getByRole("dialog").locator("textarea[readonly]").first().inputValue().catch(() => "")).length > 200);
-        check("SEO AI prompt available", !!seoPrompt);
+        const dialog7 = page.getByRole("dialog");
+        const seoPrompt = await poll(async () => (await dialog7.locator("[data-cms-seo-ai] textarea[readonly]").first().inputValue().catch(() => "")).length > 200);
+        check("SEO panel opens on Ask AI with the prompt already built", !!seoPrompt);
+        check("SEO score bar is visible", (await dialog7.locator("[data-cms-seo-score]").count()) === 1);
+        await dialog7.locator('[data-cms-tab="checks"]').click();
+        const checksShown = await dialog7.locator("[data-cms-check]").count();
+        check("every SEO check is listed (18, mirrors the backend)", checksShown === 18, `${checksShown}`);
         await closeDrawer();
     } else {
         check("SEO button on the admin bar", false, "this route has no seoPath — wire PageSeo / setSeoPath");
     }
+
+    /* ---------- 7b. Edit tools never cover the page ---------- */
+    const pill = page.locator(".cms-hover-tools").first();
+    if (await pill.count()) {
+        await bar().hover();
+        const hidden = await pill.evaluate((el) => getComputedStyle(el).opacity);
+        check("edit tools are hidden until their block is hovered", hidden === "0", `opacity ${hidden}`);
+    }
+    await page.getByRole("button", { name: "Minimise the admin bar" }).click();
+    check("admin bar minimises to a small pill", (await bar().locator("button[aria-pressed]").count()) === 0);
+    await page.getByRole("button", { name: "Show the admin bar" }).click();
+    await bar().locator("button[aria-pressed]").waitFor({ timeout: 5000 });
+    check("admin bar restores", true);
 
     /* ---------- 8. Dynamic CMS page: inline section edit + discard ---------- */
     if (DYNAMIC_PAGE) {
@@ -195,34 +225,64 @@ try {
         await publishMenu(/Discard this page/);
         const restored = await poll(async () => (await page.locator('[data-cms-block^="section:"]').first().innerText()).trim() === before);
         check("discard restores the section on screen", !!restored);
-        const builder = bar().getByRole("button", { name: "Page builder" });
-        check("Page builder offered on CMS pages", (await builder.count()) === 1);
+        const role = (await admin(`collections/for-path/?path=${encodeURIComponent(DYNAMIC_PAGE)}`)).body?.role;
+        if (!role) {
+            check("one-off CMS page: structure is locked (no add/move/delete)", (await page.locator('[title="Delete section"], [title="Add a section below"]').count()) === 0);
+        }
+        await bar().getByRole("button", { name: /AI assist/ }).click();
+        await page.getByRole("dialog").locator("textarea[readonly]").first().waitFor({ timeout: 10000 });
+        const sectionChips = await page.getByRole("dialog").locator("[data-cms-coverage-chip]").count();
+        const sectionsOnPage = await page.locator('[data-cms-block^="section:"]').evaluateAll((els) => new Set(els.map((e) => e.dataset.cmsBlock)).size);
+        check("whole-page assist covers the CMS page's sections", sectionChips >= sectionsOnPage && sectionsOnPage > 0, `${sectionChips} chips / ${sectionsOnPage} sections`);
+        await closeDrawer();
     }
 
-    /* ---------- 9. Create a page from pasted AI JSON ---------- */
-    createdPath = `acceptance-${STAMP.toLowerCase()}`;
-    await bar().getByRole("button", { name: /New page/ }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.locator('input[placeholder^="Title"]').fill("Acceptance Test Page");
-    const pathInput = dialog.locator('input[placeholder*="path" i]').first();
-    if (await pathInput.count()) await pathInput.fill(createdPath);
-    await dialog.getByRole("button", { name: "Build prompt" }).click();
-    await dialog.locator("textarea[readonly]").first().waitFor({ timeout: 10000 });
-    check("new-page prompt built", (await dialog.locator("textarea[readonly]").first().inputValue()).length > 800);
-    await dialog.locator("textarea:not([readonly])").last().fill("```json\n" + JSON.stringify({
-        title: "Acceptance Test Page",
-        seo: { title: "Acceptance Test Page", description: "A page created by the dynamic-cms acceptance test; it is deleted when the test ends." },
-        sections: [
-            { type: "hero", heading: `${STAMP} hero`, description: "Created by the acceptance test." },
-            { type: "faq", heading: "Questions", items: [1, 2, 3].map((n) => ({ question: `Q${n}?`, answer: `A${n}` })) },
-        ],
-    }) + "\n```");
-    await dialog.getByRole("button", { name: /Create draft/ }).click();
-    await page.waitForURL((url) => url.pathname === `/${createdPath}`, { timeout: 15000 });
-    await page.getByText(`${STAMP} hero`).first().waitFor({ timeout: 15000 });
-    check("created draft page renders for staff", true);
-    check("draft page is 404 for visitors", (await fetch(`${SITE}/${createdPath}`)).status === 404);
-    check("page SEO seeded from the pasted JSON", JSON.stringify((await admin(`seo/${createdPath}/`)).body).includes("Acceptance Test Page"));
+    /* ---------- 9. Collections: build entries only where it makes sense ---------- */
+    const collections = (await admin("collections/")).body || [];
+    const cfg = collections.find((c) => c.hostKind === "content") || collections[0];
+    if (!cfg) {
+        check("at least one collection is configured (SiteSettings.collections)", false);
+    } else {
+        await page.goto(`${SITE}${PAGE}`);
+        await bar().waitFor({ timeout: 15000 });
+        const pageRole = (await admin(`collections/for-path/?path=${encodeURIComponent(PAGE)}`)).body?.role;
+        if (!pageRole) check("no “＋ New …” on a page that is not a collection index", (await page.locator('[data-cms-collection]').count()) === 0);
+
+        await page.goto(`${SITE}/${cfg.indexPath}`);
+        const newButton = page.locator('[data-cms-collection="index"]');
+        await newButton.waitFor({ timeout: 15000 });
+        check(`“＋ New ${cfg.label.toLowerCase()}” offered on /${cfg.indexPath}`, true);
+        await newButton.click();
+        const title = `Acceptance ${STAMP}`;
+        await page.locator("#cms-new-title").fill(title);
+        await page.locator('[data-cms-action="create-blank"]').click();
+        createdEntry = { key: cfg.key, slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-") };
+        await page.waitForURL((url) => url.pathname === `/${cfg.pathPrefix}/${createdEntry.slug}`, { timeout: 15000 });
+        check("blank entry created and opened", true);
+        const hostPath = cfg.hostKind === "blog" ? `blog/${createdEntry.slug}` : `content/${cfg.pathPrefix}/${createdEntry.slug}`;
+        const rows = (await admin(`${hostPath}/sections/`)).body;
+        const types = (Array.isArray(rows) ? rows : rows?.results || []).map((r) => r.section_type);
+        check("new entry follows the collection template exactly", JSON.stringify(types.slice(0, cfg.sections.length)) === JSON.stringify(cfg.sections), types.join(","));
+        check("new entry is hidden from visitors (draft)", (await fetch(`${SITE}/${cfg.pathPrefix}/${createdEntry.slug}`)).status === 404);
+        const settings = page.locator('[data-cms-collection="entry"]');
+        await settings.waitFor({ timeout: 15000 });
+        await settings.click();
+        await page.locator('[data-cms-action="toggle-entry-status"]').click();
+        const live = await poll(async () => (await fetch(`${SITE}/${cfg.pathPrefix}/${createdEntry.slug}`)).status === 200, { tries: 30, every: 700 });
+        check("publishing from entry settings makes it public", !!live);
+        if (!cfg.allowAdd?.length) {
+            check("fixed template: no add/move/delete on the entry's sections", (await page.locator('[title="Delete section"], [title="Move up"]').count()) === 0);
+        }
+        const entryPrompt = (await admin(`collections/${cfg.key}/entries/${createdEntry.slug}/prompt/`)).body?.prompt || "";
+        check("entry rewrite prompt is template-strict and ends with FINAL CHECK", entryPrompt.includes("STRUCTURE") && entryPrompt.slice(-2500).includes("FINAL CHECK"));
+        const first = cfg.sections[0];
+        const rewrite = await adminWrite(`collections/${cfg.key}/entries/${createdEntry.slug}/apply/`, "POST", {
+            raw: "```json\n" + JSON.stringify({ sections: [{ type: first, heading: `${STAMP} rewritten`, content: "x", description: "x", text: "x", items: [{ question: "Q?", answer: "A." }] }] }) + "\n```",
+        });
+        check("AI rewrite applied as drafts, fitted to the template", rewrite.status === 200 && JSON.stringify(rewrite.body.sections.map((r) => r.section_type).slice(0, cfg.sections.length)) === JSON.stringify(cfg.sections));
+        check("visitors still see the published entry, not the rewrite draft", !(await (await fetch(`${SITE}/${cfg.pathPrefix}/${createdEntry.slug}`)).text()).includes(`${STAMP} rewritten`));
+        await closeDrawer().catch(() => {});
+    }
 
     /* ---------- 10. Full-page admin still works ---------- */
     for (const path of ["/admin", "/admin/pages", "/admin/seo", "/admin/images", "/admin/sitemap", "/admin/settings"]) {
@@ -245,17 +305,21 @@ try {
     console.log("screenshot: acceptance-failure.png");
 } finally {
     // Put everything back.
-    if (block || createdPath) {
+    if (block || createdEntry) {
         if (!(await admin("auth/session/")).body?.authenticated) await login("/").catch(() => {});
         if (block && original) {
             await adminWrite(`home/${block}/`, "PUT", original);
             await adminWrite("drafts/discard/", "POST", { components: [block] });
             check("cleanup: edited block restored", JSON.stringify(await publicJson(`home/${block}/`)) === JSON.stringify(original));
         }
-        if (createdPath) {
-            const del = await adminWrite(`content/pages/${createdPath}/`, "DELETE");
-            await adminWrite(`seo/${createdPath}/`, "DELETE");
-            check("cleanup: test page deleted", del.status === 204 || del.status === 200 || del.status === 404);
+        if (originalSeo) {
+            const seoKey = PAGE.replace(/^\/+|\/+$/g, "") || "home";
+            await adminWrite(`seo/${seoKey}/`, "PATCH", { keywords: { primary: originalSeo.keywords?.primary || "" } });
+            check("cleanup: page keyword restored", ((await admin(`seo/${seoKey}/`)).body?.keywords?.primary || "") === (originalSeo.keywords?.primary || ""));
+        }
+        if (createdEntry) {
+            const del = await adminWrite(`collections/${createdEntry.key}/entries/${createdEntry.slug}/`, "DELETE");
+            check("cleanup: test entry deleted", del.status === 204 || del.status === 200);
         }
     }
     check("no uncaught page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));

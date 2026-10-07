@@ -12,12 +12,15 @@ import { apiRequest } from "@/lib/api";
    post). Visitors get `children` — the server-
    rendered published page, untouched. Admins get
    the same page rendered from the admin API: drafts
-   included, every section inline-editable, and the
-   admin bar's "Page builder" bound to this page.
+   included and every section inline-editable.
+   Structure (add / move / delete sections) is only
+   offered on collection entries whose template allows
+   it — see the collection's `allowAdd`.
 ========================================= */
 
 export default function DynamicPageAdmin({ kind = "content", hostKey, children }) {
-    const { isAdmin, setDynamicHost, publishEpoch, discardEpoch } = useAdmin();
+    const { isAdmin, setDynamicHost, publishEpoch, discardEpoch, collection } = useAdmin();
+    const allowAdd = collection.role === "entry" ? collection.collection?.allowAdd || [] : [];
     const [host, setHost] = useState(null);
     const [sections, setSections] = useState(null);
     const [error, setError] = useState("");
@@ -71,7 +74,7 @@ export default function DynamicPageAdmin({ kind = "content", hostKey, children }
             {kind === "content" ? <HeaderSpacerClient sections={sections} /> : null}
             {host?.status !== "published" ? (
                 <div className="cms-ui sticky top-[70px] z-50 bg-[#FFFAEB] px-5 py-2 text-center text-[13px] font-medium text-[#B54708] lg:top-[76px]">
-                    Draft page — only admins can see it. Publish it from Page builder → Page.
+                    Draft — only admins can see it. Publish it from the admin bar’s entry settings (or Dashboard → Pages).
                 </div>
             ) : null}
             {sections.map((section, index) => (
@@ -84,10 +87,11 @@ export default function DynamicPageAdmin({ kind = "content", hostKey, children }
                     total={sections.length}
                     siblingIds={ids}
                     onChanged={load}
+                    allowAdd={allowAdd}
                 />
             ))}
             {!sections.length ? (
-                <p className="cms-ui px-5 py-24 text-center text-[14px] text-[#64748B]">This page has no sections yet — open Page builder to add some.</p>
+                <p className="cms-ui px-5 py-24 text-center text-[14px] text-[#64748B]">This page has no sections yet.</p>
             ) : null}
         </>
     );

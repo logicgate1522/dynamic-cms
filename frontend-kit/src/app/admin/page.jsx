@@ -44,7 +44,7 @@ export default function AdminOverview() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {tiles.map((tile) => (
                     <Link key={tile.href} href={tile.href}>
-                        <Card className="h-full transition hover:border-[#0F9E86]">
+                        <Card className="h-full transition hover:border-[var(--cms-accent)]">
                             <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#64748B]">{tile.label}</p>
                             <p className="mt-2 text-[30px] font-bold text-[#0F172A]">{tile.value ?? "…"}</p>
                             {tile.sub ? <p className="text-[12px] text-[#64748B]">{tile.sub}</p> : null}
@@ -61,7 +61,7 @@ export default function AdminOverview() {
                     <strong> Sections</strong> menu lists them all. Use <strong>SEO</strong> in the same bar to edit that
                     page&apos;s title, description, social image and indexing, or to run an SEO audit.
                 </p>
-                <Link href="/" className="mt-4 inline-block rounded-lg bg-[#0F9E86] px-4 py-2 text-[13px] font-semibold text-white">Open the site →</Link>
+                <Link href="/" className="mt-4 inline-block rounded-lg bg-[var(--cms-accent)] px-4 py-2 text-[13px] font-semibold text-white">Open the site →</Link>
             </Card>
         </>
     );

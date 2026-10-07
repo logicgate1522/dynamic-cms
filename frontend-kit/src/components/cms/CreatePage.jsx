@@ -3,31 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { useAdmin } from "@/components/cms/AdminProvider";
 import { INTENT_OPTIONS, Notice, PasteBox, PromptBox, Segmented, Step } from "@/components/cms/ai";
-import Drawer, { buttonStyles } from "@/components/cms/Drawer";
+import { buttonStyles } from "@/components/cms/Drawer";
 import { humanize } from "@/components/cms/FieldEditor";
 import { apiRequest } from "@/lib/api";
 
 /* =========================================
-   New page / new article from an SEO brief:
+   One-off page from an SEO brief — Dashboard → Pages
+   only (power users). On the site itself admins create
+   pages through collections (CollectionPanel), so new
+   entries always follow their collection's template.
    brief -> ai/new-page-prompt/ -> copy -> paste
-   -> content/paste-to-build/ (a DRAFT page with
-   its SEO filled in) -> open it to review, add
-   images and publish from the page builder.
+   -> content/paste-to-build/ (a DRAFT page with its
+   SEO filled in) -> open it to review and publish.
 ========================================= */
 
-export default function CreatePage() {
-    const { panel, closePanel } = useAdmin();
-    if (panel?.type !== "create") return null;
-    return (
-        <Drawer open title="Create a page with AI" subtitle="Brief → prompt → paste → review the draft" onClose={closePanel} width={600}>
-            <CreatePageForm onDone={closePanel} />
-        </Drawer>
-    );
-}
-
-const field = "w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[#0F9E86]";
+const field = "w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-[13px] outline-none focus:border-[var(--cms-accent)]";
 
 export function CreatePageForm({ onDone, defaultKind = "content" }) {
     const router = useRouter();
@@ -128,7 +119,7 @@ export function CreatePageForm({ onDone, defaultKind = "content" }) {
                             {types.map((t) => {
                                 const on = selected.includes(t);
                                 return (
-                                    <button key={t} type="button" onClick={() => setSelected(on ? selected.filter((x) => x !== t) : [...selected, t])} className={`rounded-full border px-2.5 py-0.5 text-[11px] ${on ? "border-[#0F9E86] bg-[#ECFDF5] text-[#0B7A68]" : "border-[#E2E8F0]"}`}>
+                                    <button key={t} type="button" onClick={() => setSelected(on ? selected.filter((x) => x !== t) : [...selected, t])} className={`rounded-full border px-2.5 py-0.5 text-[11px] ${on ? "border-[var(--cms-accent)] bg-[var(--cms-accent-soft)] text-[var(--cms-accent-strong)]" : "border-[#E2E8F0]"}`}>
                                         {humanize(t)}
                                     </button>
                                 );

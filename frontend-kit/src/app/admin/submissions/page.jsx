@@ -79,7 +79,7 @@ export default function SubmissionsPage() {
                 </label>
                 <div className="flex gap-1">
                     {FILTERS.map((f) => (
-                        <button key={f.key} type="button" onClick={() => { setFilter(f.key); setPage(1); }} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${filter === f.key ? "bg-[#123A5C] text-white" : "bg-white text-[#475569]"}`}>
+                        <button key={f.key} type="button" onClick={() => { setFilter(f.key); setPage(1); }} className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${filter === f.key ? "bg-[var(--cms-primary)] text-white" : "bg-white text-[#475569]"}`}>
                             {f.label}
                         </button>
                     ))}
@@ -94,7 +94,7 @@ export default function SubmissionsPage() {
                     const fields = sub.data || {};
                     const isOpen = open === sub.id;
                     return (
-                        <Card key={sub.id} className={`p-0 ${sub.is_read ? "" : "border-l-4 border-l-[#0F9E86]"}`}>
+                        <Card key={sub.id} className={`p-0 ${sub.is_read ? "" : "border-l-4 border-l-[var(--cms-accent)]"}`}>
                             <button
                                 type="button"
                                 onClick={() => {

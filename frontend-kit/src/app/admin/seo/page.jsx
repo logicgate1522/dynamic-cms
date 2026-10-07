@@ -64,7 +64,7 @@ export default function SeoAuditPage() {
                         ) : null}
                         {pages.map((p) => (
                             <tr key={p.path} className="border-b border-[#F1F5F9] last:border-0">
-                                <td className="px-5 py-3"><Link href={publicPath(p.path)} target="_blank" className="font-semibold text-[#0F9E86] hover:underline">{publicPath(p.path)}</Link></td>
+                                <td className="px-5 py-3"><Link href={publicPath(p.path)} target="_blank" className="font-semibold text-[var(--cms-accent)] hover:underline">{publicPath(p.path)}</Link></td>
                                 {["overall", "technical_score", "content_score", "metadata_score", "schema_score"].map((k) => (
                                     <td key={k} className="px-3 py-3"><span className={`rounded-md px-2 py-0.5 font-semibold ${tone(p[k])}`}>{p[k]}</span></td>
                                 ))}

@@ -49,7 +49,7 @@ export function SlotUpload({ slot = "image", className = "left-3 top-3" }) {
     const [busy, setBusy] = useState(false);
     if (!ctx?.editMode) return null;
     return (
-        <label className={`cms-ui absolute z-[55] inline-flex cursor-pointer items-center rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 hover:bg-[#0F9E86] ${className}`}>
+        <label className={`cms-ui ${busy ? "" : "cms-hover-tools"} absolute z-[55] inline-flex cursor-pointer items-center rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 hover:bg-[var(--cms-accent)] ${className}`}>
             {busy ? "Uploading…" : "Replace image"}
             <input
                 type="file"

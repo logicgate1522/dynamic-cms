@@ -37,8 +37,8 @@ export default function Drawer({ open, title, subtitle, onClose, footer, childre
 }
 
 export const buttonStyles = {
-    primary: "rounded-lg bg-[#0F9E86] px-4 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50",
+    primary: "rounded-lg bg-[var(--cms-accent)] px-4 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50",
     secondary: "rounded-lg border border-[#CBD5E1] bg-white px-4 py-2 text-[13px] font-semibold text-[#334155] hover:bg-[#F1F5F9] disabled:opacity-50",
     danger: "rounded-lg px-3 py-2 text-[13px] font-semibold text-[#B42318] hover:bg-[#FEF3F2] disabled:opacity-50",
-    link: "text-[12px] font-semibold text-[#0F9E86] hover:underline disabled:opacity-50",
+    link: "text-[12px] font-semibold text-[var(--cms-accent)] hover:underline disabled:opacity-50",
 };

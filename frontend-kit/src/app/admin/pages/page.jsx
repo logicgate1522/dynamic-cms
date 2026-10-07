@@ -254,7 +254,7 @@ function HostManager({ kind, hostKey, onBack }) {
                     <Card key={section.id}>
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#0F9E86]">{index + 1}. {humanize(section.section_type)}</p>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--cms-accent)]">{index + 1}. {humanize(section.section_type)}</p>
                                 <p className="mt-1 text-[14px] font-semibold text-[#0F172A]">{section.content.heading || section.content.text || "—"}</p>
                             </div>
                             <div className="flex gap-1">
