@@ -16,7 +16,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.generics import ListCreateAPIView, ListAPIView
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+from .throttles import SiteAwareScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
@@ -71,7 +71,7 @@ class AdminLoginView(APIView):
     page JavaScript. See api/auth_views.py.
     """
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [SiteAwareScopedRateThrottle]
     throttle_scope = 'login'  # dedicated brute-force budget, separate from form_submit
 
     def post(self, request, *args, **kwargs):
@@ -592,7 +592,7 @@ class SEOResolveView(APIView):
     """GET seo/resolve/<path>/ — fully-resolved, frontend-ready metadata +
     assembled JSON-LD @graph. Public, cached, rate-limited."""
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [SiteAwareScopedRateThrottle]
     throttle_scope = "resolve"
 
     def get(self, request, *args, **kwargs):
@@ -664,7 +664,7 @@ class RedirectResolveView(APIView):
     """GET redirects/resolve/?path=/old — public, cached. {to, status} or 404.
     Increments hit_count/last_hit_at best-effort."""
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [SiteAwareScopedRateThrottle]
     throttle_scope = "resolve"
 
     def get(self, request, *args, **kwargs):
@@ -740,7 +740,7 @@ class RedirectImportExportView(APIView):
 class FormSubmitView(APIView):
     """Public, throttled endpoint that accepts a submission for a named form definition."""
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [SiteAwareScopedRateThrottle]
     throttle_scope = 'form_submit'
 
     def post(self, request, *args, **kwargs):

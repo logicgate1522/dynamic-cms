@@ -271,13 +271,16 @@ REST_FRAMEWORK = {
     # override is useless — and it collides with endpoints that take a
     # ?format=csv|json app-level param (form-submission export). Disable it.
     'URL_FORMAT_OVERRIDE': None,
+    # api/throttles.py: staff and the site's own server (X-CMS-Frontend =
+    # REVALIDATE_SECRET) skip the general limits; `login` and `form_submit`
+    # always apply.
     'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle',
+        'api.throttles.SiteAwareAnonRateThrottle',
+        'api.throttles.StaffExemptUserRateThrottle',
         # ScopedRateThrottle must be in the default list for any view that
         # sets `throttle_scope` to actually be rate-limited. It is a no-op
         # for views without a scope, so adding it here is safe globally.
-        'rest_framework.throttling.ScopedRateThrottle',
+        'api.throttles.SiteAwareScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
         'anon': os.getenv('THROTTLE_RATE_ANON', '120/minute'),

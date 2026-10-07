@@ -1890,3 +1890,51 @@ class PromptRepetitionTests(AdminAuthMixin, APITestCase):
         self.assertEqual(len(ids), len(set(ids)))
         for wanted in prompts.SEO_CHECKS_FOR_PAGE_ASSIST:
             self.assertIn(wanted, ids)
+
+
+@override_settings(REVALIDATE_SECRET="site-secret", REST_FRAMEWORK={
+    **__import__("django.conf").conf.settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"anon": "3/minute", "user": "3/minute", "form_submit": "2/minute",
+                               "login": "2/minute", "resolve": "3/minute"},
+})
+class ThrottleExemptionTests(AdminAuthMixin, APITestCase):
+    """Staff and the site's own server are not rate-limited like visitors;
+    login and form spam limits still apply to everyone."""
+
+    def setUp(self):
+        super().setUp()
+        from rest_framework.settings import api_settings
+        api_settings.reload()
+        from rest_framework.throttling import SimpleRateThrottle
+        SimpleRateThrottle.THROTTLE_RATES = api_settings.DEFAULT_THROTTLE_RATES
+        cache.clear()
+
+    def tearDown(self):
+        from rest_framework.settings import api_settings
+        from rest_framework.throttling import SimpleRateThrottle
+        api_settings.reload()
+        SimpleRateThrottle.THROTTLE_RATES = api_settings.DEFAULT_THROTTLE_RATES
+        super().tearDown()
+
+    def test_anonymous_visitors_are_limited(self):
+        codes = [self.client.get("/api/home/hero/").status_code for _ in range(5)]
+        self.assertIn(429, codes)
+
+    def test_site_server_with_the_shared_secret_is_not(self):
+        codes = [self.client.get("/api/home/hero/", HTTP_X_CMS_FRONTEND="site-secret").status_code for _ in range(8)]
+        codes += [self.client.get("/api/seo/resolve/about/", HTTP_X_CMS_FRONTEND="site-secret").status_code for _ in range(8)]
+        self.assertNotIn(429, codes)
+
+    def test_a_wrong_secret_is_limited(self):
+        codes = [self.client.get("/api/home/hero/", HTTP_X_CMS_FRONTEND="nope").status_code for _ in range(5)]
+        self.assertIn(429, codes)
+
+    def test_staff_are_not_limited_while_editing(self):
+        codes = [self.admin_client.patch("/api/home/hero/?mode=draft", {"t": i}, format="json").status_code for i in range(10)]
+        codes += [self.admin_client.get("/api/drafts/").status_code for _ in range(10)]
+        self.assertNotIn(429, codes)
+
+    def test_form_spam_limit_applies_even_to_the_site_server(self):
+        codes = [self.client.post("/api/forms/contact/submit/", {"email": "a@b.co"}, format="json",
+                                  HTTP_X_CMS_FRONTEND="site-secret").status_code for _ in range(4)]
+        self.assertIn(429, codes)
