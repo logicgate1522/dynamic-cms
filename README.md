@@ -193,7 +193,7 @@ is referenced (`?force=1` overrides).
 
 ## Frontend integration
 
-- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R25, a
+- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R29, a
   phase-by-phase procedure, the exact section-conversion recipe, the full
   backend contract and an SEO reference.
 - **`frontend-kit/`**: the Next.js App Router kit to copy in.

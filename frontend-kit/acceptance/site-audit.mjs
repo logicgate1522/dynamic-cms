@@ -24,6 +24,17 @@
      across tel:/mailto: links and the Organization JSON-LD
    - the form on FORM_PAGE: empty submit must be blocked client-side, a valid
      submit must succeed and be stored
+   - content truth and structure (R26–R29):
+     - claims to confirm (client counts, ratings, "fixed fees", credentials,
+       visible testimonials) — warnings; with LAUNCH=1 they fail unless the
+       owner confirmed them (CLAIMS_CONFIRMED=1)
+     - a phone number or email on a page that isn't in SiteSettings.contact,
+       or the private form-notification address shown anywhere
+     - headings inside <footer> (use styled text); a page whose first
+       heading isn't its <h1>
+     - a collection entry not linked from its index page; entries under
+       ENTRY_MIN_WORDS (default 600) words of main content; a FORM_PAGE with
+       under 120 words besides the form
    With LAUNCH=1 it also fails on launch blockers (placeholder text on pages,
    GET launch-check/: localhost site URL, leads that notify nobody, email not
    really sent, indexing off…). Without LAUNCH they are printed as warnings.
@@ -39,6 +50,9 @@ const API = `${(process.env.API_URL || "http://localhost:8000").replace(/\/+$/, 
 const { CMS_USER, CMS_PASSWORD } = process.env;
 const FORM_PAGE = process.env.FORM_PAGE || "/contact";
 const LAUNCH = process.env.LAUNCH === "1";
+// Mirrors CLAIMS in api/launch_check.py (R26).
+const CLAIMS = /\b\d{2,}[,\d]*\s?\+(?=\s|$|[^\w])|\b\d(?:\.\d)?\s?\/\s?5\b|★{3,}|\b\d{2,3}\s?%\s*(?:client|customer|satisf|success|retention)|\b\d+\+?\s*years?\s+(?:of\s+)?experience|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d|\bfixed[- ](?:fees?|prices?|pricing)\b|\baward[- ]winning\b|\bchartered\b|\bregistered\s+agents?\b/gi;
+const ENTRY_MIN_WORDS = Number(process.env.ENTRY_MIN_WORDS || 600);
 const PLACEHOLDER = /\[(?:insert|registered|company|your|add|todo)[^\]]*\]|\b0{4}\s?0{6}\b|@example\.(?:com|org|co\.uk)\b|lorem ipsum|\bTBD\b|\bNew section\b|Write the first paragraph|Describe the offer in one|\bEyebrow\b/gi;
 
 const results = [];
@@ -63,6 +77,12 @@ if (!robotsSitemap) fail("/robots.txt", "no Sitemap: line");
 const titles = {};
 const phones = new Map(); // normalised number -> pages
 const emails = new Map();
+const pageWords = new Map();
+const pageLinks = new Map();
+const publicSettings = await (await fetch(`${API}/settings/site/`)).json().catch(() => ({}));
+const allowedPhone = String(publicSettings.contact?.phone || "").replace(/\(0\)/g, "").replace(/[^\d]/g, "").replace(/^44/, "0");
+const allowedEmail = String(publicSettings.contact?.email || "").toLowerCase().trim();
+const notifyAddress = String(publicSettings.forms?.notifyEmail || "").toLowerCase().trim();
 const note = (map, value, path) => { if (!map.has(value)) map.set(value, new Set()); map.get(value).add(path); };
 const descriptions = {};
 const links = new Map();
@@ -98,6 +118,15 @@ for (const url of urls) {
             tel: [...document.querySelectorAll('a[href^="tel:"]')].map((a) => a.getAttribute("href").slice(4)),
             mail: [...document.querySelectorAll('a[href^="mailto:"]')].map((a) => a.getAttribute("href").slice(7).split("?")[0]),
             text: document.body.innerText,
+            footerHeadings: document.querySelectorAll("footer h1, footer h2, footer h3").length,
+            // Visible headings only: hidden mobile/desktop twins don't count.
+            firstHeading: [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")].find((h) => h.offsetParent !== null && h.getClientRects().length)?.tagName || "",
+            mainWords: (() => {
+                const main = document.querySelector("main")?.cloneNode(true);
+                if (!main) return 0;
+                main.querySelectorAll("header, footer, nav, form, script, style").forEach((n) => n.remove());
+                return (main.textContent || "").split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).length;
+            })(),
         };
     });
     if (!m.title) fail(path, "no <title>");
@@ -142,6 +171,19 @@ for (const url of urls) {
     const digits = (t) => String(t).replace(/\(0\)/g, "").replace(/[^\d]/g, "").replace(/^44/, "0").replace(/^00/, "");
     [...m.tel, ...ldTel].forEach((t) => note(phones, digits(t), path));
     [...m.mail, ...ldMail].forEach((e) => note(emails, String(e).toLowerCase().trim(), path));
+    // R26–R29: truthful claims, contact details from one source, structure.
+    const claims = [...new Set(m.text.match(CLAIMS) || [])];
+    if (claims.length) {
+        const say = LAUNCH && process.env.CLAIMS_CONFIRMED !== "1" ? fail : warn;
+        say(path, `[claims] confirm with the owner or remove: ${claims.slice(0, 5).join(" | ")}`);
+    }
+    for (const t of m.tel) if (digits(t) !== allowedPhone) fail(path, `phone ${t} is shown but SiteSettings.contact.phone is “${publicSettings.contact?.phone || "empty"}” — contact details come only from there`);
+    for (const e of m.mail) if (e.toLowerCase().trim() !== allowedEmail) fail(path, `email ${e} is shown but SiteSettings.contact.email is “${allowedEmail || "empty"}” — contact details come only from there`);
+    if (notifyAddress.includes("@") && m.text.toLowerCase().includes(notifyAddress)) fail(path, "the private form-notification address is shown on the page");
+    if (m.footerHeadings) fail(path, `${m.footerHeadings} heading(s) inside <footer> — style footer titles as text, not h1–h3`);
+    if (m.firstHeading && m.firstHeading !== "H1") fail(path, `the first heading is ${m.firstHeading.toLowerCase()}, not the page's <h1>`);
+    pageWords.set(path, m.mainWords);
+    pageLinks.set(path, new Set(m.hrefs.map((h) => (h || "").replace(SITE, "").split("#")[0].split("?")[0])));
     const placeholders = [...new Set(m.text.match(PLACEHOLDER) || [])];
     if (placeholders.length) launch(path, `placeholder text on the page: ${placeholders.slice(0, 5).join(" | ")}`);
     for (const href of m.hrefs) {
@@ -225,6 +267,21 @@ if (CMS_USER && CMS_PASSWORD) {
         }
     }
 }
+
+/* ---------- collections: every entry linked from its index, and substantial (R28) ---------- */
+if (token) {
+    const r = await fetch(`${API}/collections/`, { headers: { Authorization: `Token ${token}` } });
+    for (const col of r.ok ? await r.json() : []) {
+        const index = `/${col.indexPath || ""}`.replace(/\/+$/, "") || "/";
+        const entries = await (await fetch(`${API}/collections/${col.key}/entries/`, { headers: { Authorization: `Token ${token}` } })).json().catch(() => []);
+        for (const entry of (entries.results || entries).filter((e) => e.status === "published" && e.href)) {
+            if (pageLinks.has(index) && !pageLinks.get(index).has(entry.href)) fail(entry.href, `not linked from its index page ${index}`);
+            const words = pageWords.get(entry.href);
+            if (col.hostKind === "content" && words !== undefined && words < ENTRY_MIN_WORDS) fail(entry.href, `${words} words of content (${col.label} pages need ≥ ${ENTRY_MIN_WORDS})`);
+        }
+    }
+}
+if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, `${pageWords.get(FORM_PAGE)} words besides the form — say what happens after someone submits it`);
 
 /* ---------- launch check ---------- */
 if (token) {

@@ -2149,6 +2149,27 @@ class TrackingAndFormSettingsTests(AdminAuthMixin, APITestCase):
         self.assertEqual(self.patch({"forms": {"notifyEmail": "a1b2c3d4e5f6a7b8c9d0"}}).status_code, 200)
 
 
+class ClaimsCheckTests(AdminAuthMixin, APITestCase):
+    def _claims(self):
+        items = {i["id"]: i for i in self.admin_client.get("/api/launch-check/").data["items"]}
+        return items.get("claims")
+
+    def test_invented_looking_claims_and_visible_testimonials_are_flagged(self):
+        self.admin_client.put("/api/home/home-hero/", {"rating": "Trusted by 250+ UK users", "badge": "Fixed fees, no surprises"}, format="json")
+        self.admin_client.put("/api/home/home-testimonials/", {"testimonials": [{"name": "Sam", "text": "Great"}]}, format="json")
+        claims = self._claims()
+        self.assertEqual(claims["level"], "warning")
+        texts = " | ".join(f"{h['text']} @ {h['where']}" for h in claims["where"])
+        self.assertIn("250+", texts)
+        self.assertIn("Fixed fees", texts)
+        self.assertIn("testimonials are visible", texts)
+
+    def test_hidden_or_honest_content_is_not_flagged(self):
+        self.admin_client.put("/api/home/home-hero/", {"title": "Online accountants for UK businesses", "fee": "Tailored quotes"}, format="json")
+        self.admin_client.put("/api/home/home-testimonials/", {"_hidden": True, "testimonials": [{"name": "Sam", "text": "4.9/5"}]}, format="json")
+        self.assertIsNone(self._claims())
+
+
 class SectionOptionalFieldTests(APITestCase):
     def test_hero_highlights_and_secondary_buttons_validate(self):
         from .dynamic_pages import _validate_section_fields, SECTION_SCHEMA

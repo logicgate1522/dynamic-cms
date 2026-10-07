@@ -108,7 +108,9 @@ If any point fails, fix your reply first. Do not mention this checklist in your 
 RULE_JSON = "The reply is ONLY the JSON described above: no markdown fences, no explanation before or after, no comments."
 RULE_URLS = 'Every URL, path and image reference is a plain string exactly as given — never "[x](x)" markdown.'
 RULE_ARRAYS = "No existing list item was removed, shortened or reordered; new items were only ADDED where a list was thin."
-RULE_FACTS = "Nothing is invented: no statistics, prices, awards, reviews, accreditations or legal claims you were not given."
+RULE_FACTS = ("Nothing is invented: no statistics or client counts, ratings, reviews or testimonials, years of experience, "
+              "awards, accreditations or memberships, prices or 'fixed fee' promises, phone numbers, emails, addresses "
+              "or legal claims you were not given.")
 RULE_KEYWORD = "The primary keyword (or a natural variation) appears where it reads naturally — never stuffed or repeated mechanically."
 RULE_PLAIN = "Text is plain: no HTML, no markdown, paragraphs separated by a blank line."
 RULE_VOICE = "The copy matches the brand voice and spelling conventions stated above."

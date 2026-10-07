@@ -22,6 +22,19 @@ PLACEHOLDER = re.compile(
     r"|\bNew section\b|Write the first paragraph|Describe the offer in one|What it does\b|\bEyebrow\b",
     re.IGNORECASE,
 )
+# Claims a new business can't usually back up: client counts, ratings,
+# percentages, credentials and price promises. Each must be confirmed by the
+# owner (or removed) before launch — R26.
+CLAIMS = re.compile(
+    r"\b\d{2,}[,\d]*\s?\+(?=\s|$|[^\w])"                               # 250+, 1,000+
+    r"|\b\d(?:\.\d)?\s?/\s?5\b|★{3,}"                                    # 4.9/5, ★★★★★
+    r"|\b\d{2,3}\s?%\s*(?:client|customer|satisf|success|retention)"     # 98% satisfaction
+    r"|\b\d+\+?\s*years?\s+(?:of\s+)?experience"                          # 15 years experience
+    r"|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d"                    # trusted by 500
+    r"|\bfixed[- ](?:fees?|prices?|pricing)\b"                             # fixed fees
+    r"|\baward[- ]winning\b|\bchartered\b|\bregistered\s+agents?\b",     # credentials
+    re.IGNORECASE,
+)
 EMAIL_LIKE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", ""}
 DEV_EMAIL_BACKENDS = ("console", "locmem", "dummy", "filebased")
@@ -44,14 +57,40 @@ def _strings(value, path=""):
 
 def placeholder_hits():
     """Placeholder text in anything visitors can see (published data only)."""
+    return published_hits(PLACEHOLDER)
+
+
+def claim_hits():
+    """Unverified-looking claims (R26) in published content, plus any
+    testimonials visitors can see — reviews must be real (UK DMCC Act)."""
+    from .models import BlogPost, ComponentData, ContentPage, DynamicSection
+    hits = [h for h in published_hits(CLAIMS, whole=True) if "testimonial" not in h["where"].lower()]
+    for row in ComponentData.objects.all():
+        data = row.data or {}
+        if not data.get("_hidden") and any(isinstance(v, list) and v for k, v in data.items() if "testimonial" in k.lower()):
+            hits.append({"where": f"block “{row.name}”", "text": "testimonials are visible"})
+    live_pages = set(ContentPage.objects.filter(status="published").values_list("pk", flat=True))
+    live_posts = set(BlogPost.objects.filter(status="published").values_list("pk", flat=True))
+    for section in DynamicSection.objects.filter(status="published", section_type="testimonials").select_related("content_type"):
+        model = section.content_type.model
+        live = (model == "contentpage" and section.object_id in live_pages) or (model == "blogpost" and section.object_id in live_posts)
+        if live and not (section.content or {}).get("_hidden"):
+            hits.append({"where": f"{model} #{section.object_id} section {section.order + 1}", "text": "testimonials are visible"})
+    return hits
+
+
+def published_hits(pattern, whole=False):
+    """Matches of `pattern` in anything visitors can see (published data only).
+    `whole` reports the full string (trimmed) instead of just the match."""
     from .models import BlogPost, ComponentData, ContentPage, DynamicSection, PageSEO, SiteSettings
     hits = []
 
     def scan(where, blob):
         for path, text in _strings(blob):
-            match = PLACEHOLDER.search(text)
+            match = pattern.search(text)
             if match:
-                hits.append({"where": f"{where} → {path}" if path else where, "text": match.group(0)})
+                shown = (text if len(text) <= 90 else text[:87] + "…") if whole else match.group(0)
+                hits.append({"where": f"{where} → {path}" if path else where, "text": shown})
 
     for row in ComponentData.objects.all():
         if not (row.name or "").startswith("form-"):
@@ -134,6 +173,14 @@ def run_launch_check():
         add("placeholders", "blocker", f"Placeholder text is published ({len(hits)})",
             "; ".join(f"{h['text']} in {h['where']}" for h in hits[:8]) + (" …" if len(hits) > 8 else ""),
             "Replace each with real details (click it on the page).", where=hits)
+
+    # 5b. Claims the owner must confirm are true (R26).
+    claims = claim_hits()
+    if claims:
+        add("claims", "warning", f"Confirm these claims are true ({len(claims)})",
+            "; ".join(f"“{h['text']}” in {h['where']}" for h in claims[:8]) + (" …" if len(claims) > 8 else ""),
+            "Keep only numbers, ratings, credentials, prices and reviews the business can prove; hide or reword the rest.",
+            where=claims)
 
     # 6. Sharing.
     if not seo_defaults.get("defaultOgImage"):

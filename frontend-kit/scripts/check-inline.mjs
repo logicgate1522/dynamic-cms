@@ -16,7 +16,8 @@
    3. site-wide (every file): forms only via lib/forms (R24), tracking only via
       lib/track (R25), no dangerouslySetInnerHTML outside JsonLd (R10), no
       secret or X-CMS-Frontend in browser code (R19), no AI prompt wording
-      (R5), no auth token in browser storage (R4).
+      (R5), no auth token in browser storage (R4), no hard-coded tel:/mailto:
+      contact details (R27).
 
    To keep a string fixed on purpose (a unit, a legal mark, a screen-reader
    label, admin-only chrome), put a JSX comment containing "cms-static" on
@@ -151,6 +152,9 @@ function contractRules(file, source, lines, report) {
         }
         if (/FINAL CHECK|Return ONLY|Respond (only )?with (valid )?JSON|You are an? (expert|senior|SEO|copywriter|content)/i.test(line)) {
             report(i + 1, "AI prompt wording in the frontend — prompts come from the backend ai/* endpoints (R5)");
+        }
+        if (/["'`](?:tel|mailto):[^"'`${}\s]+["'`]/.test(line)) {
+            report(i + 1, "hard-coded tel:/mailto: link — contact details come from SiteSettings.contact or CMS content, and only when the owner publishes them (R27)");
         }
         if (/(local|session)Storage\.setItem\(\s*[^,]*(token|auth|csrf|jwt|session)/i.test(line) || /document\.cookie\s*=.*(token|auth)/i.test(line)) {
             report(i + 1, "auth token in browser storage — session cookie + CSRF only (R4)");

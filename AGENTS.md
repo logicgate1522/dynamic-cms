@@ -11,7 +11,7 @@ instructions the docs already answer.
 ## Job A — "Integrate this CMS into <frontend>"
 
 1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full, starting with "How to use
-   this file". Rules R1–R25 are mandatory; each has a rule card (Must / Never
+   this file". Rules R1–R29 are mandatory; each has a rule card (Must / Never
    / Proven by), a phase that builds it, an anti-pattern and a checklist line.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
@@ -37,6 +37,14 @@ instructions the docs already answer.
      hard-code / invent the recipient (R24 — it's Settings → Form notifications)
    - hard-code a tracking tag or call `gtag`/`fbq`/`dataLayer.push` outside
      `lib/track.js` (R25 — IDs live in Settings → Tracking & analytics)
+   - publish a claim the owner hasn't confirmed: stats, ratings, reviews,
+     credentials, "fixed fees" (R26)
+   - hard-code or publish a contact channel the owner didn't approve, or
+     show the form-notification address (R27)
+   - build pages for services the owner doesn't offer, or thin, unlinked
+     service pages (R28)
+   - mix CTA wordings, ship a form-only contact page, or use slogan-only H1s
+     (R29)
 
 ## Job B — Change the backend
 

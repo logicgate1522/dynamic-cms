@@ -10,7 +10,7 @@ this file wins.
 
 1. **Read all of it before writing code.** Every rule below exists because it
    was missed once and broke a real site.
-2. **There are 25 rules, R1–R25 (§0).** Each rule is stated five times, on
+2. **There are 29 rules, R1–R29 (§0).** Each rule is stated five times, on
    purpose. A test (`IntegrationSpecTests`) fails the CMS build if any copy is
    missing:
    - the **rule index** (§0.1): one line, its gate, its phase
@@ -84,6 +84,10 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R23 | Editing | Blocks, items and sections can be hidden; hidden = gone for visitors | `check:inline`, acceptance | P3, P5 |
 | R24 | Leads | Forms use `submitForm()`; email via FormSubmit to Settings address | `check:inline`, acceptance | P4, P7 |
 | R25 | Tracking | Tracking configured in Site tools; events via `track()` | `check:inline`, acceptance | P1, P7 |
+| R26 | Truth | Every claim is true: no invented stats, ratings, reviews, credentials or price promises | launch-check, site-audit | P0, P3, P7 |
+| R27 | Identity | Brand and contact details come from one place, and only what the owner publishes | `check:inline`, site-audit | P0, P3, P7 |
+| R28 | Pages | Services = the owner's real list, each a complete, linked page | site-audit, acceptance | P5 |
+| R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit, review | P3, P4 |
 
 ### §0.2 Rule cards
 
@@ -339,8 +343,9 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   `forms.notifyEmail` and fires `track("generate_lead")`. The address is set
   in **Site tools → Settings → Form notifications**, the FIRST settings card,
   with **Send a test email**. FormSubmit emails an activation link on the
-  first send. After activating, the owner may swap the address for
-  FormSubmit's random alias.
+  first send. After activating, the owner replaces the address with
+  FormSubmit's private alias before launch (launch-check warns until then); the
+  address is never displayed on the site (R27).
 - **Never:** `fetch` the submit endpoint or formsubmit.co from a component;
   `mailto:` / EmailJS / Formspree; a hard-coded or invented recipient.
 - **Proven by:** `check:inline`; acceptance "a stored submission is emailed
@@ -363,6 +368,88 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Proven by:** `check:inline`; acceptance "data layer variables are pushed
   before GTM", "the GTM container from Settings is loaded", "page_view is
   pushed on in-site navigation".
+
+#### R26 — Every claim is true
+- **Must:** publish only numbers, ratings, reviews, credentials, memberships,
+  awards, guarantees and price claims the owner has confirmed. A new business
+  ships with no stats at all. Placeholder social proof (testimonials, client
+  logos, star ratings) ships **hidden** (`_hidden: true` in its defaults,
+  R23) until the owner supplies real ones. Describe pricing exactly as the
+  owner does (e.g. "a tailored quote after a free consultation"). Keep
+  regulatory facts (thresholds, deadlines, rates) current and checked
+  against HMRC / Companies House / the relevant authority.
+- **Never:** invented client counts ("250+ businesses"), ratings ("4.9/5",
+  ★★★★★), satisfaction percentages, years of experience, "trusted by …",
+  "award-winning", "chartered", "registered agents", accreditation logos
+  without membership, made-up testimonials (illegal in the UK under the DMCC
+  Act 2024), or "fixed fees" / "from £X" unless the owner said so.
+- **Proven by:** launch-check "Confirm these claims are true" (published CMS
+  content, visible testimonials) and site-audit `[claims]` on every rendered
+  page (code defaults included) — with `LAUNCH=1` these fail until the owner
+  confirms them (`CLAIMS_CONFIRMED=1`); the report lists every claim kept.
+
+#### R27 — Brand and contact details come from one place, and only what the owner publishes
+- **Must:** the brand name comes from `SITE_NAME` / `organization.name`;
+  renaming a business means changing settings and brand assets (logo,
+  favicon, app icon, default social image), nothing else, and no old name
+  survives in code, images, alt text or metadata. Contact channels (phone,
+  email, address, hours) come only from `SiteSettings.contact` (or one CMS
+  block); an empty field means that channel appears **nowhere**: header,
+  footer, legal page, contact page and JSON-LD. Ask the owner which
+  channels are public. A remote or booking-led practice may publish none,
+  with the booking form as the only route in. The form-notification
+  address (`forms.notifyEmail`) is private: never displayed, and replaced by
+  FormSubmit's alias after activation (R24).
+- **Never:** a hard-coded `tel:` / `mailto:` link or phone/address typed
+  into a component; a channel the owner didn't approve; the notification
+  address on a page; a leftover old brand name or logo.
+- **Proven by:** `check:inline` (hard-coded `tel:`/`mailto:`); site-audit
+  (every phone/email shown must equal `SiteSettings.contact`; the
+  notification address is never shown; one phone/email site-wide);
+  launch-check (`formsubmit-alias`).
+
+#### R28 — Services are the owner's real list, each a complete, linked page
+- **Must:** one collection entry per service the owner actually offers,
+  named the way the owner names it (with its frequency where it has one:
+  quarterly, monthly, yearly). Every entry follows one template (R14),
+  typically: hero with a keyword H1, an "at a glance" card (`highlights`:
+  how often, who it's for, how it's delivered, pricing) and a secondary
+  button to its guide · what's included · who it's for · how it works ·
+  deadlines and what the client provides · 6–8 FAQs · call to action — at
+  least 600 words of real content. Each service is linked from the services
+  index (cards are links), the home services section, the footer and the
+  booking page, and each service ↔ its guide (hero `secondary_*`; the
+  article sidebar links back by category). Service and FAQPage JSON-LD come
+  automatically (§9). Retiring a service: unpublish or delete its page, add a
+  301 to the nearest page, and remove every link, card, FAQ and guide that
+  sells it.
+- **Never:** a page for a service the owner doesn't offer; thin service
+  pages; service cards that aren't links; a renamed or removed URL without a
+  301.
+- **Proven by:** site-audit (every published entry linked from its index;
+  ≥ `ENTRY_MIN_WORDS`, default 600, words); acceptance (template fit).
+
+#### R29 — One primary action, an honest pricing story, keyword-led structure
+- **Must:** one primary call to action, worded identically everywhere (e.g.
+  "Book a Free Consultation" → `/contact`) in the header, heroes, section
+  CTAs and footer; secondary actions are outline buttons. The booking or
+  contact page is a real page: its H1 at the top, then what happens next,
+  how working together works, what to have ready and links to the services
+  (≥120 words besides the form). The form is definition-driven (§5.4) and
+  collects what the owner needs (e.g. services as checkboxes, preferred
+  date and time, video or phone call). If prices vary, include a pricing
+  explainer (what shapes a quote, what is promised). On every page the H1
+  names the topic with its keyword (slogans go in the eyebrow or subtitle),
+  the H1 is the first visible heading, and footer titles are styled text,
+  not headings. Put the main things (services, delivery model, primary
+  action) in the main places (hero, services section, CTA, footer) without
+  departing from the site's theme (R9, R17).
+- **Never:** competing CTAs ("Get a quote" here, "Call now" there); a
+  contact page that is only a form; slogan-only H1s; h1–h3 in the footer;
+  a redesign that leaves the existing look.
+- **Proven by:** site-audit (first visible heading is the H1; no footer
+  headings; booking page has content beyond the form); review (grep the CTA
+  wording across `src`).
 
 ---
 
@@ -387,12 +474,14 @@ handlers) to its equivalent and say so in the report. Kit files assume the
 Each phase ends green: build passes, no hydration warnings, public pages
 unchanged. Each phase names the rules it builds; tick them as you go.
 
-**P0 — Audit (no code changes). Rules: R12.** List the framework and
+**P0 — Audit (no code changes). Rules: R12, R26, R27.** List the framework and
 version, router, styling, every route, every section component and its
 hard-coded copy, lists, images, links, forms and their submit code (R24),
 tracking snippets and IDs (R25), existing SEO/metadata, the fixed-header
 height (R15), and every phone number / email / address in the code (R21,
-R22). Output one table: `file → what's hard-coded → useCms name → phase`, and
+R22). List every claim on the site (numbers, ratings, testimonials,
+credentials, price promises — R26), the services actually offered (R28) and
+which contact channels the owner wants public (R27). Output one table: `file → what's hard-coded → useCms name → phase`, and
 a list of the business details you'll need from the owner.
 
 **Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists. No file changed (`git status` clean).
@@ -456,22 +545,28 @@ once in the page. That emits JSON-LD and gives the admin bar its SEO button
 **Exit check P2:** every route file exports `generateMetadata` and renders `<PageSeo>` (grep both, compare counts with the route list); the SEO button opens on each route.
 
 **P3 — Convert every section (§3 recipe). Rules: R2, R3, R8, R9, R10, R11,
-R15, R18, R20, R23.** One component at a time. After each one,
+R15, R18, R20, R23, R26, R27, R29.** One component at a time. After each one,
 `npm run check:inline` passes for it, it renders identically (R9), it
 returns `null` when `hidden` (R23), its lists are index-keyed (R18), and it
 works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
-`SiteSettings.contact` or one shared block, never typed twice (R21).
+`SiteSettings.contact` or one shared block, never typed twice, and only the
+channels the owner publishes (R21, R27). Unconfirmed claims are removed and
+placeholder social proof ships hidden (R26). Every CTA uses the one primary
+action wording, H1s carry the keyword and footer titles are not headings
+(R29).
 
 **Exit check P3:** `npm run check:inline` reports **0 problems** for the whole of `src`; `next build` passes; side-by-side screenshots of every page at 390px and 1280px match the originals (R9); with editing on, each converted block shows Hide and All fields on hover.
 
-**P4 — Forms (§5.4). Rules: R24.** Every form submits with `submitForm()`
+**P4 — Forms (§5.4). Rules: R24, R29.** Every form submits with `submitForm()`
 from `lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
 notifications). Delete all old submit code (fetch, `mailto:`, EmailJS,
-Formspree, a hard-coded FormSubmit URL).
+Formspree, a hard-coded FormSubmit URL). Make the booking/contact page a
+real page around the form: H1 first, what happens next, what to have ready,
+links to the services (R29).
 
 **Exit check P4:** `grep -rn "fetch(.*submit\|formsubmit\|mailto:.*body" src --include=*.jsx` finds nothing outside `lib/forms.js`; each form submits once in the browser and the entry appears in Dashboard → Form inbox.
 
-**P5 — Collections, CMS pages and blog. Rules: R13, R14, R23.** First decide
+**P5 — Collections, CMS pages and blog. Rules: R13, R14, R23, R28.** First decide
 the collections (R13). A page type IS a collection when there is an index page
 listing entries AND (two or more detail pages share one section structure, OR
 it is a blog/news/projects-style list that will grow). For each one:
@@ -491,6 +586,10 @@ it is a blog/news/projects-style list that will grow). For each one:
    allows it (blog index: `GET blog/`; content collections:
    `GET content/pages/` filtered by prefix). Otherwise rely on `listingNote`.
 4. One-off pages stay one-off: no collection, locked structure.
+5. Services (R28): one entry per service the owner offers, each on the full
+   service template (≥600 words, keyword H1, "at a glance" highlights, link
+   to its guide), linked from the index cards, home, footer and booking page.
+   Retired services get a 301 and lose every link.
 
 Then the catch-all route for CMS pages, using
 `components/dynamic/DynamicContentPage.jsx` (ADAPT), which wraps the
@@ -510,12 +609,13 @@ report covers them.
 
 **Exit check P6:** `/sitemap.xml` lists every public route and no noindex page; `/robots.txt` has a Sitemap line on the canonical origin; a CMS redirect returns its status.
 
-**P7 — Seed. Rules: R5, R21, R22, R24, R25.** A `scripts/seed-cms.mjs` that
+**P7 — Seed. Rules: R5, R21, R22, R24, R25, R26, R27.** A `scripts/seed-cms.mjs` that
 fills the CMS:
 - site settings, **including the `ai` block (R5) and `collections` (§6.3)**
 - `seoDefaults.defaultOgImage`: a 1200×630 brand card (R21)
-- ONE canonical phone and email in `SiteSettings.contact`, which every
-  component uses (R21)
+- `SiteSettings.contact` with ONLY the channels the owner publishes (R21,
+  R27) — possibly none for a remote, booking-led practice
+- no invented claims; placeholder testimonials stored hidden (R26)
 - form definitions
 - `forms.notifyEmail` ONLY if the owner gave a real address (never invent
   one; otherwise it is a launch blocker, R22/R24)
@@ -530,7 +630,7 @@ business details (R22).
 
 **Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written.
 
-**P8 — Verify (three passes). Rules: all, R1–R25.** One green run is not
+**P8 — Verify (three passes). Rules: all, R1–R29.** One green run is not
 proof: a fix for one gate can break another, and some rules have no
 automatic gate. Do all three passes, in order.
 
@@ -1343,12 +1443,21 @@ any of these, stop and undo it.
 - **R25** A tracking snippet or ID hard-coded in the layout; `gtag` / `fbq` /
   `dataLayer.push` called from a component; a data layer variable added in
   code instead of Settings → Tracking.
+- **R26** Invented stats, ratings, testimonials, credentials or "fixed fees";
+  placeholder reviews left visible; out-of-date tax facts.
+- **R27** A hard-coded phone/email/address, a contact channel the owner
+  didn't approve, the notification address on a page, or a leftover old
+  brand name/logo.
+- **R28** Pages for services the owner doesn't offer, thin service pages,
+  service cards that don't link, or a removed URL without a 301.
+- **R29** Competing CTAs, a contact page that is only a form, slogan-only
+  H1s, headings in the footer, or a redesign that leaves the site's look.
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R25, no exceptions. Read the whole file first.
+exactly — every rule R1–R29, no exceptions. Read the whole file first.
 Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
@@ -1393,6 +1502,10 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")
 - [ ] **R24** Every form uses `submitForm()`; leads are stored, emailed via FormSubmit to Settings → Form notifications (first settings card, test button works) and tracked. (`check:inline`, acceptance "emailed via FormSubmit…")
 - [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking; `<Analytics>` renders them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…")
+- [ ] **R26** Every claim on the site is confirmed by the owner; none invented; placeholder social proof hidden; tax facts current. (launch-check "claims", site-audit `[claims]`)
+- [ ] **R27** Brand and contact details come from settings only; only owner-approved channels appear; the notification address is never shown. (`check:inline`, site-audit contact checks)
+- [ ] **R28** One complete page per real service, each ≥600 words, linked from the index, home, footer and booking page, with its guide; retired URLs 301. (site-audit collections, acceptance)
+- [ ] **R29** One primary CTA wording site-wide; booking page has real content; keyword H1 first; no footer headings; pricing explained when it varies. (site-audit headings/booking page, review)
 
 **Also checked by the gates**
 - [ ] Exactly one `<h1>` in each page's HTML. (acceptance, site-audit)
