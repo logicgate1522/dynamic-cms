@@ -1836,6 +1836,20 @@ class CollectionTests(AdminAuthMixin, APITestCase):
         self.assertEqual(Redirect.objects.get(source="/services/payroll").destination, "/services/payroll-bureau")
         self.assertEqual(PageSEO.objects.get(path="services/payroll-bureau").data["seoTitle"], "Payroll")
 
+    def test_renaming_back_and_forth_never_loops(self):
+        self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
+        self.admin_client.patch("/api/collections/services/entries/payroll/", {"status": "published"}, format="json")
+        self.admin_client.patch("/api/collections/services/entries/payroll/", {"slug": "payroll-bureau"}, format="json")
+        self.admin_client.patch("/api/collections/services/entries/payroll-bureau/", {"slug": "payroll"}, format="json")
+        self.assertFalse(Redirect.objects.filter(source="/services/payroll").exists())
+        self.assertEqual(Redirect.objects.get(source="/services/payroll-bureau").destination, "/services/payroll")
+
+    def test_option_fields_can_be_cleared(self):
+        r = self.admin_client.post("/api/collections/articles/entries/", {"title": "MTD", "fields": {"category": "VAT"}}, format="json")
+        slug = r.data["entry"]["slug"]
+        self.admin_client.patch(f"/api/collections/articles/entries/{slug}/", {"fields": {"category": ""}}, format="json")
+        self.assertEqual(BlogPost.objects.get(slug=slug).content["category"], "")
+
     def test_delete_removes_entry_sections_and_seo(self):
         self.admin_client.post("/api/collections/services/entries/", {"title": "Payroll"}, format="json")
         self.admin_client.patch("/api/seo/services/payroll/", {"seoTitle": "Payroll"}, format="json")

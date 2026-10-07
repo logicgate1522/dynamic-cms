@@ -167,7 +167,7 @@ def write_fields(cfg, host, values):
             continue
         value = "" if value is None else value
         options = spec.get("options") if isinstance(spec, dict) else None
-        if options and value not in options:
+        if options and value not in options and value != "":
             continue
         if name in MODEL_FIELDS[cfg["hostKind"]]:
             setattr(host, name, str(value))

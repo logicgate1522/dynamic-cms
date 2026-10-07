@@ -234,6 +234,9 @@ class CollectionEntryDetailView(APIView):
                     host.path = new_path
                     host.seo_path = new_path
                 PageSEO.objects.filter(path=old_path).update(path=new_path)
+                # The page lives at the new URL now: a redirect away from it
+                # (left by an earlier rename) would loop.
+                Redirect.objects.filter(source=f"/{new_path}").delete()
                 if host.status == "published":
                     # Keep old links and search results working.
                     Redirect.objects.update_or_create(
