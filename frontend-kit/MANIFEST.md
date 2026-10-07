@@ -15,7 +15,7 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 
 | Area | Files | What it does |
 |---|---|---|
-| Styles + theme | `app/cms.css` | The five `--cms-*` theme variables (set them to the site palette — the only styling you change), editable outlines, hover-only edit tools. Import it in the root layout after `globals.css`. |
+| Styles + theme | `app/cms.css` | The theme block at the top — five `--cms-*` colours (site palette, ≥4.5:1 with white, R17) and `--cms-first-section-tools-top` (fixed header height + 8px, R15) — is the only part you change, editable outlines, hover-only edit tools. Import it in the root layout after `globals.css`. |
 | Cache | `app/api/revalidate/route.js` | Verifies the backend's HMAC webhook and calls `revalidateTag` for `cms*` tags. |
 | API | `lib/api.js` | Session + CSRF client: `apiFetch`, `apiRequest`, `getSession`, `login`, `logout`, `uploadImage`, `mediaUrl`, `getPath`/`setPath`, `mergeDefaults`. |
 | Redirects | `middleware.js` | CMS redirects, matched from a list cached for a minute. Sends `X-CMS-Frontend` like `lib/cms.js`. |
@@ -28,7 +28,7 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 | Keywords | `lib/keywords.js` | Keyword matching, mirroring `api/keywords.py`. Used by the coverage badge. |
 | SEO checks | `lib/seoChecks.js` | The 18 SEO rules (id, tab, field, fix), mirroring `api/prompts.py#seo_rule_checks`. Used by the SEO panel and the whole-page assist. |
 | Admin state | `components/cms/AdminProvider.jsx` | Session, edit mode, editables registry, drafts, publish/discard (flushes pending saves first), panels. |
-| Inline editing | `components/cms/useCms.jsx`, `components/cms/inline.jsx` | `useCms(name, defaults, options)` → `{data, E, editButton}`, with draft autosave; `E.Text/Image/Item/Add/Link`. |
+| Inline editing | `components/cms/useCms.jsx`, `components/cms/inline.jsx` | `useCms(name, defaults, options)` → `{data, hidden, setHidden, E, editButton}` (every caller does `if (hidden) return null`, R23), with draft autosave; `E.Text/Image/Item/Add/Link`. |
 | Admin bar | `components/cms/AdminBar.jsx`, `SiteTools.jsx`, `Drawer.jsx` | Floating dock plus Site tools (it embeds the `/admin/*` pages). |
 | Block editor | `components/cms/SectionEditor.jsx`, `FieldEditor.jsx` | All fields, AI assist, JSON, History. |
 | AI | `components/cms/ai.jsx`, `PageAssist.jsx`, `SeoEditPanel.jsx` | Prompt/paste UI. Every prompt comes from the backend; every paste goes through `ai/normalize`. The SEO panel opens on Ask AI; the whole-page assist builds on open and shows live coverage + SEO rules. |
@@ -57,10 +57,10 @@ their classes to match the site, but you must keep every `T`, `ItemTools`,
 
 | File | Run | Gate |
 |---|---|---|
-| `scripts/check-inline.mjs` | `node scripts/check-inline.mjs src` | Fails on any literal copy left in a `useCms` component (unless marked `cms-static`), and on any list keyed by its items' own text (fields would lose focus while typing). |
+| `scripts/check-inline.mjs` | `node scripts/check-inline.mjs src` | Fails on: literal copy in a `useCms` component (unless `cms-static`, R2); lists keyed by their own text (focus loss, R18); raw CSS `url(` (use `bgImage`); a `useCms` component without the `hidden` guard (R23); form submits outside `lib/forms.js` (R24); `gtag`/`fbq`/`dataLayer.push` outside `lib/track.js` (R25). |
 | `scripts/check-sections.mjs` | `node scripts/check-sections.mjs` (backend running) | Fails when `registry.js` differs from `ai/section-schema/`. |
 | `acceptance/site-audit.mjs` | See its header (`LAUNCH=1` before go-live) | Every page: SEO (titles, descriptions, canonical, OG, one H1, heading order, JSON-LD, alt), broken links, one phone/email site-wide, placeholder text, forms end to end, plus the backend launch check. |
-| `acceptance/acceptance.mjs` | See its header | End-to-end test: visitor isolation, session login, inline edit → draft → publish → webhook, AI paste normalisation, discard, SEO AI, CMS-page section editing, create page, admin pages, sign out. Cleans up after itself. |
+| `acceptance/acceptance.mjs` | See its header | End-to-end test: visitor isolation, session login, inline edit → draft → publish → webhook, AI paste normalisation, discard, typing keeps focus, SEO panel + whole-page assist, contrast, hover tools, CMS-page sections, collections, responsive, hide (block/item/section), FormSubmit email + inbox + lead event, GTM + data layer + page_view, admin pages, sign out. Cleans up after itself. |
 
 ## Refreshing the kit (maintainers)
 

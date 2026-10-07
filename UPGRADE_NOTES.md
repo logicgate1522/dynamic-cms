@@ -1,3 +1,26 @@
+# Upgrade Notes — spec v3: every rule stated five times
+
+- `FRONTEND_INTEGRATION_PROMPT.md` is restructured. "How to use this file"
+  comes first, with a table of the five gates. Then come §0.1 (a rule index
+  with each rule's gate and phase) and §0.2 (a card per rule with Must /
+  Never / Proven by). Every §2 phase lists the rules it builds, §11 has one
+  anti-pattern per rule, and §13 has one checklist line per rule, each
+  ending in its gate.
+- Lessons from real integrations are now explicit in the cards: the
+  fixed-header offset for the first section's tools, h1 twins, contact
+  details from one source, GTM double counting, FormSubmit activation, and
+  never inventing business details.
+- R1 now names exactly what may change: the MANIFEST ADAPT files, the
+  `cms.css` theme block and the adapter classes. It used to say
+  "4 ADAPT files"; there are 5.
+- §12 fixes the report's shape: gate outputs, the ticked checklist, the
+  defaults taken, and what the owner still needs to provide.
+- `IntegrationSpecTests` enforces the structure: every copy of every rule,
+  phase/index agreement, and current `R1–Rn` ranges in AGENTS, the READMEs
+  and MANIFEST.
+
+---
+
 # Upgrade Notes — hide anything, FormSubmit emails, tracking from Site tools
 
 **Hide blocks, list items and sections (R23)**

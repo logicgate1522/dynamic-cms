@@ -1977,24 +1977,54 @@ class ThrottleExemptionTests(AdminAuthMixin, APITestCase):
 
 
 class IntegrationSpecTests(APITestCase):
-    """FRONTEND_INTEGRATION_PROMPT.md must restate every rule: in the rules
-    table (§0), as an anti-pattern (§11) and in the final checklist (§13)."""
+    """FRONTEND_INTEGRATION_PROMPT.md states every rule five times, so an
+    integrating agent can't miss one: the rule index (§0.1), a rule card with
+    Must / Never / Proven by (§0.2), the phase that builds it (§2), an
+    anti-pattern (§11) and a checklist line with its gate (§13)."""
 
-    def test_every_rule_is_reiterated(self):
+    def _spec(self):
         import re
         from pathlib import Path
-        spec = (Path(__file__).resolve().parent.parent / "FRONTEND_INTEGRATION_PROMPT.md").read_text()
+        root = Path(__file__).resolve().parent.parent
+        spec = (root / "FRONTEND_INTEGRATION_PROMPT.md").read_text()
         sections = {p.split("\n", 1)[0][:6].strip("# ").strip(): p for p in re.split(r"\n(?=## )", spec)}
-        rules = sorted({int(n) for n in re.findall(r"\| R(\d+) \|", sections["§0"])})
+        rules = sorted({int(n) for n in re.findall(r"^\| R(\d+) \|", sections["§0"], re.M)})
+        return root, spec, sections, rules
+
+    def test_rules_are_numbered_and_counted(self):
+        import re
+        _, spec, sections, rules = self._spec()
         self.assertEqual(rules, list(range(1, len(rules) + 1)), "rules must be numbered R1..Rn without gaps")
-        for n in rules:
-            for where in ("§0", "§11", "§13"):
-                self.assertRegex(sections[where], rf"\bR{n}\b", f"R{n} is missing from {where}")
+        self.assertIn(f"There are {len(rules)} rules, R1–R{rules[-1]}", spec)
         self.assertIn(f"R1–R{rules[-1]}", sections["§12"], "the fill-in prompt must name every rule")
         stale = {m for m in re.findall(r"R1–R(\d+)", spec) if int(m) != rules[-1]}
         self.assertFalse(stale, f"stale rule ranges in the spec: R1–R{', R1–R'.join(sorted(stale))}")
-        root = Path(__file__).resolve().parent.parent
-        for doc in ("AGENTS.md", "README.md", "frontend-kit/README.md"):
+
+    def test_every_rule_is_stated_five_times(self):
+        import re
+        _, _, sections, rules = self._spec()
+        zero, phases = sections["§0"], sections["§2"]
+        built = {}
+        for phase, listed in re.findall(r"\*\*(P\d) — [^*]*?Rules: ([^*]+?)\.?\*\*", phases):
+            built[phase] = set(range(1, rules[-1] + 1)) if listed.startswith("all") else {int(n) for n in re.findall(r"R(\d+)", listed)}
+        self.assertEqual(sorted(built), [f"P{i}" for i in range(9)], "every phase P0–P8 must name the rules it builds")
+        for n in rules:
+            row = re.search(rf"^\| R{n} \|(.+)\|$", zero, re.M)
+            self.assertEqual(len(row.group(1).split("|")), 4, f"R{n}: index row needs Area | Rule | Proven by | Built in")
+            for phase in re.findall(r"P\d(?!–)", row.group(1).split("|")[-1]):
+                self.assertIn(n, built[phase], f"R{n}: the index says {phase} builds it, but {phase} doesn't list it")
+            card = re.search(rf"^#### R{n} — .+?(?=^#### |\Z)", zero, re.M | re.S)
+            self.assertIsNotNone(card, f"R{n} has no rule card in §0.2")
+            for part in ("**Must:**", "**Never:**", "**Proven by:**"):
+                self.assertIn(part, card.group(0), f"R{n} card is missing {part}")
+            self.assertTrue(any(n in r for p, r in built.items() if p != "P8"), f"R{n} is not built by any phase P0–P7")
+            self.assertRegex(sections["§11"], rf"(?m)^- \*\*R{n}\*\* ", f"R{n} has no anti-pattern in §11")
+            self.assertRegex(sections["§13"], rf"(?m)^- \[ \] \*\*R{n}\*\* .+\(.+\)$", f"R{n} has no checklist line with its gate in §13")
+
+    def test_companion_docs_name_the_current_rule_range(self):
+        import re
+        root, _, _, rules = self._spec()
+        for doc in ("AGENTS.md", "README.md", "frontend-kit/README.md", "frontend-kit/MANIFEST.md"):
             path = root / doc
             if path.exists():
                 stale = {m for m in re.findall(r"R1[–-]R(\d+)", path.read_text()) if int(m) != rules[-1]}

@@ -10,7 +10,9 @@ instructions the docs already answer.
 
 ## Job A — "Integrate this CMS into <frontend>"
 
-1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full. Rules R1–R25 are mandatory.
+1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full, starting with "How to use
+   this file". Rules R1–R25 are mandatory; each has a rule card (Must / Never
+   / Proven by), a phase that builds it, an anti-pattern and a checklist line.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
 3. Run the spec's Autonomous mode, phases P0–P8, in order. Convert every
@@ -84,6 +86,13 @@ instructions the docs already answer.
   the acceptance test, then pulled in with
   `python frontend-kit/sync_kit.py <frontend>`. Never hand-edit
   `frontend-kit/src` alone.
+- **Adding or changing a rule in the spec:** keep its five copies in step —
+  the §0.1 index row (with its gate and phase), a §0.2 card with Must / Never
+  / Proven by, the `Rules:` line of the §2 phase that builds it, a §11
+  anti-pattern line and a §13 checklist line ending in its gate. Bump every
+  `R1–Rn` range (spec, AGENTS, READMEs). `IntegrationSpecTests` fails on any
+  gap. Prefer an automatic gate (`check-inline.mjs`, acceptance, site-audit,
+  launch-check) over "(review)".
 - Record notable changes in `UPGRADE_NOTES.md`.
 
 ## Product principles (for any new feature)

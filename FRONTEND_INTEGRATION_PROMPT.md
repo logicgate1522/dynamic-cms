@@ -1,53 +1,356 @@
-# Frontend Integration Spec — dynamic-cms (v2)
+# Frontend Integration Spec — dynamic-cms (v3)
 
 You are the frontend integration agent for this CMS. This file is the whole
 contract. Follow it exactly. Do not invent endpoints, fields, flows or UI
 patterns that are not here, and do not "simplify" any rule. If something here
-conflicts with your habits or with older docs, this file wins.
+conflicts with your habits, with the site's existing code or with older docs,
+this file wins.
 
-**Definition of done (no exceptions):** `next build` passes,
-`node scripts/check-inline.mjs src` passes, `node scripts/check-sections.mjs`
-passes, `frontend-kit/acceptance/acceptance.mjs` passes **every** check, and
-`frontend-kit/acceptance/site-audit.mjs` reports **0 failures**, both against
-the running production build. Until all five are green, the work is not
-finished. Do not report success early.
+## How to use this file
 
-**Definition of launched:** additionally, `LAUNCH=1 node site-audit.mjs`
-passes, i.e. the backend's `launch-check/` has no blockers (R22).
+1. **Read all of it before writing code.** Every rule below exists because it
+   was missed once and broke a real site.
+2. **There are 25 rules, R1–R25 (§0).** Each rule is stated five times, on
+   purpose. A test (`IntegrationSpecTests`) fails the CMS build if any copy is
+   missing:
+   - the **rule index** (§0.1): one line, its gate, its phase
+   - the **rule card** (§0.2): **Must**, **Never**, **Proven by**
+   - the **phase** that builds it (§2)
+   - the **anti-pattern** that breaks it (§11)
+   - the **final checklist** line you tick in your report (§13)
+3. **Work in the order of §2** (phases P0–P8). Each phase lists the rules it
+   builds, so nothing is left for "later".
+4. **Rely on the gates, not memory.** Most rules have an automatic gate. Where
+   a rule says "(review)", you check it by hand and say how in your report.
+
+**Definition of done (no exceptions).** All five gates pass against the
+running **production build** (`next build && next start`, never `next dev`):
+
+| Gate | Command | Proves |
+|---|---|---|
+| 1. Build | `next build` | compiles, prerenders, no server/client import mistakes |
+| 2. Inline | `npm run check:inline` | no hard-coded copy, index keys, `hidden` guard, no raw `url(`, forms only via `submitForm`, tracking only via `track` |
+| 3. Sections | `npm run check:sections` (backend running) | renderer registry = backend section types |
+| 4. Acceptance | `node frontend-kit/acceptance/acceptance.mjs` | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, auth |
+| 5. Site audit | `node frontend-kit/acceptance/site-audit.mjs` → **0 failures** | SEO on every page, links, contact consistency, placeholders, forms end to end |
+
+Until all five are green the work is not finished. Do not report success
+early, and never weaken a gate to make it pass.
+
+**Definition of launched.** Additionally, `LAUNCH=1 node site-audit.mjs`
+passes, i.e. `GET launch-check/` has no blockers (R22). Blockers that need
+real business data are listed for the owner, never invented.
 
 ---
 
-## §0 — Non-negotiable rules
+## §0 — The rules
 
-Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
+Every rule is a MUST. Rule numbers are referenced throughout this file.
 
-| # | Rule |
-|---|---|
-| R1 | **Install the frontend kit verbatim** (`frontend-kit/src` → the app's `src/`). Do not rewrite kit files, re-implement them, or hand-roll an alternative (no custom admin bar, no custom editor modal, no custom API client). Only the 4 ADAPT files in `frontend-kit/MANIFEST.md` may be changed, and only as the manifest says. |
-| R2 | **Inline editing is the primary way to edit.** Every visible string in a CMS-wired component is `<E.Text path="…" />`. Every image has `<E.Image path="…" />`, every list item has `<E.Item>`, every list ends with `<E.Add>`, and every link's URL has `<E.Link>` beside its text. Panels and modals are secondary (the "All fields" pill, AI, JSON, History). Never build a "click Edit → modal form → Save/Cancel" flow as the main editing path. |
-| R3 | **Drafts, then Publish.** Every edit (inline, panel, AI paste, JSON paste) autosaves as a draft (`?mode=draft`). Visitors only see what was published from the admin bar. Never write live data from an editor. |
-| R4 | **Session cookie + CSRF auth only.** No tokens in `localStorage`/`sessionStorage`/cookies you set. `isAdmin` comes from `GET auth/session/`, never from client storage. All admin fetches go through `apiRequest`/`apiFetch` in `lib/api.js` (`credentials: "include"` + `X-CSRFToken`). |
-| R5 | **The backend owns every AI prompt.** The frontend never contains prompt text. It calls the `ai/*-prompt/` and `content/<key>/build-prompt/` endpoints and shows the result in `<PromptBox>`. |
-| R6 | **Every pasted AI or JSON reply goes through `POST ai/normalize/`** (or `paste-to-build` / `paste-to-edit`, which normalise server-side) before it touches content. Never `JSON.parse` a pasted AI reply yourself, and never write one straight into content. |
-| R7 | **The backend webhook refreshes caches.** Public reads use `lib/cms.js` (ISR with `cms:*` tags), and `app/api/revalidate/route.js` verifies the HMAC webhook. The browser never calls revalidation. |
-| R8 | **Visitors get zero CMS UI and zero CMS cost.** No admin markup, no `contentEditable`, no extra client fetches for visitors. Published HTML is server-rendered from `CmsSection`/`lib/cms.js`. |
-| R9 | **Preserve 100% of design, animation and copy.** Current hard-coded copy becomes the `defaults` **verbatim**, so the page looks identical before anything is saved. |
-| R10 | **Plain text only.** Never `dangerouslySetInnerHTML` for CMS or AI text. Multi-line text uses `<E.Text multiline />`, and paragraphs come from blank-line splits. |
-| R11 | **Images are uploaded, never typed.** Use `uploadImage()` / `<E.Image>` / `SlotUpload`. No raw image-URL text inputs. |
-| R12 | **Don't ask clarifying questions** unless an action is destructive or irreversible. Pick the default given here and state it in your report. |
-| R13 | **Only collections are buildable from the site.** A *collection* is a set of pages that share ONE section structure and are listed on an index page (blog articles on /blog, services on /services, projects on /projects). Configure them in `SiteSettings.collections` (§6.3). "＋ New …" appears only on a collection's index page, and every entry uses the collection template. One-off pages (home, about, contact, legal…) are NOT collections: their structure is fixed, and admins edit copy, never layout. Never add a free-form "new page" or "page builder" button to the site. |
-| R14 | **New entries must look exactly like their siblings.** A collection's `sections` must equal, in order, the section types of the existing detail pages. Blank entries copy the newest published sibling's fields and list lengths; AI entries are fitted to the template server-side. Never hand-design a new entry layout. |
-| R15 | **Edit tools never cover the page.** Block pills, item tools, link 🔗 buttons, "＋ Add" buttons and "Replace image" chips are `cms-hover-tools`: hidden until their own block / item is hovered or focused (always shown on touch screens). The admin bar can be minimised. Never add an always-visible overlay on top of content. |
-| R16 | **SEO and AI parity is fixed.** The SEO panel opens on **✦ Ask AI** with the audit prompt already built, shows the score bar on every tab, and lists all 18 checks (`lib/seoChecks.js`, mirroring `prompts.seo_rule_checks`) with a fix for each. The whole-page AI assist builds its prompt when opened, shows KEYWORD COVERAGE (%, sentence, a chip per section) and OTHER SEO RULES (6 rules, ✓/✕), stays live after Apply, and covers CMS-page sections too. Don't rebuild these UIs; they ship in the kit. |
-| R18 | **Typing never loses focus.** Every list that contains editable fields is keyed by the map **index** (`key={i}`), never by the item's own text (`key={item.title}`, `` key={`${item.name}-${i}`} ``). A text-derived key changes on every keystroke, React re-creates the element and the cursor is gone. `check:inline` fails on it, and the acceptance test types into list fields and asserts the element is never re-created. The kit also restores focus if a re-mount ever happens, but that is a safety net, not permission. |
-| R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
-| R20 | **Responsive on every screen.** Converting a section must keep its behaviour at every width: phones (≈390px), tablets (≈768px), laptops (≈1280px) and large screens (≥1920px — content stays inside a max-width container, nothing stretches edge to edge, type and images scale up sensibly). No horizontal scroll at any width. The admin UI is responsive too: on phones the bar collapses behind "More" and panels fit the screen. The acceptance test checks visitors and admins at 390px and 1920px. |
-| R21 | **Every page passes the site audit** (`site-audit.mjs`). SEO: every sitemap URL returns 200 and is indexable, with a unique title (25–65 chars; ideal 50–60) and description (110–165; ideal 120–160), self canonical, og:title/description/image, twitter:card, `<html lang>`, exactly one `<h1>`, no skipped heading levels, valid JSON-LD with BreadcrumbList (Article/BlogPosting on articles, FAQPage on FAQ pages), alt on every `<img>`, robots.txt with a Sitemap line on the canonical origin. Consistency: no broken internal links; ONE phone number and ONE email across every `tel:`/`mailto:` link and the Organization JSON-LD; titles never repeat the brand. Data: a default social image (`seoDefaults.defaultOgImage`); real meta descriptions for every page and article. Forms: client validation blocks bad input, a valid submit is stored as a real (non-spam) submission, the honeypot is never filled by people. |
-| R22 | **Nothing launches with a launch-check blocker.** `GET launch-check/` (shown on the dashboard as "Launch readiness") must report no blockers: no placeholder text (`[Insert …]`, `example.com` emails, `0000 000000`, "New section"…), `seoDefaults.siteUrl` is the live https domain, indexing is on, lead forms email a real, activated address (Settings → Form notifications → `forms.notifyEmail`, sent through FormSubmit.co per R24; or, only if no address is set there, `FORM_NOTIFICATION_EMAIL` through a real SMTP backend), and the cache webhook is configured. Never invent business details to clear a blocker; ask the owner for them (this is the one case where R12 does not apply). |
-| R23 | **Admins can hide anything, and hidden means gone.** Every `useCms` block, every object list item and every CMS-page section can be hidden with the kit's **Hide** toggle (block: next to the "All fields" pill; item: in the floating item tools; section: in the section hover toolbar). Hiding stores `_hidden: true` in the content **as a draft** (R3) and goes live on Publish. Visitors never get hidden content in the HTML: `useCms` returns `data` with hidden items already removed (`stripHidden`, `lib/visibility.js`) plus a `hidden` flag, and **every component that calls `useCms` renders `if (hidden) return null;` before its markup** (for several blocks in one component, guard each block's JSX with its own flag). Admins with editing on see hidden things dimmed and outlined, with "Hidden · Show" to bring them back. Never filter by `_hidden` by hand, never delete content to "hide" it, never add a separate show/hide setting. Blocks that must always render (a blog template) pass `{ hideable: false }`. `check:inline` fails a CMS component without the `hidden` guard; the acceptance test hides a block, an item and a section and checks the visitor HTML. |
-| R24 | **Every form submits through `submitForm()` and emails the address set in Site tools.** Components call only `submitForm(name, payload, { honeypotField })` from `lib/forms.js`. It stores the submission in the CMS inbox (`POST forms/<name>/submit/`), then — for real leads only (honeypot empty) — emails it through **FormSubmit.co** (`https://formsubmit.co/ajax/<address>`) to `forms.notifyEmail`, and fires `track("generate_lead")` (R25). The address is set in **Site tools → Settings → Form notifications**, the FIRST card on the settings page, which has a **Send a test email** button: FormSubmit emails an activation link on the first send; after activating, the owner may replace the address with FormSubmit's random alias so the real address is not in page code. Never `fetch` the submit endpoint or formsubmit.co from a component, never hard-code a recipient, never invent one (ask the owner — R22). `check:inline` fails any other submit path; the acceptance test mocks FormSubmit and checks the address, fields, inbox entry and lead event. |
-| R25 | **Tracking is configured in Site tools, never in code.** GTM, GA4, Google Ads (+ lead conversion label), Meta Pixel, TikTok, LinkedIn (+ lead conversion id), Microsoft Clarity and Hotjar are pasted as IDs in **Site tools → Settings → Tracking & analytics** (validated server-side), together with **data layer variables** (key/value rows pushed to `window.dataLayer` before GTM loads), the Google **consent-mode default** (granted/denied), event toggles, "Don't track signed-in admins" and custom head/body code. `<Analytics analytics={settings.analytics} />` (kit) in the root layout renders every tag; nothing renders until an ID is set. Events go through `track(name, params)` from `lib/track.js` only — it pushes `{event, …params}` to the data layer and maps to gtag / fbq / ttq / Ads / LinkedIn. The CMS fires `page_view` (in-site navigation), `generate_lead` (stored form submission, `{form_name}`) and `contact_click` (tel:/mailto: clicks, `{method, value}`). Never paste a tag snippet into the layout, never call `gtag`/`fbq`/`dataLayer.push` from a component (`check:inline` fails it). The acceptance test sets a GTM ID and a data layer variable in Settings and checks both load, then checks `page_view`. |
-| R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. Pick shades with **≥4.5:1 contrast against white** (WCAG AA): admin buttons put white text on `--cms-accent`, and `--cms-accent-strong` is text on white. Darken the brand colour if needed; the acceptance test runs an axe contrast scan on the admin panels. |
+### §0.1 Rule index
+
+| # | Area | Rule | Proven by | Built in |
+|---|---|---|---|---|
+| R1 | Foundation | Install the kit verbatim; change only ADAPT files and the theme block | review, `check:sections` | P1 |
+| R2 | Editing | Inline editing first: `E.Text` / `E.Image` / `E.Item` + `E.Add` / `E.Link` | `check:inline`, acceptance | P3 |
+| R3 | Editing | Every edit is a draft; only Publish goes live | acceptance | P3 |
+| R4 | Foundation | Session cookie + CSRF auth only | acceptance | P1 |
+| R5 | AI | The backend owns every AI prompt | review (grep), acceptance | P1, P8 |
+| R6 | AI | Every pasted AI/JSON reply goes through `ai/normalize` | acceptance | P1, P8 |
+| R7 | Foundation | The signed backend webhook refreshes caches | acceptance | P1 |
+| R8 | Foundation | Visitors get zero CMS UI and zero CMS cost | acceptance | P1, P3 |
+| R9 | Editing | Defaults = the original copy, verbatim | review (screenshots) | P3 |
+| R10 | Editing | Plain text only; no `dangerouslySetInnerHTML` for CMS text | review (grep) | P3 |
+| R11 | Editing | Images are uploaded, never typed | review | P3 |
+| R12 | Process | No clarifying questions; take the stated default | report | P0–P8 |
+| R13 | Pages | Only collections are buildable from the site | acceptance | P5 |
+| R14 | Pages | New entries look exactly like their siblings | acceptance | P5 |
+| R15 | Editing | Edit tools never cover the page | acceptance | P1, P3 |
+| R16 | AI | SEO panel and whole-page assist are the kit's, unchanged | acceptance | P2, P8 |
+| R17 | Look | Admin UI themed via `--cms-*`, never restyled; ≥4.5:1 contrast | acceptance (axe) | P1 |
+| R18 | Editing | Typing never loses focus: lists keyed by index | `check:inline`, acceptance | P3 |
+| R19 | Foundation | The site's server sends `X-CMS-Frontend` | review, acceptance | P1 |
+| R20 | Look | Responsive at 390 / 768 / 1280 / 1920px, admin included | acceptance | P3 |
+| R21 | Quality | Every page passes the site audit | site-audit | P2, P6, P7 |
+| R22 | Launch | No launch-check blockers; never invent business details | `LAUNCH=1` site-audit | P7, P8 |
+| R23 | Editing | Blocks, items and sections can be hidden; hidden = gone for visitors | `check:inline`, acceptance | P3, P5 |
+| R24 | Leads | Forms use `submitForm()`; email via FormSubmit to Settings address | `check:inline`, acceptance | P4, P7 |
+| R25 | Tracking | Tracking configured in Site tools; events via `track()` | `check:inline`, acceptance | P1, P7 |
+
+### §0.2 Rule cards
+
+#### R1 — Install the kit verbatim
+- **Must:** copy `frontend-kit/src/**` into the app's `src/` unchanged. Edit
+  only (a) the ADAPT files listed in `frontend-kit/MANIFEST.md`, as it says,
+  (b) the theme block at the top of `app/cms.css` (R17, R15), and (c) the
+  classes (never the hooks) of the section adapters `sections.jsx` /
+  `interactive.jsx` (§9).
+- **Never:** rewrite, "improve", re-implement or hand-roll a kit file — no
+  custom admin bar, editor modal, API client, SEO panel, form sender or
+  tracking loader. If a kit file seems wrong, report it; don't fork it.
+- **Proven by:** review against `MANIFEST.md`; `check:sections`.
+
+#### R2 — Inline editing is the primary way to edit
+- **Must:** every visible string in a CMS-wired component is
+  `<E.Text path="…" />` (`multiline` for line breaks). Every image has
+  `<E.Image>`, every list item `<E.Item>`, every list ends with `<E.Add>`,
+  every link's URL has `<E.Link>` right after its text. Panels (All fields,
+  AI, JSON, History) are secondary. Subcomponents receive
+  `data={{ ...data, E }}` and use `data.E.Text`. CSS background images use
+  `bgImage(data.x)` from `lib/bgImage.js`.
+- **Never:** a "click Edit → modal form → Save/Cancel" flow as the main path;
+  literal copy left in JSX (except `{/* cms-static: reason */}` for units,
+  legal marks, the honeypot label, the staff-login link); a bare `E` in a
+  function that didn't receive it; a raw `url('/file.png')`; a client-only
+  helper imported into a server component (prerender crashes).
+- **Proven by:** `check:inline`; acceptance "page has a visible top-level
+  inline-editable text", "public data unchanged before publish".
+
+#### R3 — Drafts, then Publish
+- **Must:** every edit — inline, panel, AI paste, JSON paste, hide/show,
+  section change — autosaves as a draft (`?mode=draft`). Visitors see only
+  what was published from the admin bar's Publish menu.
+- **Never:** an editor that writes live data; a component with its own Save
+  button.
+- **Proven by:** acceptance "public data unchanged before publish", "publish
+  copies the draft live", "discard drops the draft".
+
+#### R4 — Session cookie + CSRF auth only
+- **Must:** `isAdmin` comes from `GET auth/session/`. Every admin fetch goes
+  through `apiRequest` / `apiFetch` in `lib/api.js` (`credentials: "include"`
+  + `X-CSRFToken`). Host the API on the same site, or set
+  `SESSION_COOKIE_SAMESITE=None` + `Secure` (§6.1).
+- **Never:** a token in `localStorage` / `sessionStorage` / a cookie you set;
+  `isAdmin` derived from client storage; token login in the browser.
+- **Proven by:** acceptance "session cookie is httpOnly; nothing token-like
+  in web storage", "sign out ends the server session".
+
+#### R5 — The backend owns every AI prompt
+- **Must:** prompts come from `ai/*-prompt/`, `content/<key>/build-prompt/`
+  and `collections/…/prompt/`, shown in the kit's `<PromptBox>`. Site context
+  goes into `SiteSettings.ai` (seeded in P7), not into frontend strings.
+  Every backend prompt ends with its FINAL CHECK.
+- **Never:** prompt wording in the frontend; a prompt without a FINAL CHECK.
+- **Proven by:** review (grep the frontend for prompt wording); acceptance
+  "prompt restates its rules at the end (FINAL CHECK)".
+
+#### R6 — Every pasted reply is normalised by the backend
+- **Must:** pasted AI or JSON goes through `POST ai/normalize/` (or
+  `paste-to-build` / `paste-to-edit` / `collections/…/apply/`, which
+  normalise server-side) before it touches content.
+- **Never:** `JSON.parse` a pasted reply yourself, or write one straight into
+  content.
+- **Proven by:** acceptance "AI paste normalised (prose, fences, wrapper,
+  markdown link)".
+
+#### R7 — The backend webhook refreshes caches
+- **Must:** public reads use `lib/cms.js` (ISR with `cms:*` tags);
+  `app/api/revalidate/route.js` verifies the HMAC webhook (§6.5).
+  `REVALIDATE_SECRET` is identical on both sides; the backend has
+  `FRONTEND_REVALIDATE_URL`.
+- **Never:** `revalidatePath` / `revalidateTag` from the browser or an editor.
+- **Proven by:** acceptance "visitor HTML updated (revalidate webhook)".
+
+#### R8 — Visitors get zero CMS UI and zero CMS cost
+- **Must:** published content is server-rendered: wrap server pages in
+  `<CmsSection names={[…]}>`; CMS pages render through
+  `DynamicPageRenderer`. Admin code paths load only for staff.
+- **Never:** admin markup, `contentEditable` or extra client content fetches
+  for visitors.
+- **Proven by:** acceptance "visitor: no admin bar, no editable spans".
+
+#### R9 — Preserve 100% of design, animation and copy
+- **Must:** the current hard-coded copy becomes the module-level `defaults`,
+  **verbatim**, so the page is identical before anything is saved. Keep every
+  animation, provider, font and wrapper. Keep good existing metadata as the
+  `pageMetadata` fallback.
+- **Never:** reworded, shortened or "cleaned up" defaults; dropped styling.
+- **Proven by:** review (before/after screenshots at 390px and 1280px).
+
+#### R10 — Plain text only
+- **Must:** CMS and AI text renders as text; paragraphs come from blank-line
+  splits (`EditableParagraphs`).
+- **Never:** `dangerouslySetInnerHTML` for CMS or AI text.
+- **Proven by:** review (grep for `dangerouslySetInnerHTML`).
+
+#### R11 — Images are uploaded, never typed
+- **Must:** `<E.Image>`, `SlotUpload` or `uploadImage()`; alt text in its own
+  key.
+- **Never:** an image-URL text input.
+- **Proven by:** review.
+
+#### R12 — Don't ask clarifying questions
+- **Must:** take the default this file states and list it in the report.
+- **Never:** stop to ask about something this file decides. Exception: real
+  business details (phone, email, address, company numbers, lead email,
+  domain) — ask the owner, never invent them (R22).
+- **Proven by:** the report's "defaults taken" list.
+
+#### R13 — Only collections are buildable from the site
+- **Must:** a *collection* is a set of pages sharing ONE section structure,
+  listed on an index page (articles on /blog, services on /services). Configure
+  each in `SiteSettings.collections` (§6.3). "＋ New …" appears only on a
+  collection's index page. One-off pages (home, about, contact, legal…) keep a
+  fixed structure: admins edit copy, never layout.
+- **Never:** a free-form "new page" / "page builder" button on the site;
+  section add / move / delete on one-off pages.
+- **Proven by:** acceptance "no “＋ New …” on a page that is not a collection
+  index", "one-off CMS page: structure is locked".
+
+#### R14 — New entries look exactly like their siblings
+- **Must:** a collection's `sections` equals, in order, the section types of
+  its existing detail pages. Blank entries copy the newest published sibling's
+  fields and list lengths; AI entries are fitted to the template server-side.
+- **Never:** a hand-designed entry layout, or a `sections` list that differs
+  from the existing pages.
+- **Proven by:** acceptance "new entry follows the collection template
+  exactly", "fixed template: no add/move/delete on the entry's sections".
+
+#### R15 — Edit tools never cover the page
+- **Must:** block pills, item tools, 🔗 link buttons, "＋ Add", "Replace
+  image" and Hide chips are hover tools — hidden until their own block / item
+  is hovered or focused (always shown on touch). The admin bar minimises.
+  Set `--cms-first-section-tools-top` in `app/cms.css` to the site's fixed
+  header height + 8px, so the first section's tools are never under the
+  header.
+- **Never:** an always-visible overlay on content; tools a fixed header
+  covers.
+- **Proven by:** acceptance "edit tools are hidden until their block is
+  hovered", "admin bar minimises to a small pill".
+
+#### R16 — SEO and AI parity is fixed
+- **Must:** use the kit's SEO panel and whole-page assist unchanged. The SEO
+  panel opens on **✦ Ask AI** with the audit prompt built, shows the score bar
+  on every tab and lists all 18 checks (`lib/seoChecks.js` ↔
+  `prompts.seo_rule_checks`). The whole-page assist builds its prompt on open,
+  shows KEYWORD COVERAGE (%, sentence, a chip per section) and OTHER SEO
+  RULES (6 ✓/✕), stays live after Apply, and covers CMS-page sections.
+  Shared blocks pass `excludeFromKeywordAudit: true`.
+- **Never:** a rebuilt or "simplified" panel; Ask AI not first; fewer checks;
+  coverage that is stale after Apply.
+- **Proven by:** acceptance "SEO panel opens on Ask AI…", "every SEO check is
+  listed (18…)", "keyword coverage card shows a percentage", "coverage updates
+  live after Apply".
+
+#### R17 — The admin UI is themed, not restyled
+- **Must:** set the five `--cms-*` colour variables at the top of
+  `app/cms.css` to the site's palette (accent = primary action colour, bar =
+  darkest brand surface). Shades need **≥4.5:1 contrast with white**: white
+  text sits on `--cms-accent`; `--cms-accent-strong` is text on white. Darken
+  the brand colour if needed.
+- **Never:** admin markup, layout or wording changed to "match the site";
+  colours hard-coded outside the variables.
+- **Proven by:** acceptance "admin panels meet WCAG AA contrast".
+
+#### R18 — Typing never loses focus
+- **Must:** every `.map` that renders editable fields uses the index as its
+  key (`key={i}`).
+- **Never:** a key built from the item's text or any admin-editable value
+  (`key={item.title}`, `` key={`${item.name}-${i}`} ``): it changes on every
+  keystroke, React re-creates the element and the cursor is gone. The kit
+  restores focus as a safety net only.
+- **Proven by:** `check:inline`; acceptance "typing keeps focus…" and "never
+  re-created".
+
+#### R19 — The site's server identifies itself
+- **Must:** every server-side CMS request (`lib/cms.js`, `middleware.js` —
+  the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one
+  IP rendering every page isn't rate-limited as an anonymous visitor.
+- **Never:** this header from browser code; the secret in a `NEXT_PUBLIC_`
+  variable.
+- **Proven by:** review; acceptance runs without 429s.
+
+#### R20 — Responsive on every screen
+- **Must:** every converted section keeps its behaviour at 390px, 768px,
+  1280px and ≥1920px. Content stays in a max-width container on large
+  screens. No horizontal scroll at any width. The admin bar collapses behind
+  "More" on phones and panels fit the screen.
+- **Never:** a section that overflows on phones or stretches edge to edge on
+  large screens.
+- **Proven by:** acceptance "responsive: …" checks.
+
+#### R21 — Every page passes the site audit
+- **Must:**
+  - **SEO:** every sitemap URL returns 200 and is indexable; unique title
+    25–65 chars (ideal 50–60) and description 110–165 (ideal 120–160); self
+    canonical; og:title/description/image; twitter:card; `<html lang>`;
+    exactly one `<h1>`; no skipped heading levels; valid JSON-LD with
+    BreadcrumbList (Article/BlogPosting on articles, FAQPage on FAQ pages);
+    `alt` on every `<img>`; robots.txt with a Sitemap line on the canonical
+    origin.
+  - **Consistency:** no broken internal links; ONE phone and ONE email across
+    every `tel:` / `mailto:` link and the Organization JSON-LD (all read from
+    `SiteSettings.contact`); titles never repeat the brand.
+  - **Data:** a default social image (`seoDefaults.defaultOgImage`, used on
+    every page without its own); real meta descriptions for every page and
+    article.
+  - **Forms:** client validation blocks bad input, a valid submit is stored
+    as a real (non-spam) submission, people never fill the honeypot.
+- **Never:** two `<h1>`s (hidden mobile/desktop twins: make the hidden copy
+  `<div role="heading" aria-level={1}>`); a card `<h3>` straight under the
+  `<h1>`; contact details typed separately into the footer, contact page and
+  JSON-LD.
+- **Proven by:** site-audit (0 failures); acceptance "exactly one <h1>".
+
+#### R22 — Nothing launches with a launch-check blocker
+- **Must:** `GET launch-check/` (dashboard "Launch readiness") reports no
+  blockers: no placeholder text (`[Insert …]`, `example.com` emails,
+  `0000 000000`, "New section"…); `seoDefaults.siteUrl` is the live https
+  domain; indexing on; lead forms email a real, activated address (R24); the
+  cache webhook is configured. Anything left is listed in the report under
+  "Needs from the owner".
+- **Never:** invent business details to clear a blocker (this is the one
+  case where R12 does not apply).
+- **Proven by:** `LAUNCH=1 node site-audit.mjs`; the dashboard card.
+
+#### R23 — Admins can hide anything; hidden means gone
+- **Must:** every `useCms` block, object list item and CMS-page section can
+  be hidden with the kit's **Hide** toggle (block: beside "All fields"; item:
+  floating item tools; section: section toolbar). Hiding stores
+  `_hidden: true` **as a draft** (R3) and goes live on Publish. `useCms`
+  returns `data` with hidden items already removed for visitors
+  (`stripHidden`, `lib/visibility.js`) and a `hidden` flag. **Every component
+  that calls `useCms` does `if (hidden) return null;` before its markup**; a
+  component rendering several blocks guards each one's JSX with its own flag.
+  Admins see hidden things dimmed with "Hidden · Show". Blocks that must
+  always render (a blog template) pass `{ hideable: false }`.
+- **Never:** filter `_hidden` by hand, delete content to "hide" it, or add a
+  separate show/hide setting.
+- **Proven by:** `check:inline` (hidden guard); acceptance "“Hide” on a
+  block / list item / CMS-page section…" and "a hidden … is not in the
+  visitor's HTML".
+
+#### R24 — Forms use `submitForm()` and email the address set in Site tools
+- **Must:** components call only `submitForm(name, payload, { honeypotField })`
+  from `lib/forms.js`. It stores the submission (`POST forms/<name>/submit/`),
+  then for real leads (honeypot empty) emails it through **FormSubmit.co** to
+  `forms.notifyEmail` and fires `track("generate_lead")`. The address is set
+  in **Site tools → Settings → Form notifications**, the FIRST settings card,
+  with **Send a test email**. FormSubmit emails an activation link on the
+  first send. After activating, the owner may swap the address for
+  FormSubmit's random alias.
+- **Never:** `fetch` the submit endpoint or formsubmit.co from a component;
+  `mailto:` / EmailJS / Formspree; a hard-coded or invented recipient.
+- **Proven by:** `check:inline`; acceptance "a stored submission is emailed
+  via FormSubmit to the Settings address", "generate_lead is pushed…", "the
+  submission is also in the CMS inbox".
+
+#### R25 — Tracking is configured in Site tools, never in code
+- **Must:** GTM, GA4, Google Ads (+ lead label), Meta Pixel, TikTok, LinkedIn
+  (+ lead conversion id), Clarity and Hotjar are IDs in **Site tools →
+  Settings → Tracking & analytics** (validated server-side), together with
+  **data layer variables** (pushed before GTM loads), the Google
+  **consent-mode default**, event toggles, "Don't track signed-in admins" and
+  custom head/body code. `<Analytics analytics={settings.analytics} />` in the
+  root layout renders every tag. Events go through `track(name, params)` in
+  `lib/track.js` only. The kit fires `page_view` (in-site navigation),
+  `generate_lead` (`{form_name}`) and `contact_click` (`{method, value}`);
+  with GTM present it does not also call gtag (no double counting).
+- **Never:** a tag snippet or ID hard-coded in the layout; `gtag` / `fbq` /
+  `dataLayer.push` called from a component; data layer variables added in code.
+- **Proven by:** `check:inline`; acceptance "data layer variables are pushed
+  before GTM", "the GTM container from Settings is loaded", "page_view is
+  pushed on in-site navigation".
 
 ---
 
@@ -56,8 +359,8 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | Attached with this file… | Do this |
 |---|---|
 | A whole frontend repo, no other instruction | **§2 Autonomous mode**: all phases, in order. Report after each phase, then continue. |
-| One or more specific files | **§5 Input router**, once per file, in dependency order (layout → pages → sections → forms → lists → blog). |
-| A brief, screenshot or markup for a new page | **§7 Paste to Build** (from a brief) or **§8 Copy Structure** (from a reference). |
+| One or more specific files | **§5 Input router**, once per file, in dependency order (layout → pages → sections → forms → lists → blog). Every rule still applies. |
+| A brief, screenshot or markup for a new page | **§7** (collections / one-off pages) or **§8 Copy Structure** (from a reference). |
 | One phase heading from §2 | Run only that phase, end green, stop. |
 
 Framework: Next.js App Router (`src/app`), React 18+, Tailwind. On another
@@ -70,29 +373,33 @@ handlers) to its equivalent and say so in the report. Kit files assume the
 ## §2 — Autonomous mode (whole repo)
 
 Each phase ends green: build passes, no hydration warnings, public pages
-unchanged.
+unchanged. Each phase names the rules it builds; tick them as you go.
 
-**P0 — Audit (no code changes).** List the framework and version, router,
-styling, every route, every section component and its hard-coded copy, lists,
-images, links, forms, existing SEO/metadata, analytics/tracking snippets (R25) and form
-submit handlers (R24). Output one table:
-`file → what's hard-coded → useCms name → phase`.
+**P0 — Audit (no code changes). Rules: R12.** List the framework and
+version, router, styling, every route, every section component and its
+hard-coded copy, lists, images, links, forms and their submit code (R24),
+tracking snippets and IDs (R25), existing SEO/metadata, the fixed-header
+height (R15), and every phone number / email / address in the code (R21,
+R22). Output one table: `file → what's hard-coded → useCms name → phase`, and
+a list of the business details you'll need from the owner.
 
-**P1 — Install the kit (R1).**
-1. Copy `frontend-kit/src/**` into `src/`. Do not overwrite site files that
-   aren't in the manifest; if a path collides, stop and report it.
-2. Set `SITE_NAME` in `src/lib/brand.js` (or `NEXT_PUBLIC_SITE_NAME`), and set
-   the five `--cms-*` theme variables at the top of `src/app/cms.css` to the
-   site's palette: accent = the site's primary action color, bar = its darkest
-   brand surface (R17).
+**P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25.**
+1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
+   that aren't in the manifest; if a path collides, stop and report it. The
+   kit brings the API client (R4), prompt/paste UI (R5, R6), revalidate route
+   (R7), server reads with `X-CMS-Frontend` (R19) and SSR data (R8).
+2. Set `SITE_NAME` in `src/lib/brand.js` (or `NEXT_PUBLIC_SITE_NAME`). At the
+   top of `src/app/cms.css`, set the five `--cms-*` colours to the site's
+   palette at ≥4.5:1 contrast (R17) and `--cms-first-section-tools-top` to the
+   fixed header height + 8px (R15).
 3. Copy `frontend-kit/scripts/check-inline.mjs` and `check-sections.mjs` to
-   `scripts/` and add these npm scripts:
+   `scripts/` and add the npm scripts
    `"check:inline": "node scripts/check-inline.mjs src"` and
    `"check:sections": "node scripts/check-sections.mjs"`.
-4. Env (`.env.local`):
-   `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`, `REVALIDATE_SECRET` (the same
-   value as the backend). On the backend: `FRONTEND_REVALIDATE_URL=<site>/api/revalidate`,
-   plus the site origin in `CORS_ALLOWED_ORIGINS` **and** `CSRF_TRUSTED_ORIGINS`.
+4. Env (`.env.local`): `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`,
+   `REVALIDATE_SECRET` (the same value as the backend; never `NEXT_PUBLIC_`).
+   On the backend: `FRONTEND_REVALIDATE_URL=<site>/api/revalidate`, plus the
+   site origin in `CORS_ALLOWED_ORIGINS` **and** `CSRF_TRUSTED_ORIGINS`.
 5. Root layout (exact shape):
    ```jsx
    import "./globals.css";
@@ -116,37 +423,41 @@ submit handlers (R24). Output one table:
      );
    }
    ```
-   Keep every existing provider, font and wrapper. Remove any hard-coded
-   tracking snippet (GTM, gtag, Meta Pixel, …) the site had and move its IDs
-   into Settings → Tracking & analytics (seeded in P7, R25). `generateMetadata` and
-   `generateViewport` come from `settings/site/`, as in §5.1.
+   Keep every existing provider, font and wrapper. **Delete** every
+   hard-coded tracking snippet (GTM, gtag, Meta Pixel, …) and note its IDs
+   for P7 (R25). `generateMetadata` and `generateViewport` come from
+   `settings/site/`, as in §5.1.
 6. Add a footer link `Staff login {/* cms-static: admin entry point */}` →
    `/admin/login?next=<current path>` with `rel="nofollow"`. Use `usePathname`;
    on `/admin*` routes, link without `next`.
 
-**P2 — Per-route metadata.** Every route: `generateMetadata()` =
-`pageMetadata("/<path>")` (from `lib/seo.js`, which reads `seo/resolve/`), and
-`<PageSeo path="/<path>" />` once in the page. That emits JSON-LD and gives
-the admin bar its SEO button.
+**P2 — Per-route metadata. Rules: R16, R21.** Every route:
+`generateMetadata()` = `pageMetadata("/<path>", fallback)` (from
+`lib/seo.js`, which reads `seo/resolve/`), and `<PageSeo path="/<path>" />`
+once in the page. That emits JSON-LD and gives the admin bar its SEO button
+(R16). Fix heading structure now: one `<h1>`, no skipped levels (R21).
 
-**P3 — Convert every section (§3 recipe).** One component per commit. After
-each one, `npm run check:inline` must pass for that file, and the section
-must still work at 390px, 768px, 1280px and 1920px (R20).
+**P3 — Convert every section (§3 recipe). Rules: R2, R3, R8, R9, R10, R11,
+R15, R18, R20, R23.** One component at a time. After each one,
+`npm run check:inline` passes for it, it renders identically (R9), it
+returns `null` when `hidden` (R23), its lists are index-keyed (R18), and it
+works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
+`SiteSettings.contact` or one shared block, never typed twice (R21).
 
-**P4 — Forms (§5.4, R24).** Every form submits with `submitForm()` from
-`lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
-notifications). Delete any old submit code (fetch, mailto, EmailJS,
+**P4 — Forms (§5.4). Rules: R24.** Every form submits with `submitForm()`
+from `lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
+notifications). Delete all old submit code (fetch, `mailto:`, EmailJS,
 Formspree, a hard-coded FormSubmit URL).
 
-**P5 — Collections, CMS pages and blog.** First decide the collections (R13).
-A page type IS a collection when there is an index page listing entries AND
-(two or more detail pages share one section structure, OR it is a blog/news/
-projects-style list that will grow). For each one:
+**P5 — Collections, CMS pages and blog. Rules: R13, R14, R23.** First decide
+the collections (R13). A page type IS a collection when there is an index page
+listing entries AND (two or more detail pages share one section structure, OR
+it is a blog/news/projects-style list that will grow). For each one:
 1. Make every detail page a CMS page (`body_mode: "dynamic"`) rendered by the
    kit's renderer at `/<pathPrefix>/<slug>`, including its existing entries
    (seed them).
 2. Configure it in `SiteSettings.collections` (§6.3, seeded in P7):
-   - `sections` = the existing detail pages' section types, in order
+   - `sections` = the existing detail pages' section types, in order (R14)
    - `allowAdd` = `[]` for fixed layouts (service, project, location pages);
      body types (`rich_text`, `image_text`, `faq`, `cta`) only for long-form
      articles
@@ -162,36 +473,45 @@ projects-style list that will grow). For each one:
 Then the catch-all route for CMS pages, using
 `components/dynamic/DynamicContentPage.jsx` (ADAPT), which wraps the
 server-rendered `DynamicPageRenderer` in `DynamicPageAdmin`. That gives admins
-inline section editing, per-section AI, and (on collection entries) the collection panel. Dynamic blog
-posts work the same way with `kind="blog"`.
+inline section editing, per-section AI, section Hide (R23) and (on collection
+entries) the collection panel. Dynamic blog posts work the same way with
+`kind="blog"`.
 
-**P6 — Sitemap, robots, redirects.** `app/sitemap.js` builds from static routes,
-`seo/`, `blog/` and `content/pages/`, honouring `sitemap.include:false` and
-`robots.index:false`. `app/robots.js` reads `settings/site/`. The middleware
-calls `redirects/resolve/?path=`. Add the static routes to
-`SiteSettings.sitemap.extraPaths` so the backend sitemap report covers them.
+**P6 — Sitemap, robots, redirects. Rules: R21.** `app/sitemap.js` builds
+from static routes, `seo/`, `blog/` and `content/pages/`, honouring
+`sitemap.include:false` and `robots.index:false`. `app/robots.js` reads
+`settings/site/`. The middleware calls `redirects/resolve/?path=`. Add the
+static routes to `SiteSettings.sitemap.extraPaths` so the backend sitemap
+report covers them.
 
-**P7 — Seed.** A `scripts/seed-cms.mjs` that fills the CMS:
-- site settings, **including the `ai` and `collections` blocks (§6.3)**
-- `seoDefaults.defaultOgImage`: a 1200×630 brand card
+**P7 — Seed. Rules: R5, R21, R22, R24, R25.** A `scripts/seed-cms.mjs` that
+fills the CMS:
+- site settings, **including the `ai` block (R5) and `collections` (§6.3)**
+- `seoDefaults.defaultOgImage`: a 1200×630 brand card (R21)
 - ONE canonical phone and email in `SiteSettings.contact`, which every
   component uses (R21)
 - form definitions
 - `forms.notifyEmail` ONLY if the owner gave a real address (never invent
-  one; otherwise list it as a launch blocker, R22/R24)
-- `analytics`: the tracking IDs the old site used, moved out of code (R25)
+  one; otherwise it is a launch blocker, R22/R24)
+- `analytics`: the tracking IDs removed from code in P1 (R25)
 - per-route `seo/<path>/` with real meta descriptions (120–160 chars) for
-  every page and article
+  every page and article (R21)
 - `sitemap.extraPaths`
 
 It must be idempotent. Without `--force` it fills only what is still missing
-(at any depth) and never overwrites an admin's edit.
+(at any depth) and never overwrites an admin's edit. It never writes invented
+business details (R22).
 
-**P8 — Verify.** Run the five checks in the Definition of done. Fix and rerun
-until all five are green (site-audit: 0 failures). Then report the launch-check
-blockers that need real business data or production config, so the owner can
-supply them (R22). Then walk the §13 checklist (one line per rule,
-R1–R25) and report it ticked, together with the acceptance and site-audit output verbatim.
+**P8 — Verify. Rules: all, R1–R25.** Run the five gates of the Definition of
+done against the production build. Fix and rerun until all five are green
+(site-audit: 0 failures). Grep for prompt wording (R5),
+`dangerouslySetInnerHTML` (R10) and image-URL inputs (R11). Then report:
+1. the five gate outputs, verbatim
+2. the §13 checklist, one line per rule, ticked, with its evidence
+3. "Defaults taken" (R12)
+4. "Needs from the owner": every launch-check blocker that needs real
+   business data or production config (R22), plus the FormSubmit activation
+   step (R24)
 
 ---
 
@@ -239,7 +559,8 @@ const defaults = {
 };
 
 export default function Pricing() {
-  const { data, E, editButton } = useCms("pricing", defaults, { label: "Pricing" });
+  const { data, hidden, E, editButton } = useCms("pricing", defaults, { label: "Pricing" });
+  if (hidden) return null; // R23 — admins hid this block
   return (
     <section className="relative py-20">
       {editButton}
@@ -265,7 +586,8 @@ export default function Pricing() {
 }
 ```
 
-Rules:
+Rules (this recipe builds R2, R8, R9, R10, R11, R18, R20 and R23 — every
+step is mandatory):
 
 1. `useCms(name, defaults, { label })`. `name` is kebab-case, unique, and
    descriptive (`home-hero`, `services-process`, `footer`). `defaults` is
@@ -902,113 +1224,118 @@ unclosed/invalid JSON-LD, marking up invisible content.
 
 ## §11 — Anti-patterns (each one fails review)
 
-- Rewriting, "improving" or re-implementing a kit file instead of installing it
-  verbatim (R1).
-- Stopping to ask about something this spec already decides (R12). Pick the
-  stated default and note it in the report.
-- A token in `localStorage`, or `isAdmin` derived from client storage (R4).
-- A modal or "Edit mode → form → Save" as the main way to change copy (R2).
-- An editor that writes live data, or a component with its own Save button (R3).
-- Prompt text written in the frontend, or a paste box that `JSON.parse`s and
-  writes directly (R5, R6).
-- `revalidatePath`/`revalidateTag` called from the browser or from an editor (R7).
-- Literal copy left in a CMS component without `cms-static` (R2, `check:inline`).
-- Bare `E` used in a subcomponent (it must be `data.E`), or a client-only helper
-  imported into a server component (this crashes prerender).
-- Defaults that differ from the original copy, so the page changes before any
-  edit (R9).
-- Admin UI, `contentEditable` or extra fetches present for visitors (R8).
-- `dangerouslySetInnerHTML` for CMS or AI text (R10). Image URL text inputs (R11).
-- A "new page" / "page builder" button on the site, or section add / move /
-  delete on one-off pages (R13).
-- A collection entry whose layout differs from its siblings, or a collection
-  `sections` list that doesn't match the existing detail pages (R14).
-- Edit chrome that is always visible on top of content (R15).
-- A list keyed by its own editable text, so fields lose focus after one
-  keystroke (R18).
-- Server-side CMS fetches without `X-CMS-Frontend`, or the secret in browser
-  code (R19).
-- A section that breaks, overflows or stretches edge to edge at phone or
-  large-screen widths, or admin panels wider than a phone screen (R20).
-- Any site-audit failure (R21): duplicate or brand-doubled titles,
-  descriptions outside 110–165 chars, a page without og:image, two `<h1>`s
-  (e.g. hidden mobile/desktop twins — make the hidden one
-  `<div role="heading" aria-level={1}>`), a card `<h3>` straight under the
-  `<h1>`, broken links, a sitemap URL that 404s or is noindex, contact details
-  that differ between the footer, contact page and JSON-LD, or a form that
-  sends empty data or stores real leads as spam.
-- Launching with placeholder business details, a localhost site URL, or lead
-  forms nobody is notified about (R22). Also inventing those details instead
-  of asking for them.
-- Visitors shown any admin markup, or extra client fetches for content
-  (R8). Image URLs typed into text fields instead of uploaded (R11).
-- A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI not first,
-  no score bar, fewer than 18 checks, coverage that is stale after Apply
-  (R16).
-- Admin colors hard-coded to the site instead of the `--cms-*` variables, or
-  admin markup changed to match the site, or an accent colour too light for
-  white text (R17).
-- Writing AI prompt text on the client, or a prompt that doesn't end with its
-  FINAL CHECK (prompts live only in `api/prompts.py`).
-- A CMS component without `if (hidden) return null`, hidden content left in
-  the visitor HTML, "hiding" by deleting content, or a hand-rolled show/hide
-  flag instead of the kit's Hide toggle (R23).
-- A form posted with its own `fetch`, `mailto:`, EmailJS/Formspree or a
-  hard-coded recipient, instead of `submitForm()` and the Settings address;
-  or a lead address invented to clear the launch check (R24).
-- A tracking snippet or ID hard-coded in the layout, a component calling
-  `gtag`/`fbq`/`dataLayer.push` directly, or a data layer variable added in
-  code instead of Settings → Tracking (R25).
+One line per rule: the mistake that breaks it. If you catch yourself doing
+any of these, stop and undo it.
+
+- **R1** Rewriting, "improving" or re-implementing a kit file, or hand-rolling
+  an admin bar, modal, API client, SEO panel, form sender or tag loader.
+- **R2** A modal / "Edit → form → Save" as the main way to change copy;
+  literal copy without `cms-static`; a bare `E` in a subcomponent; a raw
+  `url('/big.png')`; a client-only helper imported into a server component.
+- **R3** An editor that writes live data, or a component with its own Save
+  button.
+- **R4** A token in `localStorage`, or `isAdmin` derived from client storage.
+- **R5** Prompt text written in the frontend, or a backend prompt without its
+  FINAL CHECK.
+- **R6** A paste box that `JSON.parse`s and writes directly.
+- **R7** `revalidatePath` / `revalidateTag` called from the browser or an
+  editor.
+- **R8** Admin markup, `contentEditable` or extra client content fetches for
+  visitors.
+- **R9** Defaults that differ from the original copy, so the page changes
+  before any edit.
+- **R10** `dangerouslySetInnerHTML` for CMS or AI text.
+- **R11** Image URLs typed into text fields instead of uploaded.
+- **R12** Stopping to ask about something this spec already decides — or,
+  the reverse, inventing business details instead of asking.
+- **R13** A "new page" / "page builder" button on the site, or section add /
+  move / delete on one-off pages.
+- **R14** A collection entry whose layout differs from its siblings, or a
+  `sections` list that doesn't match the existing detail pages.
+- **R15** Edit chrome always visible on top of content, or a first-section
+  toolbar hidden under the fixed header.
+- **R16** A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI
+  not first, no score bar, fewer than 18 checks, coverage stale after Apply.
+- **R17** Admin colours hard-coded to the site instead of the `--cms-*`
+  variables, admin markup changed to match the site, or an accent too light
+  for white text.
+- **R18** A list keyed by its own editable text, so fields lose focus after
+  one keystroke.
+- **R19** Server-side CMS fetches without `X-CMS-Frontend`, or the secret in
+  browser code.
+- **R20** A section that overflows on phones or stretches edge to edge on
+  large screens, or admin panels wider than a phone.
+- **R21** Duplicate or brand-doubled titles; descriptions outside 110–165
+  chars; a page without og:image; two `<h1>`s (hidden mobile/desktop twins);
+  a card `<h3>` straight under the `<h1>`; broken links; a sitemap URL that
+  404s or is noindex; contact details that differ between footer, contact
+  page and JSON-LD; a form that sends empty data or stores real leads as
+  spam.
+- **R22** Launching with placeholder business details, a localhost site URL,
+  indexing off, or lead forms nobody is notified about.
+- **R23** A CMS component without `if (hidden) return null`; hidden content
+  left in the visitor HTML; "hiding" by deleting content; a hand-rolled
+  show/hide flag.
+- **R24** A form posted with its own `fetch`, `mailto:`, EmailJS / Formspree
+  or a hard-coded recipient instead of `submitForm()` and the Settings
+  address; a lead address invented to clear the launch check.
+- **R25** A tracking snippet or ID hard-coded in the layout; `gtag` / `fbq` /
+  `dataLayer.push` called from a component; a data layer variable added in
+  code instead of Settings → Tracking.
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R25, no exceptions. Kit: dynamic-cms/frontend-kit.
+exactly — every rule R1–R25, no exceptions. Read the whole file first.
+Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
-Finish only when build + check:inline + check:sections + acceptance.mjs pass and
-site-audit.mjs reports 0 failures; list any launch blockers that need the owner,
-then walk the §13 checklist line by line and paste it, ticked, with the
-acceptance output in your report.
+Finish only when the five gates pass against the production build:
+next build, check:inline, check:sections, acceptance.mjs (every check),
+site-audit.mjs (0 failures). Then report, in this order:
+  1. the five gate outputs, verbatim
+  2. the §13 checklist, one line per rule, ticked, with evidence
+  3. Defaults taken
+  4. Needs from the owner (launch blockers, FormSubmit activation)
 ```
 
 ## §13 — Final checklist (every rule, one more time)
 
 Walk this list before reporting. Every line must be true. Each line names the
-gate that proves it; a line with no automatic gate is yours to verify by hand.
+gate that proves it; a "(review)" line is yours to verify by hand — say how.
 
 **The rules**
-- [ ] **R1** The kit is installed verbatim; only the MANIFEST's ADAPT files changed. (review)
-- [ ] **R2** Every visible string in a CMS component is `<E.Text>`; images, lists and links use `E.Image` / `E.Item` + `E.Add` / `E.Link`. No modal-first editing. (`check:inline`, acceptance "click-and-type")
+- [ ] **R1** The kit is installed verbatim; only MANIFEST ADAPT files, the `cms.css` theme block and adapter classes changed. (review, `check:sections`)
+- [ ] **R2** Every visible string in a CMS component is `<E.Text>`; images, lists and links use `E.Image` / `E.Item` + `E.Add` / `E.Link`; backgrounds use `bgImage()`. No modal-first editing. (`check:inline`, acceptance)
 - [ ] **R3** Every edit saves as a draft; only Publish makes it live. (acceptance "public data unchanged before publish")
 - [ ] **R4** Session cookie + CSRF only; no token in browser storage. (acceptance "session cookie…")
-- [ ] **R5** No prompt text in the frontend; prompts come from `ai/*` endpoints. (review: grep the frontend for prompt wording)
+- [ ] **R5** No prompt text in the frontend; prompts come from the backend and end with a FINAL CHECK. (review grep, acceptance "FINAL CHECK")
 - [ ] **R6** Every pasted AI/JSON reply goes through `ai/normalize/` or a server paste endpoint. (acceptance "AI paste normalised")
 - [ ] **R7** The webhook route is installed, and visitors see a publish without a rebuild. (acceptance "visitor HTML updated")
 - [ ] **R8** Visitors get zero CMS UI and no extra content fetches. (acceptance "visitor: no admin bar")
-- [ ] **R9** Defaults are the original copy, verbatim; the page looks identical before any edit. (review: compare screenshots)
+- [ ] **R9** Defaults are the original copy, verbatim; the page looks identical before any edit. (review: screenshots)
 - [ ] **R10** No `dangerouslySetInnerHTML` for CMS/AI text. (review: grep)
 - [ ] **R11** Images are uploaded, never typed as URLs. (review)
-- [ ] **R12** No clarifying questions were needed; defaults are stated in the report. (report)
+- [ ] **R12** No clarifying questions were needed; defaults are listed in the report; no business detail was invented. (report)
 - [ ] **R13** Collections are decided and seeded; "＋ New …" appears only on their index pages; one-off pages are structure-locked. (acceptance "collections…", "structure is locked")
 - [ ] **R14** New entries follow the template exactly, like their siblings. (acceptance "new entry follows the collection template exactly")
-- [ ] **R15** Edit tools are hover-only and never cover content; the bar minimises. (acceptance "edit tools are hidden…", "admin bar minimises")
+- [ ] **R15** Edit tools are hover-only, never cover content or sit under the header; the bar minimises. (acceptance "edit tools are hidden…", "admin bar minimises")
 - [ ] **R16** The SEO panel opens on Ask AI with its prompt built and shows 18 checks; the whole-page assist shows coverage %, chips and 6 rules, live after Apply. (acceptance SEO + AI assist checks)
 - [ ] **R17** The `--cms-*` theme variables are set to the site palette, at ≥4.5:1 contrast with white. (acceptance "admin panels meet WCAG AA contrast")
-- [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus" + "never re-created")
+- [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus")
 - [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (review; acceptance shows no 429s)
 - [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
 - [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
-- [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed in the report as "needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
+- [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
 - [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")
 - [ ] **R24** Every form uses `submitForm()`; leads are stored, emailed via FormSubmit to Settings → Form notifications (first settings card, test button works) and tracked. (`check:inline`, acceptance "emailed via FormSubmit…")
 - [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking; `<Analytics>` renders them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…")
 
-**Also checked by the acceptance test**
-- [ ] Exactly one `<h1>` in each page's HTML. Hidden mobile/desktop twins use `<div role="heading" aria-level={1}>` for the hidden copy.
-- [ ] No critical accessibility violations for visitors (axe).
-- [ ] CSS background images go through `bgImage()` (`lib/bgImage.js`), never raw `url('/big.png')`.
+**Also checked by the gates**
+- [ ] Exactly one `<h1>` in each page's HTML. (acceptance, site-audit)
+- [ ] No critical accessibility violations for visitors. (acceptance, axe)
+- [ ] No uncaught page errors. (acceptance)
 
 **Setup**
 - [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`
@@ -1017,6 +1344,5 @@ gate that proves it; a line with no automatic gate is yours to verify by hand.
 - [ ] Forms are definition-driven, with editable copy and a honeypot, and submit with `submitForm()`
 - [ ] CMS pages and dynamic blog posts render through `DynamicPageAdmin`
 - [ ] Sitemap and robots honour SEO flags; redirects run in middleware; `sitemap.extraPaths` seeded
-- [ ] `SiteSettings.ai` and `SiteSettings.collections` seeded
+- [ ] `SiteSettings.ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and `analytics` seeded; seed is idempotent
 - [ ] Env: `REVALIDATE_SECRET` on both sides, `FRONTEND_REVALIDATE_URL`, CORS + CSRF trusted origins
-- [ ] `next build` is clean; `acceptance.mjs` passes every check (output pasted in the report)
