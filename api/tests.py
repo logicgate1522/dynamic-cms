@@ -1880,6 +1880,28 @@ class PromptRepetitionTests(AdminAuthMixin, APITestCase):
             tail = prompt[-2500:]
             self.assertIn("FINAL CHECK", tail)
 
+    def test_hard_rules_are_stated_at_least_twice(self):
+        """Each hard rule appears in the body AND in the FINAL CHECK."""
+        import re
+        from . import prompts
+        json_prompts = {
+            "page": prompts.page_prompt(None, {"mode": "edit", "title": "X",
+                                               "existing_sections": [{"type": "hero", "content": {"heading": "x"}}]}),
+            "section": prompts.section_prompt(content={"title": "x"}, label="Hero", path="about", keyword="vat"),
+            "assist": prompts.page_assist_prompt(path="about", sections={"hero": {"label": "Hero", "content": {"t": "x"}}},
+                                                 seo={"keywords": {"primary": "vat"}})[0],
+        }
+        rules = {
+            "json only": r"ONLY (valid )?JSON|ONLY the JSON",
+            "never drop list items": r"NEVER remove|No existing list item was removed",
+            "no invented facts": r"invent",
+            "plain text": r"no HTML",
+            "plain URLs": r"markdown-linkified|never \"\[x\]\(x\)\"",
+        }
+        for name, text in json_prompts.items():
+            for rule, pattern in rules.items():
+                self.assertGreaterEqual(len(re.findall(pattern, text, re.I)), 2, f"{name}: '{rule}' stated fewer than twice")
+
     def test_seo_checks_carry_tab_field_and_fix(self):
         from . import prompts
         rules = prompts.seo_rule_checks({})

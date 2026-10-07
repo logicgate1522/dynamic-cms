@@ -81,7 +81,8 @@ SEO_PRINCIPLES = """SEO RULES — apply to every word you write:
 
 JSON_ONLY = (
     "Return ONLY valid JSON — no markdown code fences, no commentary before or after, no comments "
-    "inside the JSON. Keep every URL, path and image reference a plain string exactly as given "
+    "inside the JSON. Every text value is plain text: no HTML, no markdown, paragraphs separated by a "
+    "blank line. Keep every URL, path and image reference a plain string exactly as given "
     '(never markdown-linkified as "[https://x.jpg](https://x.jpg)").'
 )
 
