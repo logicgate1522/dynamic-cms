@@ -127,6 +127,9 @@ let block = null;
 let original = null;
 let originalSeo = null;
 let createdEntry = null;
+let originalSettings = null;   // forms + analytics, restored at the end
+const restoreSections = [];    // [{ hostPath, id, content }]
+const FORM_PAGE = process.env.FORM_PAGE || "/contact";
 
 try {
     /* ---------- 1. Visitors get zero CMS UI ---------- */
@@ -419,6 +422,179 @@ try {
     }
     await page.setViewportSize({ width: 1440, height: 900 });
 
+    /* ---------- 9c. Hide blocks, list items and sections (R23) ---------- */
+    async function publishPage() {
+        await bar().getByRole("button", { name: /^Publish \(\d+\)/ }).click();
+        await bar().getByRole("button", { name: /Publish this page/ }).click();
+        await settle();
+    }
+    const visitorHtml = async (path) => (await (await fetch(`${SITE}${path}`)).text());
+    // Text can legitimately appear elsewhere too (a nav label in the footer),
+    // so hiding is proven by the count going down, not by absence.
+    const countIn = async (path, text) => (await visitorHtml(path)).split(text).length - 1;
+    const longestString = (value) => {
+        let best = "";
+        JSON.stringify(value, (k, v) => { if (typeof v === "string" && k !== "_hidden" && !/href|image|icon|url/i.test(k) && v.length > best.length) best = v; return v; });
+        return best;
+    };
+    await page.goto(`${SITE}${PAGE}`);
+    await ensureEditing();
+    // Block: the first block whose Hide toggle we click.
+    const toggle = page.locator('[data-cms-action="toggle-hidden"]').first();
+    await toggle.click({ force: true });
+    const hiddenBlock = await poll(async () => {
+        const d = (await admin("drafts/")).body?.components || [];
+        for (const c of d) {
+            const draftData = (await admin(`home/${c.name}/?mode=draft`)).body;
+            if (draftData?._hidden) return { name: c.name, text: longestString(draftData) };
+        }
+        return null;
+    });
+    check("“Hide” on a block saves _hidden as a draft", !!hiddenBlock);
+    if (hiddenBlock) {
+        const needle = hiddenBlock.text.slice(0, 40);
+        const before = await countIn(PAGE, needle);
+        await publishPage();
+        const gone = await poll(async () => (await countIn(PAGE, needle)) < before, { tries: 30, every: 700 });
+        check("a hidden block is not in the visitor's HTML", !!gone, `${hiddenBlock.name}: “${needle}” ${before}→${await countIn(PAGE, needle)}`);
+        await page.goto(`${SITE}${PAGE}`);
+        await ensureEditing();
+        await page.locator('[data-cms-action="toggle-hidden"][aria-pressed="true"]').first().click({ force: true });
+        await poll(async () => !(await admin(`home/${hiddenBlock.name}/?mode=draft`)).body?._hidden);
+        await publishPage();
+        const back = await poll(async () => (await countIn(PAGE, needle)) >= before, { tries: 30, every: 700 });
+        check("showing it again brings it back for visitors", !!back);
+    }
+    // List item: the first list field on the page that belongs to an object item.
+    const itemField = page.locator('[data-cms-block]:not([data-cms-block^="section:"])').filter({ hasText: /\S/ });
+    const itemIndex = await itemField.evaluateAll((els) => els.findIndex((el) => /\.\d+\.\w+$/.test(el.dataset.cmsPath) && el.offsetParent));
+    if (itemIndex >= 0) {
+        const el = itemField.nth(itemIndex);
+        const [blockName, path] = [await el.getAttribute("data-cms-block"), await el.getAttribute("data-cms-path")];
+        const itemText = (await el.innerText()).trim();
+        await el.hover();
+        await page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]').first().click();
+        const listPath = path.replace(/\.\d+\.\w+$/, "");
+        const idx = Number(path.match(/\.(\d+)\.\w+$/)[1]);
+        const saved = await poll(async () => {
+            const d = (await admin(`home/${blockName}/?mode=draft`)).body;
+            return listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
+        });
+        check("“Hide” on a list item saves _hidden on that item only", !!saved, `${blockName}.${listPath}[${idx}]`);
+        const itemBefore = await countIn(PAGE, itemText);
+        await publishPage();
+        const itemGone = await poll(async () => (await countIn(PAGE, itemText)) < itemBefore, { tries: 30, every: 700 });
+        check("a hidden list item is not shown to visitors", !!itemGone, `“${itemText.slice(0, 30)}” ${itemBefore}→${await countIn(PAGE, itemText)}`);
+        await el.hover();
+        await page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]').first().click();
+        await poll(async () => {
+            const d = (await admin(`home/${blockName}/?mode=draft`)).body;
+            return !listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
+        });
+        await publishPage();
+    }
+    // CMS-page section.
+    if (DYNAMIC_PAGE) {
+        await page.goto(`${SITE}${DYNAMIC_PAGE}`);
+        await ensureEditing();
+        const slot = page.locator('[data-cms-block^="section:"]').first();
+        await slot.waitFor({ timeout: 10000 });
+        const sectionId = (await slot.getAttribute("data-cms-block")).split(":")[1];
+        const role = (await admin(`collections/for-path/?path=${encodeURIComponent(DYNAMIC_PAGE)}`)).body;
+        const hostKind = DYNAMIC_PAGE.startsWith("/blog/") ? "blog" : "content";
+        const hostPath = hostKind === "blog" ? `blog/${DYNAMIC_PAGE.split("/").pop()}` : `content/${DYNAMIC_PAGE.replace(/^\//, "")}`;
+        void role;
+        const rows = (await admin(`${hostPath}/sections/`)).body;
+        const original = (Array.isArray(rows) ? rows : rows?.results || []).find((r) => String(r.id) === sectionId);
+        restoreSections.push({ hostPath, id: sectionId, content: original?.content });
+        const sectionText = longestString(original?.content || {});
+        // The toggle sits in the section's hover toolbar (below a fixed header
+        // on the first section) — hover the section, then click it like a person.
+        await slot.hover();
+        await page.locator('[data-cms-action="toggle-section-hidden"]').first().click();
+        const savedSection = await poll(async () => {
+            const r = (await admin(`${hostPath}/sections/`)).body;
+            return (Array.isArray(r) ? r : r?.results || []).find((x) => String(x.id) === sectionId)?.draft_content?._hidden;
+        });
+        check("“Hide” on a CMS-page section saves a draft", !!savedSection);
+        const sectionBefore = await countIn(DYNAMIC_PAGE, sectionText.slice(0, 40));
+        await publishPage();
+        const sectionGone = await poll(async () => (await countIn(DYNAMIC_PAGE, sectionText.slice(0, 40))) < sectionBefore, { tries: 30, every: 700 });
+        check("a hidden section is not in the visitor's HTML", !!sectionGone);
+    }
+
+    /* ---------- 9d. Forms: stored, emailed via FormSubmit, lead event (R24) ---------- */
+    originalSettings = (await admin("settings/site/")).body || {};
+    await adminWrite("settings/site/", "PATCH", { forms: { notifyEmail: "acceptance-test@example.org", subjectPrefix: "Acceptance" } });
+    {
+        const ctx = await browser.newContext();
+        const v = await ctx.newPage();
+        const emails = [];
+        let formName = null;
+        ctx.on("request", (r) => {
+            const m = r.method() === "POST" && r.url().match(/\/forms\/([^/]+)\/submit\//);
+            if (m) formName = m[1];
+        });
+        await ctx.route("https://formsubmit.co/**", async (route) => {
+            emails.push({ url: route.request().url(), body: route.request().postDataJSON?.() || {} });
+            await route.fulfill({ status: 200, contentType: "application/json", body: '{"success":"true","message":"ok"}' });
+        });
+        await v.goto(`${SITE}${FORM_PAGE}`);
+        const forms = v.locator("form").filter({ has: v.locator('input[type="email"]') });
+        let form = null;
+        for (let i = 0; i < (await forms.count()); i++) if (!form && (await forms.nth(i).isVisible())) form = forms.nth(i);
+        if (!form) check(`a visible form on ${FORM_PAGE} (set FORM_PAGE)`, false);
+        else {
+            const tag = `Lead ${STAMP}`;
+            const inputs = form.locator("input:visible, textarea:visible");
+            for (let i = 0; i < (await inputs.count()); i++) {
+                const el = inputs.nth(i);
+                const type = (await el.getAttribute("type")) || "text";
+                if (["submit", "button", "hidden", "file", "checkbox", "radio"].includes(type)) continue;
+                if (await el.evaluate((n) => n.tabIndex < 0 || !!n.closest('[aria-hidden="true"]'))) continue;
+                await el.fill(type === "email" ? "lead@example.org" : type === "tel" ? "07700 900123" : tag);
+            }
+            await form.locator('button[type="submit"], input[type="submit"]').first().click();
+            const emailed = await poll(async () => emails.length > 0, { tries: 20, every: 400 });
+            check("a stored submission is emailed via FormSubmit to the Settings address", !!emailed && emails[0].url.includes(encodeURIComponent("acceptance-test@example.org")), emails[0]?.url);
+            check("the email carries the submitted fields", emailed && JSON.stringify(emails[0].body).includes(tag));
+            const lead = await v.evaluate(() => (window.dataLayer || []).some((e) => e && e.event === "generate_lead"));
+            check("generate_lead is pushed to the data layer", lead);
+            const list = formName ? (await admin(`forms/${formName}/submissions/`)).body : [];
+            const stored = (list?.results || list || []).find((x) => JSON.stringify(x).includes(tag));
+            check("the submission is also in the CMS inbox", !!stored);
+            if (stored) await adminWrite(`forms/${formName}/submissions/${stored.id}/`, "DELETE");
+        }
+        await ctx.close();
+    }
+
+    /* ---------- 9e. Tracking: IDs from Settings, data layer, events (R25) ---------- */
+    await adminWrite("settings/site/", "PATCH", { analytics: { gtmId: "GTM-ACCTEST1", dataLayer: [{ key: "cms_acceptance", value: "yes" }], events: { pageView: true, lead: true, contactClicks: true } } });
+    {
+        const ctx = await browser.newContext();
+        await ctx.route(/googletagmanager\.com|connect\.facebook\.net/, (route) => route.abort());
+        const v = await ctx.newPage();
+        const ready = await poll(async () => {
+            await v.goto(`${SITE}${PAGE}`);
+            return v.evaluate(() => (window.dataLayer || []).some((e) => e && e.cms_acceptance === "yes"));
+        }, { tries: 15, every: 1000 });
+        check("data layer variables are pushed before GTM", !!ready);
+        check("the GTM container from Settings is loaded", await v.evaluate(() => (window.dataLayer || []).some((e) => e && e["gtm.start"])));
+        const here = new URL(v.url()).pathname;
+        const target = await v.evaluate((path) => {
+            const links = [...document.querySelectorAll('a[href^="/"]')].filter((a) => a.offsetParent && !a.getAttribute("href").startsWith("/admin"));
+            const link = links.find((a) => new URL(a.href).pathname !== path);
+            return link ? link.getAttribute("href") : null;
+        }, here);
+        if (target) {
+            await v.locator(`a[href="${target}"]:visible`).first().click();
+            await v.waitForURL((url) => url.pathname !== here, { timeout: 15000 }).catch(() => {});
+            const viewed = await poll(async () => v.evaluate(() => (window.dataLayer || []).some((e) => e && e.event === "page_view")));
+            check("page_view is pushed on in-site navigation", !!viewed);
+        }
+        await ctx.close();
+    }
+
     /* ---------- 10. Full-page admin still works ---------- */
     for (const path of ["/admin", "/admin/pages", "/admin/seo", "/admin/images", "/admin/sitemap", "/admin/settings"]) {
         await page.goto(`${SITE}${path}`);
@@ -440,12 +616,22 @@ try {
     console.log("screenshot: acceptance-failure.png");
 } finally {
     // Put everything back.
-    if (block || createdEntry) {
+    if (block || createdEntry || originalSettings || restoreSections.length) {
         if (!(await admin("auth/session/")).body?.authenticated) await login("/").catch(() => {});
         if (block && original) {
             await adminWrite(`home/${block}/`, "PUT", original);
             await adminWrite("drafts/discard/", "POST", { components: [block] });
             check("cleanup: edited block restored", JSON.stringify(await publicJson(`home/${block}/`)) === JSON.stringify(original));
+        }
+        if (originalSettings) {
+            await adminWrite("settings/site/", "PATCH", {
+                forms: originalSettings.forms || { notifyEmail: "", subjectPrefix: "" },
+                analytics: { ...(originalSettings.analytics || {}), gtmId: originalSettings.analytics?.gtmId || "", dataLayer: originalSettings.analytics?.dataLayer || [] },
+            });
+            check("cleanup: form and tracking settings restored", true);
+        }
+        for (const s of restoreSections) {
+            if (s.content) await adminWrite(`${s.hostPath}/sections/${s.id}/`, "PATCH", { content: s.content, draft_content: null });
         }
         if (originalSeo) {
             const seoKey = PAGE.replace(/^\/+|\/+$/g, "") || "home";

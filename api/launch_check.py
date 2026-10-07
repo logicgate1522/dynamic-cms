@@ -22,12 +22,16 @@ PLACEHOLDER = re.compile(
     r"|\bNew section\b|Write the first paragraph|Describe the offer in one|What it does\b|\bEyebrow\b",
     re.IGNORECASE,
 )
+EMAIL_LIKE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", ""}
 DEV_EMAIL_BACKENDS = ("console", "locmem", "dummy", "filebased")
 
 
 def _strings(value, path=""):
-    """Every string in a JSON blob, with a readable path."""
+    """Every string in a JSON blob, with a readable path. Anything an admin
+    hid (`_hidden: true`) is skipped — visitors never see it."""
+    if isinstance(value, dict) and value.get("_hidden"):
+        return
     if isinstance(value, str):
         yield path, value
     elif isinstance(value, dict):
@@ -94,19 +98,27 @@ def run_launch_check():
         add("robots-off", "blocker", "Search engines are blocked site-wide",
             "seoDefaults.robots.index is false (a staging setting).", "Turn indexing back on in Settings → SEO defaults.")
 
-    # 3. Leads must reach someone.
+    # 3. Leads must reach someone: FormSubmit (Settings → Form notifications)
+    #    is the standard; backend SMTP (FORM_NOTIFICATION_EMAIL) is optional.
+    formsubmit = str((site.get("forms") or {}).get("notifyEmail") or "").strip()
     recipients = [getattr(settings, "FORM_NOTIFICATION_EMAIL", "") or ""]
     for row in ComponentData.objects.filter(name__startswith="form-"):
         recipients.append(((row.data or {}).get("notify") or {}).get("email") or "")
-    if not any(r.strip() for r in recipients):
+    smtp_recipient = any(r.strip() for r in recipients)
+    if not formsubmit and not smtp_recipient:
         add("lead-email", "blocker", "Form submissions notify nobody",
-            "No FORM_NOTIFICATION_EMAIL and no form has notify.email — leads would only sit in the inbox.",
-            "Set FORM_NOTIFICATION_EMAIL in the backend .env (and SMTP settings).")
+            "No notification email is set — leads would only sit in the inbox.",
+            "Site tools → Settings → Form notifications: enter the address, then click “Send a test email” and confirm FormSubmit's activation email.")
     backend = getattr(settings, "EMAIL_BACKEND", "")
-    if any(name in backend for name in DEV_EMAIL_BACKENDS):
+    if smtp_recipient and not formsubmit and any(name in backend for name in DEV_EMAIL_BACKENDS):
         add("email-backend", "blocker", "Emails are not actually sent",
-            f"EMAIL_BACKEND is the {next(n for n in DEV_EMAIL_BACKENDS if n in backend)} backend — notifications are not delivered.",
-            "Set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend and EMAIL_HOST/USER/PASSWORD.")
+            f"Notifications rely on the backend's email, but EMAIL_BACKEND is the "
+            f"{next(n for n in DEV_EMAIL_BACKENDS if n in backend)} backend.",
+            "Use Settings → Form notifications (FormSubmit), or configure SMTP in the backend .env.")
+    if formsubmit and EMAIL_LIKE.match(formsubmit):
+        add("formsubmit-alias", "warning", "Form notification address is public",
+            "FormSubmit uses the address in the page's requests. After activation it emails you a private alias.",
+            "Replace the address with that alias in Settings → Form notifications.")
 
     # 4. Visitors must see edits.
     if not getattr(settings, "FRONTEND_REVALIDATE_URL", "") or not getattr(settings, "REVALIDATE_SECRET", ""):

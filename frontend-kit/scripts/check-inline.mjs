@@ -44,7 +44,7 @@ const files = [];
         if (name === "node_modules" || name.startsWith(".")) continue;
         const path = join(dir, name);
         if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(jsx|tsx)$/.test(name)) files.push(path);
+        else if (/\.(jsx|tsx|js|ts|mjs)$/.test(name)) files.push(path);
     }
 })(root);
 
@@ -106,10 +106,55 @@ function textDerivedKeys(ast, report) {
     });
 }
 
+// Site-wide rules: forms and tracking each have ONE entry point.
+const OWN = {
+    forms: /lib\/forms\.(js|ts)$/,
+    tracking: /lib\/track\.(js|ts)$|components\/seo\/Analytics(Events)?\.(jsx|tsx)$/,
+};
+function siteWideRules(file, source, lines, report) {
+    if (!OWN.forms.test(file)) {
+        lines.forEach((line, i) => {
+            if (/formsubmit\.co|\/forms\/[^"'`]*\/submit/.test(line) && !/cms-static/.test(line)) {
+                report(i + 1, "form submitted directly — use submitForm() from @/lib/forms (stores the lead, emails it via FormSubmit, fires generate_lead)");
+            }
+        });
+    }
+    if (!OWN.tracking.test(file)) {
+        lines.forEach((line, i) => {
+            if (/\b(gtag|fbq|lintrk)\s*\(|\bttq\.(track|page)\(|dataLayer\.push\(|googletagmanager\.com|connect\.facebook\.net/.test(line) && !/cms-static/.test(line)) {
+                report(i + 1, "tracking code outside lib/track.js / Analytics.jsx — use track(name, params) and the IDs in Settings → Tracking");
+            }
+        });
+    }
+}
+
+// A component that renders a useCms block must honour `hidden`
+// (if (hidden) return null;) — otherwise "Hide" does nothing for visitors.
+function hiddenGuard(ast, source, report) {
+    visit(ast.program, (node) => {
+        if (!/Function/.test(node.type) || node.body?.type !== "BlockStatement") return;
+        const body = node.body.body;
+        const callsUseCms = body.some((stmt) => stmt.type === "VariableDeclaration" && stmt.declarations.some((d) => d.init?.type === "CallExpression" && d.init.callee?.name === "useCms"));
+        if (!callsUseCms) return;
+        const last = [...body].reverse().find((stmt) => stmt.type === "ReturnStatement");
+        if (!last?.argument || /ObjectExpression|CallExpression|Identifier/.test(last.argument.type)) return; // a hook, not a component
+        if (!/\bhidden\b/.test(source.slice(node.body.start, node.body.end))) report(node.loc.start.line);
+    });
+}
+
 let problems = 0;
 let scanned = 0;
 for (const file of files) {
     const source = readFileSync(file, "utf8");
+    const relativePath = relative(process.cwd(), file);
+    {
+        const lines = source.split("\n");
+        siteWideRules(file, source, lines, (line, message) => {
+            problems++;
+            console.log(`${relativePath}:${line}  ${message}`);
+        });
+    }
+    if (!/\.(jsx|tsx)$/.test(file)) continue;
     const usesCms = /import\s*\{[^}]*\buseCms\b[^}]*\}\s*from/.test(source);
     const usesSectionEdit = /from\s+["']@\/components\/dynamic\/edit-context["']/.test(source);
     if (!usesCms && !usesSectionEdit) continue;
@@ -118,6 +163,10 @@ for (const file of files) {
     const ast = parser.parse(source, {
         sourceType: "module",
         plugins: ["jsx", ...(file.endsWith(".tsx") ? ["typescript"] : [])],
+    });
+    hiddenGuard(ast, source, (line) => {
+        problems++;
+        console.log(`${relative(process.cwd(), file)}:${line}  CMS component ignores \`hidden\` — add  if (hidden) return null;  before its final return`);
     });
     textDerivedKeys(ast, (line) => {
         if (`${lines[line - 2] || ""}${lines[line - 1]}`.includes("cms-static")) return;
@@ -150,6 +199,7 @@ if (problems) {
     console.log(`\n${problems} problem(s) in ${scanned} CMS component file(s).`);
     console.log('Hard-coded text: wire it with <E.Text path="…" /> (original string -> defaults), or mark it {/* cms-static: reason */}.');
     console.log("Text-derived list keys: use the map index (key={index}).");
+    console.log("Forms → submitForm() from @/lib/forms. Tracking → track() from @/lib/track. Hide → if (hidden) return null.");
     process.exit(1);
 }
-console.log(`check-inline: OK — ${scanned} CMS component file(s): no hard-coded copy, no text-derived list keys.`);
+console.log(`check-inline: OK — ${scanned} CMS component file(s): no hard-coded copy, no text-derived list keys, hidden honoured; forms and tracking use their helpers.`);

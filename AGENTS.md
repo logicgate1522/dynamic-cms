@@ -10,15 +10,17 @@ instructions the docs already answer.
 
 ## Job A — "Integrate this CMS into <frontend>"
 
-1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full. Rules R1–R12 are mandatory.
+1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full. Rules R1–R25 are mandatory.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
 3. Run the spec's Autonomous mode, phases P0–P8, in order. Convert every
    section with the §3 recipe.
-4. You are done only when all four gates pass:
+4. You are done only when all five gates pass:
    `next build`, `npm run check:inline`, `npm run check:sections` (backend
-   running), and `frontend-kit/acceptance/acceptance.mjs` against the
-   production build. Paste the acceptance output in your report.
+   running), `frontend-kit/acceptance/acceptance.mjs` and
+   `frontend-kit/acceptance/site-audit.mjs` (0 failures) against the
+   production build. Paste their output in your report, plus any launch-check
+   blockers that need the owner.
 5. Never:
    - put a token in browser storage
    - build modal-first editing
@@ -26,6 +28,11 @@ instructions the docs already answer.
    - `JSON.parse` a pasted AI reply
    - call revalidation from the browser
    - ship admin UI to visitors
+   - leave a `useCms` component without `if (hidden) return null` (R23)
+   - submit a form any way but `submitForm()` from `lib/forms.js`, or
+     hard-code / invent the recipient (R24 — it's Settings → Form notifications)
+   - hard-code a tracking tag or call `gtag`/`fbq`/`dataLayer.push` outside
+     `lib/track.js` (R25 — IDs live in Settings → Tracking & analytics)
 
 ## Job B — Change the backend
 
@@ -92,5 +99,10 @@ instructions the docs already answer.
 - **AI is a copy/paste loop with any chat model:** the backend writes the
   prompt with site context, SEO best practice and an exact JSON shape, and
   `ai/normalize` turns messy replies into safe content (it refuses data loss).
+- **Everything can be hidden** (blocks, list items, sections) as a draft;
+  hidden content never reaches visitors' HTML.
+- **Owner-configurable, not code-configurable:** lead email recipient
+  (FormSubmit.co) and every tracking ID / data layer variable live in Site
+  tools → Settings, near the top, validated by `api/settings_validation.py`.
 - **Visitors pay nothing:** server-rendered published content, no admin code
   paths.

@@ -43,7 +43,10 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
 | R20 | **Responsive on every screen.** Converting a section must keep its behaviour at every width: phones (≈390px), tablets (≈768px), laptops (≈1280px) and large screens (≥1920px — content stays inside a max-width container, nothing stretches edge to edge, type and images scale up sensibly). No horizontal scroll at any width. The admin UI is responsive too: on phones the bar collapses behind "More" and panels fit the screen. The acceptance test checks visitors and admins at 390px and 1920px. |
 | R21 | **Every page passes the site audit** (`site-audit.mjs`). SEO: every sitemap URL returns 200 and is indexable, with a unique title (25–65 chars; ideal 50–60) and description (110–165; ideal 120–160), self canonical, og:title/description/image, twitter:card, `<html lang>`, exactly one `<h1>`, no skipped heading levels, valid JSON-LD with BreadcrumbList (Article/BlogPosting on articles, FAQPage on FAQ pages), alt on every `<img>`, robots.txt with a Sitemap line on the canonical origin. Consistency: no broken internal links; ONE phone number and ONE email across every `tel:`/`mailto:` link and the Organization JSON-LD; titles never repeat the brand. Data: a default social image (`seoDefaults.defaultOgImage`); real meta descriptions for every page and article. Forms: client validation blocks bad input, a valid submit is stored as a real (non-spam) submission, the honeypot is never filled by people. |
-| R22 | **Nothing launches with a launch-check blocker.** `GET launch-check/` (shown on the dashboard as "Launch readiness") must report no blockers: no placeholder text (`[Insert …]`, `example.com` emails, `0000 000000`, "New section"…), `seoDefaults.siteUrl` is the live https domain, indexing is on, lead forms notify a real address (`FORM_NOTIFICATION_EMAIL` or the form's `notify.email`) through a real email backend (SMTP), and the cache webhook is configured. Never invent business details to clear a blocker; ask the owner for them (this is the one case where R12 does not apply). |
+| R22 | **Nothing launches with a launch-check blocker.** `GET launch-check/` (shown on the dashboard as "Launch readiness") must report no blockers: no placeholder text (`[Insert …]`, `example.com` emails, `0000 000000`, "New section"…), `seoDefaults.siteUrl` is the live https domain, indexing is on, lead forms email a real, activated address (Settings → Form notifications → `forms.notifyEmail`, sent through FormSubmit.co per R24; or, only if no address is set there, `FORM_NOTIFICATION_EMAIL` through a real SMTP backend), and the cache webhook is configured. Never invent business details to clear a blocker; ask the owner for them (this is the one case where R12 does not apply). |
+| R23 | **Admins can hide anything, and hidden means gone.** Every `useCms` block, every object list item and every CMS-page section can be hidden with the kit's **Hide** toggle (block: next to the "All fields" pill; item: in the floating item tools; section: in the section hover toolbar). Hiding stores `_hidden: true` in the content **as a draft** (R3) and goes live on Publish. Visitors never get hidden content in the HTML: `useCms` returns `data` with hidden items already removed (`stripHidden`, `lib/visibility.js`) plus a `hidden` flag, and **every component that calls `useCms` renders `if (hidden) return null;` before its markup** (for several blocks in one component, guard each block's JSX with its own flag). Admins with editing on see hidden things dimmed and outlined, with "Hidden · Show" to bring them back. Never filter by `_hidden` by hand, never delete content to "hide" it, never add a separate show/hide setting. Blocks that must always render (a blog template) pass `{ hideable: false }`. `check:inline` fails a CMS component without the `hidden` guard; the acceptance test hides a block, an item and a section and checks the visitor HTML. |
+| R24 | **Every form submits through `submitForm()` and emails the address set in Site tools.** Components call only `submitForm(name, payload, { honeypotField })` from `lib/forms.js`. It stores the submission in the CMS inbox (`POST forms/<name>/submit/`), then — for real leads only (honeypot empty) — emails it through **FormSubmit.co** (`https://formsubmit.co/ajax/<address>`) to `forms.notifyEmail`, and fires `track("generate_lead")` (R25). The address is set in **Site tools → Settings → Form notifications**, the FIRST card on the settings page, which has a **Send a test email** button: FormSubmit emails an activation link on the first send; after activating, the owner may replace the address with FormSubmit's random alias so the real address is not in page code. Never `fetch` the submit endpoint or formsubmit.co from a component, never hard-code a recipient, never invent one (ask the owner — R22). `check:inline` fails any other submit path; the acceptance test mocks FormSubmit and checks the address, fields, inbox entry and lead event. |
+| R25 | **Tracking is configured in Site tools, never in code.** GTM, GA4, Google Ads (+ lead conversion label), Meta Pixel, TikTok, LinkedIn (+ lead conversion id), Microsoft Clarity and Hotjar are pasted as IDs in **Site tools → Settings → Tracking & analytics** (validated server-side), together with **data layer variables** (key/value rows pushed to `window.dataLayer` before GTM loads), the Google **consent-mode default** (granted/denied), event toggles, "Don't track signed-in admins" and custom head/body code. `<Analytics analytics={settings.analytics} />` (kit) in the root layout renders every tag; nothing renders until an ID is set. Events go through `track(name, params)` from `lib/track.js` only — it pushes `{event, …params}` to the data layer and maps to gtag / fbq / ttq / Ads / LinkedIn. The CMS fires `page_view` (in-site navigation), `generate_lead` (stored form submission, `{form_name}`) and `contact_click` (tel:/mailto: clicks, `{method, value}`). Never paste a tag snippet into the layout, never call `gtag`/`fbq`/`dataLayer.push` from a component (`check:inline` fails it). The acceptance test sets a GTM ID and a data layer variable in Settings and checks both load, then checks `page_view`. |
 | R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. Pick shades with **≥4.5:1 contrast against white** (WCAG AA): admin buttons put white text on `--cms-accent`, and `--cms-accent-strong` is text on white. Darken the brand colour if needed; the acceptance test runs an axe contrast scan on the admin panels. |
 
 ---
@@ -71,7 +74,8 @@ unchanged.
 
 **P0 — Audit (no code changes).** List the framework and version, router,
 styling, every route, every section component and its hard-coded copy, lists,
-images, links, forms, existing SEO/metadata and analytics. Output one table:
+images, links, forms, existing SEO/metadata, analytics/tracking snippets (R25) and form
+submit handlers (R24). Output one table:
 `file → what's hard-coded → useCms name → phase`.
 
 **P1 — Install the kit (R1).**
@@ -112,7 +116,9 @@ images, links, forms, existing SEO/metadata and analytics. Output one table:
      );
    }
    ```
-   Keep every existing provider, font and wrapper. `generateMetadata` and
+   Keep every existing provider, font and wrapper. Remove any hard-coded
+   tracking snippet (GTM, gtag, Meta Pixel, …) the site had and move its IDs
+   into Settings → Tracking & analytics (seeded in P7, R25). `generateMetadata` and
    `generateViewport` come from `settings/site/`, as in §5.1.
 6. Add a footer link `Staff login {/* cms-static: admin entry point */}` →
    `/admin/login?next=<current path>` with `rel="nofollow"`. Use `usePathname`;
@@ -127,7 +133,10 @@ the admin bar its SEO button.
 each one, `npm run check:inline` must pass for that file, and the section
 must still work at 390px, 768px, 1280px and 1920px (R20).
 
-**P4 — Forms (§5.4).**
+**P4 — Forms (§5.4, R24).** Every form submits with `submitForm()` from
+`lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
+notifications). Delete any old submit code (fetch, mailto, EmailJS,
+Formspree, a hard-coded FormSubmit URL).
 
 **P5 — Collections, CMS pages and blog.** First decide the collections (R13).
 A page type IS a collection when there is an index page listing entries AND
@@ -168,6 +177,9 @@ calls `redirects/resolve/?path=`. Add the static routes to
 - ONE canonical phone and email in `SiteSettings.contact`, which every
   component uses (R21)
 - form definitions
+- `forms.notifyEmail` ONLY if the owner gave a real address (never invent
+  one; otherwise list it as a launch blocker, R22/R24)
+- `analytics`: the tracking IDs the old site used, moved out of code (R25)
 - per-route `seo/<path>/` with real meta descriptions (120–160 chars) for
   every page and article
 - `sitemap.extraPaths`
@@ -179,7 +191,7 @@ It must be idempotent. Without `--force` it fills only what is still missing
 until all five are green (site-audit: 0 failures). Then report the launch-check
 blockers that need real business data or production config, so the owner can
 supply them (R22). Then walk the §13 checklist (one line per rule,
-R1–R22) and report it ticked, together with the acceptance and site-audit output verbatim.
+R1–R25) and report it ticked, together with the acceptance and site-audit output verbatim.
 
 ---
 
@@ -293,6 +305,16 @@ Rules:
     and content held in its max-width container on large screens. Clicking editable text never triggers the parent
     link or toggle, because the kit stops propagation; Cmd/Ctrl-click follows
     the link.
+13. **Hidden guard (R23):** destructure `hidden` from `useCms` and return
+    `null` before the section's markup:
+    ```jsx
+    const { data, hidden, E, editButton } = useCms("pricing", defaults, { label: "Pricing" });
+    if (hidden) return null;
+    ```
+    Hidden list items are already removed from `data` for visitors — just
+    `map` over it. A component rendering several blocks guards each one
+    (`{!faqHidden ? <section>…</section> : null}`). `check:inline` fails a
+    component that calls `useCms` without using `hidden`.
 
 ---
 
@@ -315,6 +337,14 @@ route:
 - **Inline:** click text and type. Enter ends a single-line field, Esc
   reverts, and paste is plain text. Hover tools (R15): item tools (↑ ↓ ⧉ ✕),
   "＋ Add", 🔗 link editor, "Replace image", and the block's "All fields" pill.
+- **Hide / Show (R23):** a "Hide" chip beside every block's "All fields"
+  pill, a hide button in every object item's tools, and "Hide" in every
+  CMS-page section toolbar. Hidden things stay visible to admins (dimmed,
+  outlined, labelled "Hidden · Show") and disappear for visitors after
+  Publish.
+- **Site tools → Settings** opens on **Form notifications** (R24: address,
+  subject, Send a test email) then **Tracking & analytics** (R25: IDs, data
+  layer variables, events, consent default, custom code).
 - **"All fields" pill** per block: tabs for All fields, **AI assist** (prompt
   → paste → preview → apply as draft), **JSON** (copy / paste / validate,
   normalised), and **History** (revisions, revert).
@@ -350,7 +380,9 @@ route:
   appear only on collection entries whose `allowAdd` includes that section
   type.
 - **Tooling hooks:** each editable span has `data-cms-block` (the useCms name,
-  or `section:<id>`) and `data-cms-path`. The admin bar root has
+  or `section:<id>`) and `data-cms-path`. Hide toggles carry
+  `data-cms-action="toggle-hidden" | "toggle-item-hidden" | "toggle-section-hidden"`
+  and hidden things carry `data-cms-hidden`. The admin bar root has
   `data-cms-adminbar`. Don't remove them; the acceptance test depends on them.
 
 ---
@@ -394,8 +426,12 @@ Use the §3 recipe. Output the component, its `useCms` name, and its sample
 - Every visible string — headings, `submitText`, `successTitle`,
   `successMessage`, `resetText`, `privacyNote` — is `E.Text` on the definition.
 - Include a hidden honeypot named `definition.honeypotField || "website"`.
-- Submit with `POST forms/<name>/submit/`. Validate on the client for UX, but
-  trust the server's `{errors:{field}}`.
+- Submit with `submitForm(name, payload, { honeypotField })` from
+  `lib/forms.js` — never a raw fetch (R24). It returns
+  `{ ok, status, errors, message }`; show `errors[field]` under each field.
+  Validate on the client for UX, but trust the server's errors.
+- The email goes to Settings → Form notifications (`forms.notifyEmail`) via
+  FormSubmit.co, and `generate_lead` is tracked — both done by `submitForm`.
 - Seed the definition in P7.
 
 ### 5.5 Blog index / article
@@ -471,7 +507,8 @@ returns 403.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET/PATCH | `settings/site/` | public / admin | Site identity, SEO defaults, analytics, `ai`, `sitemap` (validated) |
+| GET/PATCH | `settings/site/` | public / admin | Site identity, SEO defaults, `forms` (R24), `analytics` (R25), `ai`, `collections`, `sitemap` (validated) |
+| GET | `launch-check/` | admin | `{ready, items:[{id, level: blocker\|warning, title, detail}]}` (R22) |
 | GET | `settings/site/schema/organization/` | public | Organization + WebSite JSON-LD |
 | GET | `seo/` · GET/PATCH `seo/<path>/` | public / admin | Per-page SEO blob (home = `seo/home/`) |
 | GET | `seo/resolve/` · `seo/resolve/<path>/` | public | Fully resolved metadata + JSON-LD (root = home) |
@@ -542,8 +579,21 @@ Blog posts mirror all of these under `blog/<slug>/…`.
                    "defaultOgImage", "defaultOgImageAlt", "twitterHandle", "twitterCard",
                    "robots": { "index": true, "follow": true }, "themeColor", "locale": "en_US" },
   "verification": { "google", "bing", "yandex", "pinterest", "facebookDomain" },
-  "analytics": { "gtmId", "ga4Id", "metaPixelId", "clarityId", "hotjarId", "linkedinPartnerId",
-                 "customHead": [], "customBodyStart": [], "customBodyEnd": [] },
+  // R24 — Settings → Form notifications (first card). FormSubmit.co recipient:
+  // a plain email, or the FormSubmit alias (16–64 letters/digits) after activation.
+  "forms": { "notifyEmail": "", "subjectPrefix": "New website enquiry" },
+  // R25 — Settings → Tracking & analytics. Every ID is format-validated.
+  "analytics": {
+    "gtmId": "GTM-XXXXXXX", "ga4Id": "G-XXXXXXXXXX",
+    "googleAdsId": "AW-123456789", "googleAdsLeadLabel": "",          // label needs googleAdsId
+    "metaPixelId": "1234567890123456", "tiktokPixelId": "", "linkedinPartnerId": "",
+    "linkedinLeadConversionId": "", "clarityId": "", "hotjarId": "",
+    "dataLayer": [ { "key": "site_section", "value": "marketing" } ],  // pushed before GTM
+    "consentDefault": "",                                             // "" | "granted" | "denied"
+    "events": { "pageView": true, "lead": true, "contactClicks": true },
+    "excludeAdmins": true,
+    "customHead": [], "customBodyStart": [], "customBodyEnd": []
+  },
   "schema": { "organizationType": "Organization", "enabled": true },
   // Injected into EVERY AI prompt. Seed it (P7) — prompts are generic without it.
   "ai": {
@@ -797,8 +847,10 @@ rules, the runtime resolver for CMS-managed ones.
 
 ### Verification & analytics
 
-GSC + Bing Webmaster via `settings/site/verification`. GA4/GTM via IDs
-(`analytics`). Consent-mode note: gate non-essential tags behind consent.
+GSC + Bing Webmaster via `settings/site/verification`. Every tracking tag
+via IDs in `analytics` (R25), rendered by `<Analytics>`, events via
+`track()`. Consent: set `analytics.consentDefault` to `denied` where the
+law requires opt-in, and let the consent banner/GTM update it.
 UTM hygiene; `referrerPolicy`.
 
 ### Social / preview
@@ -898,12 +950,21 @@ unclosed/invalid JSON-LD, marking up invisible content.
   white text (R17).
 - Writing AI prompt text on the client, or a prompt that doesn't end with its
   FINAL CHECK (prompts live only in `api/prompts.py`).
+- A CMS component without `if (hidden) return null`, hidden content left in
+  the visitor HTML, "hiding" by deleting content, or a hand-rolled show/hide
+  flag instead of the kit's Hide toggle (R23).
+- A form posted with its own `fetch`, `mailto:`, EmailJS/Formspree or a
+  hard-coded recipient, instead of `submitForm()` and the Settings address;
+  or a lead address invented to clear the launch check (R24).
+- A tracking snippet or ID hard-coded in the layout, a component calling
+  `gtag`/`fbq`/`dataLayer.push` directly, or a data layer variable added in
+  code instead of Settings → Tracking (R25).
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R22, no exceptions. Kit: dynamic-cms/frontend-kit.
+exactly — every rule R1–R25, no exceptions. Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
 Finish only when build + check:inline + check:sections + acceptance.mjs pass and
@@ -940,6 +1001,9 @@ gate that proves it; a line with no automatic gate is yours to verify by hand.
 - [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
 - [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
 - [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed in the report as "needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
+- [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")
+- [ ] **R24** Every form uses `submitForm()`; leads are stored, emailed via FormSubmit to Settings → Form notifications (first settings card, test button works) and tracked. (`check:inline`, acceptance "emailed via FormSubmit…")
+- [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking; `<Analytics>` renders them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…")
 
 **Also checked by the acceptance test**
 - [ ] Exactly one `<h1>` in each page's HTML. Hidden mobile/desktop twins use `<div role="heading" aria-level={1}>` for the hidden copy.
@@ -950,7 +1014,7 @@ gate that proves it; a line with no automatic gate is yours to verify by hand.
 - [ ] Root layout: `cms.css`, `AdminProvider`, `AdminBar`, `Analytics`; staff login link with `?next=`
 - [ ] Every route: `generateMetadata` via `pageMetadata`, plus `<PageSeo>`
 - [ ] Registry matches the backend (`check:sections` passes)
-- [ ] Forms are definition-driven, with editable copy and a honeypot
+- [ ] Forms are definition-driven, with editable copy and a honeypot, and submit with `submitForm()`
 - [ ] CMS pages and dynamic blog posts render through `DynamicPageAdmin`
 - [ ] Sitemap and robots honour SEO flags; redirects run in middleware; `sitemap.extraPaths` seeded
 - [ ] `SiteSettings.ai` and `SiteSettings.collections` seeded

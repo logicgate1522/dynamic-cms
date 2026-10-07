@@ -22,6 +22,9 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 | Server reads | `lib/cms.js` | Tagged ISR reads (`getContent(s)`, `getSiteSettings`, `resolveSeo`, `getBlogPost(s)`, `getContentPage(s)`, `getPageSeoList`). |
 | SEO | `lib/seo.js`, `components/seo/*` | `pageMetadata`, `metadataFromResolved`, `pageJsonLd`, `<PageSeo>`, `<JsonLd>`, `<Analytics>`. |
 | Backgrounds | `lib/bgImage.js` | `bgImage(src)` — CSS background images through the Next image optimiser (AVIF/WebP, resized). |
+| Visibility | `lib/visibility.js` | `_hidden` flag helpers (`isHidden`, `stripHidden`). `useCms` returns `hidden` and strips hidden items for visitors (R23). |
+| Forms | `lib/forms.js` | `submitForm(name, payload, { honeypotField })` — the only submit path: stores in the CMS inbox, emails Settings → Form notifications via FormSubmit.co, tracks `generate_lead` (R24). `sendFormEmail` powers the Settings test button. |
+| Tracking | `lib/track.js`, `components/seo/Analytics.jsx`, `components/seo/AnalyticsEvents.jsx` | Tags from Settings → Tracking (GTM, GA4, Ads, Meta, TikTok, LinkedIn, Clarity, Hotjar, data layer variables, consent default). `track(name, params)` is the only event API; `page_view`, `generate_lead`, `contact_click` fire automatically (R25). |
 | Keywords | `lib/keywords.js` | Keyword matching, mirroring `api/keywords.py`. Used by the coverage badge. |
 | SEO checks | `lib/seoChecks.js` | The 18 SEO rules (id, tab, field, fix), mirroring `api/prompts.py#seo_rule_checks`. Used by the SEO panel and the whole-page assist. |
 | Admin state | `components/cms/AdminProvider.jsx` | Session, edit mode, editables registry, drafts, publish/discard (flushes pending saves first), panels. |

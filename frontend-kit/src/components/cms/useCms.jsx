@@ -6,6 +6,7 @@ import { useAdmin } from "@/components/cms/AdminProvider";
 import { useCmsInitial } from "@/components/cms/CmsDataProvider";
 import { createInline } from "@/components/cms/inline";
 import { API, apiRequest, isEmpty, mergeDefaults, setPath } from "@/lib/api";
+import { HIDDEN_KEY, isHidden, stripHidden } from "@/lib/visibility";
 
 /* =========================================
    useCms(name, defaults, options) — binds one
@@ -32,6 +33,14 @@ import { API, apiRequest, isEmpty, mergeDefaults, setPath } from "@/lib/api";
    options.excludeFromKeywordAudit  shared copy (footer, site-wide CTA)
                       that should not count toward a page's keyword score
    options.buttonPosition   classes placing the "All fields" pill
+   options.hideable         false for blocks that hold shared labels rather
+                            than a visible section (no "Hide" toggle)
+
+   Returns { data, hidden, E, editButton, … }. A block an admin hid renders
+   nothing for visitors — every component MUST end with:
+       if (hidden) return null;
+       return ( …the block… );
+   (hidden list items are already removed from `data` for visitors).
 ========================================= */
 
 const AUTOSAVE_MS = 700;
@@ -142,9 +151,18 @@ export function useCms(name, defaults, options = {}) {
         loadDraft();
     }, [discardEpoch, loadDraft]);
 
+    /* ---------- visibility ---------- */
+    // Visitors (and admins with editing off) see the published shape: hidden
+    // list items removed, hidden block not rendered. Editing shows everything.
+    const hideable = options.hideable !== false;
+    const blockHidden = hideable && isHidden(data);
+    const visible = useMemo(() => (editMode ? data : stripHidden(data)), [editMode, data]);
+    const hidden = blockHidden && !editMode;
+    const setHidden = useCallback((value) => update(HIDDEN_KEY, Boolean(value)), [update]);
+
     /* ---------- inline primitives ---------- */
     const label = options.label || name;
-    stateRef.current = { data, editMode, update, defaults, label, block: name };
+    stateRef.current = { data: visible, editMode, update, defaults, label, block: name };
     const [E] = useState(() => createInline(stateRef));
 
     /* ---------- registry (admin bar, AI assist, panels) ---------- */
@@ -162,6 +180,7 @@ export function useCms(name, defaults, options = {}) {
             fields,
             afterSave,
             excludeFromKeywordAudit,
+            hidden: blockHidden,
             saveState,
             saveError,
             update,
@@ -169,13 +188,20 @@ export function useCms(name, defaults, options = {}) {
             flush: persist,
         });
     }, [isAdmin, register, name, label, defaults, data, fields, afterSave, excludeFromKeywordAudit,
-        saveState, saveError, update, replace, persist]);
+        blockHidden, saveState, saveError, update, replace, persist]);
 
     const editButton = editMode ? (
-        <AllFieldsButton label={label} saveState={saveState} position={options.buttonPosition} onClick={() => openPanel("section", { name })} />
+        <AllFieldsButton
+            label={label}
+            saveState={saveState}
+            position={options.buttonPosition}
+            hidden={blockHidden}
+            onToggleHidden={hideable ? () => setHidden(!blockHidden) : null}
+            onClick={() => openPanel("section", { name })}
+        />
     ) : null;
 
-    return { data, E, editButton, update, replace, saveState, editMode };
+    return { data: visible, hidden, setHidden, E, editButton, update, replace, saveState, editMode };
 }
 
 const STATE_DOT = {
@@ -186,24 +212,32 @@ const STATE_DOT = {
     idle: "bg-white/70",
 };
 
-function AllFieldsButton({ label, saveState, onClick, position = "right-3 top-3" }) {
+function AllFieldsButton({ label, saveState, onClick, hidden, onToggleHidden, position = "right-3 top-3" }) {
+    const pinned = hidden || ["dirty", "saving", "error"].includes(saveState);
     return (
-        <button
-            type="button"
-            onClick={onClick}
-            title={`All fields, AI and history for “${label}”`}
-            className={`
-                cms-ui ${["dirty", "saving", "error"].includes(saveState) ? "" : "cms-hover-tools"} absolute z-[60] ${position}
-                inline-flex items-center gap-2 rounded-full
-                border border-white/40 bg-[#0F172A]/85 px-3 py-1.5
-                text-[11px] font-semibold text-white backdrop-blur
-                shadow-[0_8px_24px_rgba(0,0,0,0.25)]
-                transition hover:bg-[var(--cms-accent)]
-            `}
-        >
-            <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />
-            {label}
-            <span aria-hidden="true">⋯</span>
-        </button>
+        <span className={`cms-ui ${pinned ? "" : "cms-hover-tools"} absolute z-[60] ${position} inline-flex items-center gap-1`}>
+            {/* Dims the block (cms.css) while it is hidden from visitors. */}
+            {hidden ? <span data-cms-hidden="block" hidden /> : null}
+            {onToggleHidden ? <button
+                type="button"
+                onClick={onToggleHidden}
+                title={hidden ? "Hidden from visitors (after Publish) — click to show" : "Hide this block from visitors"}
+                aria-pressed={hidden}
+                data-cms-action="toggle-hidden"
+                className={`inline-flex h-[30px] items-center rounded-full border px-2.5 text-[11px] font-semibold shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur ${hidden ? "border-[#F59E0B] bg-[#FEF3C7] text-[#92400E]" : "border-white/40 bg-[#0F172A]/85 text-white hover:bg-[#334155]"}`}
+            >
+                {hidden ? "Hidden · Show" : "Hide"}
+            </button> : null}
+            <button
+                type="button"
+                onClick={onClick}
+                title={`All fields, AI and history for “${label}”`}
+                className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur transition hover:bg-[var(--cms-accent)]"
+            >
+                <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />
+                {label}
+                <span aria-hidden="true">⋯</span>
+            </button>
+        </span>
     );
 }

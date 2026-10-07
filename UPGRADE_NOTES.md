@@ -1,3 +1,45 @@
+# Upgrade Notes — hide anything, FormSubmit emails, tracking from Site tools
+
+**Hide blocks, list items and sections (R23)**
+- A "Hide" chip sits beside every block's "All fields" pill; object list items
+  get a hide button in their floating tools; CMS-page sections get "Hide" in
+  their hover toolbar.
+- Hiding stores `_hidden: true` as a draft and goes live on Publish. Admins see
+  hidden things dimmed with "Hidden · Show".
+- `useCms` returns `hidden` and strips hidden items for visitors
+  (`lib/visibility.js`). **Upgrading a site:** add
+  `if (hidden) return null;` to every component that calls `useCms`
+  (`check-inline.mjs` now fails without it). Blocks that must always render
+  pass `{ hideable: false }`.
+- Launch check placeholder scan skips hidden content.
+
+**Form emails via FormSubmit.co (R24)**
+- New `SiteSettings.forms` (`notifyEmail`, `subjectPrefix`), edited in the
+  first card of Site tools → Settings, with a "Send a test email" button
+  (FormSubmit sends an activation link on first use; then you can use the
+  alias it gives you).
+- `lib/forms.js#submitForm` is the only submit path: stores in the inbox,
+  emails real leads, tracks `generate_lead`. **Upgrading a site:** replace
+  every form's fetch with `submitForm(name, payload, { honeypotField })`.
+- Launch check: a lead address in Settings clears the email blockers; SMTP is
+  only required when relying on `FORM_NOTIFICATION_EMAIL`. A plain address
+  (not the alias) is a warning.
+
+**Tracking from Site tools (R25)**
+- Settings → Tracking & analytics: GTM, GA4, Google Ads (+ lead label), Meta
+  Pixel, TikTok, LinkedIn (+ lead conversion), Clarity, Hotjar — validated
+  server-side — plus data layer variables, consent-mode default, event
+  toggles, "Don't track signed-in admins" and custom code.
+- `lib/track.js#track` is the only event API; `page_view`, `generate_lead` and
+  `contact_click` fire automatically (`components/seo/AnalyticsEvents.jsx`).
+- `check-inline.mjs` fails direct `gtag`/`fbq`/`dataLayer.push` calls and raw
+  form submits outside the kit helpers.
+
+**Docs:** spec rules R23–R25 in §0, recipes, §4, §5.4, §6, §11 and §13;
+AGENTS.md; the spec test now also fails stale rule ranges in AGENTS/README.
+
+---
+
 # Upgrade Notes — site audit and launch readiness
 
 **SEO fixes**

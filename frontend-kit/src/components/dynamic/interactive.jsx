@@ -4,7 +4,7 @@ import { useContext, useId, useState } from "react";
 
 import { AddItem, ItemTools, SectionEditContext, T } from "@/components/dynamic/edit-context";
 import { keyOf, pick } from "@/components/dynamic/media";
-import { API } from "@/lib/api";
+import { submitForm } from "@/lib/forms";
 
 /* ------------------------------------------------ faq */
 export function Faq({ heading, eyebrow, items }) {
@@ -66,24 +66,17 @@ export function Newsletter({ heading, description, form_name }) {
     async function onSubmit(event) {
         event.preventDefault();
         setState({ status: "sending", message: "" });
-        try {
-            const data = new FormData(event.currentTarget);
-            const res = await fetch(`${API}/forms/${formName}/submit/`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, website: data.get("website") || "" }),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                const err = body.errors?.email || Object.values(body.errors || {})[0] || "Please check your email address.";
-                setState({ status: "error", message: err });
-                return;
-            }
-            setEmail("");
-            setState({ status: "done", message: "Thanks — you're subscribed." });
-        } catch {
-            setState({ status: "error", message: "Something went wrong. Please try again." });
+        const data = new FormData(event.currentTarget);
+        // Stored in the CMS, emailed via FormSubmit, generate_lead fired — lib/forms.js.
+        const result = await submitForm(formName, { email, website: data.get("website") || "" });
+        if (!result.ok) {
+            const err = result.errors.email || Object.values(result.errors)[0]
+                || (result.status === 0 ? "Something went wrong. Please try again." : "Please check your email address.");
+            setState({ status: "error", message: err });
+            return;
         }
+        setEmail("");
+        setState({ status: "done", message: "Thanks — you're subscribed." });
     }
 
     return (

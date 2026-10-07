@@ -4,6 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { getPath, uploadImage } from "@/lib/api";
+import { HIDDEN_KEY, isHidden } from "@/lib/visibility";
 import { blankLike } from "@/components/cms/FieldEditor";
 
 /* =========================================
@@ -15,7 +16,7 @@ import { blankLike } from "@/components/cms/FieldEditor";
      <E.Text path="title" />                 click & type, in place
      <E.Text path="intro" multiline />       Enter = new line ("\n" -> <br/> when shown)
      <E.Image path="image" />                "Replace image" over the image
-     <E.Item path="items" index={i} />       ↑ ↓ duplicate remove, floating above the item
+     <E.Item path="items" index={i} />       ↑ ↓ hide duplicate remove, floating above the item
      <E.Add path="items" label="Add FAQ" />  appends a blank item
      <E.Link path="buttonHref" />            edit a link's URL
 
@@ -296,6 +297,10 @@ export function createInline(stateRef) {
             [next[index], next[target]] = [next[target], next[index]];
             write(next);
         };
+        const item = list[index];
+        const canHide = item && typeof item === "object" && !Array.isArray(item);
+        const hiddenItem = isHidden(item);
+        const toggleHidden = () => write(list.map((entry, i) => (i === index ? { ...entry, [HIDDEN_KEY]: !hiddenItem } : entry)));
         const above = rect && rect.top > 36;
         const style = rect
             ? {
@@ -306,7 +311,7 @@ export function createInline(stateRef) {
             : null;
         return (
             <>
-                <span ref={anchor} hidden />
+                <span ref={anchor} hidden data-cms-hidden={hiddenItem ? "item" : undefined} />
                 {rect && typeof document !== "undefined"
                     ? createPortal(
                           <span
@@ -321,6 +326,11 @@ export function createInline(stateRef) {
                           >
                               <button type="button" title="Move earlier" aria-label="Move earlier" className={toolButton} disabled={index === 0} onClick={(e) => { stop(e); move(-1); }}>↑</button>
                               <button type="button" title="Move later" aria-label="Move later" className={toolButton} disabled={index === list.length - 1} onClick={(e) => { stop(e); move(1); }}>↓</button>
+                              {canHide ? (
+                                  <button type="button" title={hiddenItem ? "Hidden from visitors — click to show" : "Hide from visitors (keeps it here)"} aria-label={hiddenItem ? "Show item" : "Hide item"} aria-pressed={hiddenItem} data-cms-action="toggle-item-hidden" className={`${toolButton} ${hiddenItem ? "bg-[#FEF3C7] text-[#92400E]" : ""}`} onClick={(e) => { stop(e); toggleHidden(); }}>
+                                      {hiddenItem ? "Show" : "Hide"}
+                                  </button>
+                              ) : null}
                               <button type="button" title="Duplicate" aria-label="Duplicate" className={toolButton} onClick={(e) => { stop(e); write([...list.slice(0, index + 1), structuredClone(list[index]), ...list.slice(index + 1)]); }}>⧉</button>
                               <button type="button" title="Remove" aria-label="Remove" className={`${toolButton} text-[#B42318]`} onClick={(e) => { stop(e); write(list.filter((_, i) => i !== index)); }}>✕</button>
                           </span>,

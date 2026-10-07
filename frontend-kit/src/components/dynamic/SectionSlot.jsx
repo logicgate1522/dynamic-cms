@@ -11,6 +11,7 @@ import { SectionEditContext } from "@/components/dynamic/edit-context";
 import { SECTION_REGISTRY } from "@/components/dynamic/registry";
 import { Fallback } from "@/components/dynamic/sections";
 import { apiRequest, setPath } from "@/lib/api";
+import { HIDDEN_KEY, isHidden, stripHidden } from "@/lib/visibility";
 
 /* =========================================
    One dynamic section, as an admin sees it:
@@ -97,6 +98,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
         name: `section:${section.id}`,
         kind: "section",
         label,
+        hidden: isHidden(content),
         defaults: {},
         data: content,
         saveState,
@@ -140,14 +142,14 @@ export default function SectionSlot({ base, host, section, index, total, sibling
 
     return (
         <SectionEditContext.Provider value={{ E, editMode, uploadSlot }}>
-            <div className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
+            {!editMode && isHidden(content) ? null : <div data-cms-hidden={editMode && isHidden(content) ? "section" : undefined} className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
                 {editMode ? (
                     <>
-                        <span className="cms-ui pointer-events-none absolute left-3 top-3 z-[56] rounded bg-[#0F172A] px-1.5 py-0.5 text-[10px] font-bold uppercase text-white opacity-0 transition group-hover/slot:opacity-100">
+                        <span style={index === 0 ? { top: "var(--cms-first-section-tools-top)" } : undefined} className="cms-ui pointer-events-none absolute left-3 top-3 z-[56] rounded bg-[#0F172A] px-1.5 py-0.5 text-[10px] font-bold uppercase text-white opacity-0 transition group-hover/slot:opacity-100">
                             {index + 1}. {humanize(section.section_type)}
                             {saveState === "saving" || saveState === "dirty" ? " · saving…" : section.draft_content || saveState === "saved" ? " · draft" : ""}
                         </span>
-                        <div className="cms-ui pointer-events-none absolute right-3 top-3 z-[56] flex gap-1 opacity-0 transition group-hover/slot:opacity-100">
+                        <div style={index === 0 ? { top: "var(--cms-first-section-tools-top)" } : undefined} className="cms-ui pointer-events-none absolute right-3 top-3 z-[56] flex gap-1 opacity-0 transition group-hover/slot:opacity-100">
                             {canRestructure ? (
                                 <>
                                     <button type="button" className={chip} disabled={index === 0} onClick={() => move(-1)} title="Move up">↑</button>
@@ -155,6 +157,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                                 </>
                             ) : null}
                             {allowAdd.length ? <button type="button" className={chip} onClick={() => setAdding((v) => !v)} title="Add a section below">＋</button> : null}
+                            <button type="button" className={chip} data-cms-action="toggle-section-hidden" onClick={() => update(HIDDEN_KEY, !isHidden(content))} title={isHidden(content) ? "Hidden from visitors (after Publish) — click to show" : "Hide this section from visitors"}>{isHidden(content) ? "Show" : "Hide"}</button>
                             <button type="button" className={chip} onClick={() => setPanel("ai")}>✦ AI</button>
                             <button type="button" className={chip} onClick={() => setPanel("fields")}>Fields</button>
                             <button
@@ -180,10 +183,10 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                 ) : null}
                 {error && editMode ? <div className="cms-ui relative z-[56] bg-[#FEF3F2] px-4 py-2 text-[12px] text-[#B42318]">{error}</div> : null}
 
-                {Component ? <Component {...content} media={section.media || []} /> : <Fallback type={section.section_type} />}
+                {Component ? <Component {...(editMode ? content : stripHidden(content))} media={section.media || []} /> : <Fallback type={section.section_type} />}
 
                 {adding && editMode ? <TypePicker types={allowAdd} onPick={addBelow} onCancel={() => setAdding(false)} /> : null}
-            </div>
+            </div>}
 
             {panel === "fields" ? (
                 <Drawer open title={`${humanize(section.section_type)} section`} subtitle="Changes save as a draft" onClose={() => setPanel(null)}>

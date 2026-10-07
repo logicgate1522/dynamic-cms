@@ -92,8 +92,8 @@ export function PageTitle({ title, description, actions }) {
     );
 }
 
-export function Card({ children, className = "" }) {
-    return <div className={`rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm ${className}`}>{children}</div>;
+export function Card({ children, className = "", ...rest }) {
+    return <div {...rest} className={`rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm ${className}`}>{children}</div>;
 }
 
 export function Notice({ error, success }) {

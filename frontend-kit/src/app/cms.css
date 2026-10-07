@@ -14,6 +14,10 @@
     --cms-accent-soft: #ecfdf5;   /* accent tint (hover / selected backgrounds) */
     --cms-bar: #0b1a2e;           /* admin bar and dark panel surfaces */
     --cms-primary: #123a5c;       /* secondary brand colour: active tabs, admin headings */
+    /* The first section on a page sits under the fixed site header: its tools
+       start this far down so the header never covers them. Set to the
+       header's height (+ a little). */
+    --cms-first-section-tools-top: 88px;
 }
 
 /* ===== Inline editing: click any outlined text and type ===== */
@@ -56,4 +60,21 @@
 }
 @media (hover: none) {
     .cms-hover-tools { opacity: 1; pointer-events: auto; }
+}
+
+/* ===== Hidden from visitors (admins see it dimmed while editing) =====
+   Blocks: the block's tool group carries [data-cms-hidden="block"].
+   List items: E.Item's anchor carries [data-cms-hidden="item"].
+   CMS-page sections: the slot itself carries [data-cms-hidden="section"]. */
+:has(> .cms-ui > [data-cms-hidden="block"]),
+:has(> [data-cms-hidden="item"]),
+[data-cms-hidden="section"] {
+    outline: 2px dashed #f59e0b;
+    outline-offset: -2px;
+}
+:has(> .cms-ui > [data-cms-hidden="block"]) > :not(.cms-ui),
+:has(> [data-cms-hidden="item"]) > :not(.cms-ui):not([data-cms-hidden]),
+[data-cms-hidden="section"] > :not(.cms-ui) {
+    opacity: 0.35;
+    filter: grayscale(0.6);
 }

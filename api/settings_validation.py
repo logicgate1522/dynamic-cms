@@ -9,6 +9,20 @@ PATCH; unknown keys pass through untouched. Returns {dotted.path: message}.
 
 import re
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TRACKING_IDS = (
+    ("gtmId", r"^GTM-[A-Z0-9]{4,12}$", "GTM-ABC1234"),
+    ("ga4Id", r"^G-[A-Z0-9]{4,16}$", "G-ABC123XYZ"),
+    ("googleAdsId", r"^AW-\d{6,14}$", "AW-123456789"),
+    ("googleAdsLeadLabel", r"^[A-Za-z0-9_-]{4,40}$", "AbC-D_efG-h12_34-567"),
+    ("metaPixelId", r"^\d{10,20}$", "123456789012345"),
+    ("tiktokPixelId", r"^[A-Z0-9]{15,30}$", "C4ABCDEFGH1234567890"),
+    ("linkedinPartnerId", r"^\d{4,12}$", "1234567"),
+    ("linkedinLeadConversionId", r"^\d{4,12}$", "12345678"),
+    ("clarityId", r"^[a-z0-9]{8,16}$", "abcd1234ef"),
+    ("hotjarId", r"^\d{5,12}$", "1234567"),
+)
+
 _STR_ARRAY_KEYS = [
     ("analytics", "customHead"),
     ("analytics", "customBodyStart"),
@@ -78,6 +92,44 @@ def validate_site_settings(payload):
                 isinstance(overrides, dict) and all(isinstance(v, dict) for v in overrides.values())
             ):
                 errors["sitemap.overrides"] = 'Must be an object of {"path": {"include", "priority", "changefreq"}}.'
+
+    # Form notifications (FormSubmit.co): an email, or the FormSubmit alias
+    # it issues after activation.
+    forms = payload.get("forms")
+    if forms is not None:
+        if not isinstance(forms, dict):
+            errors["forms"] = "Must be an object."
+        else:
+            email = str(forms.get("notifyEmail") or "").strip()
+            if email and not (EMAIL_RE.match(email) or re.match(r"^[A-Za-z0-9]{16,64}$", email)):
+                errors["forms.notifyEmail"] = "Must be an email address (or the FormSubmit alias from its activation email)."
+            if "subjectPrefix" in forms and not isinstance(forms["subjectPrefix"], str):
+                errors["forms.subjectPrefix"] = "Must be a string."
+
+    # Tracking IDs: a wrong ID silently tracks nothing, so check the shape.
+    analytics = payload.get("analytics")
+    if isinstance(analytics, dict):
+        for key, pattern, example in TRACKING_IDS:
+            value = str(analytics.get(key) or "").strip()
+            if value and not re.match(pattern, value):
+                errors[f"analytics.{key}"] = f"Doesn't look like a valid ID (expected e.g. {example})."
+        if analytics.get("googleAdsLeadLabel") and not analytics.get("googleAdsId"):
+            errors["analytics.googleAdsLeadLabel"] = "Set the Google Ads ID (AW-…) too."
+        layer = analytics.get("dataLayer")
+        if layer is not None:
+            if not isinstance(layer, list):
+                errors["analytics.dataLayer"] = 'Must be a list of {"key", "value"}.'
+            else:
+                for i, row in enumerate(layer):
+                    if not isinstance(row, dict) or not re.match(r"^[A-Za-z_][A-Za-z0-9_.]{0,63}$", str(row.get("key") or "")):
+                        errors[f"analytics.dataLayer[{i}].key"] = "Use letters, digits, _ or . (e.g. site_section)."
+                    elif not isinstance(row.get("value"), (str, int, float, bool)):
+                        errors[f"analytics.dataLayer[{i}].value"] = "Must be text, a number or true/false."
+        if analytics.get("consentDefault") not in (None, "", "granted", "denied"):
+            errors["analytics.consentDefault"] = 'Must be "granted" or "denied".'
+        events = analytics.get("events")
+        if events is not None and not (isinstance(events, dict) and all(isinstance(v, bool) for v in events.values())):
+            errors["analytics.events"] = "Must be an object of true/false switches."
 
     collections = payload.get("collections")
     if collections is not None:

@@ -76,6 +76,11 @@ export function AdminProvider({ children }) {
         if (isAdmin) refreshDrafts();
     }, [isAdmin, refreshDrafts]);
 
+    // lib/track.js skips events for signed-in admins ("Don't track signed-in admins").
+    useEffect(() => {
+        window.__cmsAdmin = isAdmin;
+    }, [isAdmin]);
+
     const refreshCollection = useCallback(async () => {
         if (!isAdmin || !pathname || pathname.startsWith("/admin")) {
             setCollection({ collection: null, role: null });

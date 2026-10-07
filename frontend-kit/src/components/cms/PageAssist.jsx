@@ -52,7 +52,8 @@ export function useKeywordCoverage(path) {
     const keyword = String(seo?.keywords?.primary || "").trim();
 
     return useMemo(() => {
-        const blocks = Object.values(editables);
+        // Hidden blocks aren't on the live page — they don't count.
+        const blocks = Object.values(editables).filter((e) => !e.hidden);
         const rows = blocks.map((e) => ({
             id: e.name,
             label: e.label,
@@ -88,7 +89,8 @@ function PageAssistDrawer({ onClose }) {
     const [error, setError] = useState("");
     const [result, setResult] = useState("");
     const [warnings, setWarnings] = useState("");
-    const blocks = Object.values(editables);
+    // Hidden blocks/sections are not on the live page: not audited, not rewritten.
+    const blocks = Object.values(editables).filter((e) => !e.hidden);
     const built = useRef(false);
 
     const rules = useMemo(() => {

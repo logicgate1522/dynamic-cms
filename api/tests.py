@@ -1993,6 +1993,12 @@ class IntegrationSpecTests(APITestCase):
         self.assertIn(f"R1–R{rules[-1]}", sections["§12"], "the fill-in prompt must name every rule")
         stale = {m for m in re.findall(r"R1–R(\d+)", spec) if int(m) != rules[-1]}
         self.assertFalse(stale, f"stale rule ranges in the spec: R1–R{', R1–R'.join(sorted(stale))}")
+        root = Path(__file__).resolve().parent.parent
+        for doc in ("AGENTS.md", "README.md", "frontend-kit/README.md"):
+            path = root / doc
+            if path.exists():
+                stale = {m for m in re.findall(r"R1[–-]R(\d+)", path.read_text()) if int(m) != rules[-1]}
+                self.assertFalse(stale, f"{doc} names a stale rule range (rules go to R{rules[-1]})")
 
 
 class TitleTemplateTests(APITestCase):
@@ -2031,7 +2037,7 @@ class LaunchCheckTests(AdminAuthMixin, APITestCase):
         self.admin_client.patch("/api/home/footer/", {"email": "info@example.co.uk", "regulatory": ["ICO: [Insert ICO number]"]}, format="json")
         data, ids = self._ids()
         self.assertFalse(data["ready"])
-        for blocker in ("site-url", "lead-email", "email-backend", "placeholders"):
+        for blocker in ("site-url", "lead-email", "placeholders"):
             self.assertEqual(ids[blocker]["level"], "blocker", blocker)
         self.assertIn("footer", ids["placeholders"]["detail"])
 
@@ -2044,6 +2050,23 @@ class LaunchCheckTests(AdminAuthMixin, APITestCase):
         self.assertTrue(data["ready"], data)
         self.assertNotIn("og-default", ids)
 
+    @override_settings(FORM_NOTIFICATION_EMAIL="leads@acme.test", EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_smtp_only_setup_with_console_backend_is_blocked(self):
+        _, ids = self._ids()
+        self.assertEqual(ids["email-backend"]["level"], "blocker")
+        self.assertNotIn("lead-email", ids)
+
+    @override_settings(FORM_NOTIFICATION_EMAIL="", EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_formsubmit_address_clears_the_lead_blockers(self):
+        self.admin_client.patch("/api/settings/site/", {"forms": {"notifyEmail": "leads@acme.test"}}, format="json")
+        _, ids = self._ids()
+        self.assertNotIn("lead-email", ids)
+        self.assertNotIn("email-backend", ids)
+        self.assertEqual(ids["formsubmit-alias"]["level"], "warning")
+        self.admin_client.patch("/api/settings/site/", {"forms": {"notifyEmail": "a1b2c3d4e5f6a7b8c9d0e1f2"}}, format="json")
+        _, ids = self._ids()
+        self.assertNotIn("formsubmit-alias", ids)
+
     def test_admin_only(self):
         self.assertEqual(self.client.get("/api/launch-check/").status_code, 401)
 
@@ -2055,3 +2078,38 @@ class SubmissionDeleteTests(AdminAuthMixin, APITestCase):
         self.assertEqual(self.client.delete(f"/api/forms/quote/submissions/{sub.pk}/").status_code, 401)
         self.assertEqual(self.admin_client.delete(f"/api/forms/quote/submissions/{sub.pk}/").status_code, 204)
         self.assertFalse(FormSubmission.objects.filter(pk=sub.pk).exists())
+
+
+class TrackingAndFormSettingsTests(AdminAuthMixin, APITestCase):
+    def patch(self, body):
+        return self.admin_client.patch("/api/settings/site/", body, format="json")
+
+    def test_valid_tracking_settings_are_accepted(self):
+        r = self.patch({"analytics": {"gtmId": "GTM-ABC1234", "ga4Id": "G-ABC123XYZ", "metaPixelId": "123456789012345",
+                                      "googleAdsId": "AW-123456789", "googleAdsLeadLabel": "AbC-D_efG",
+                                      "dataLayer": [{"key": "site_section", "value": "accounting"}, {"key": "is_uk", "value": True}],
+                                      "consentDefault": "denied", "events": {"pageView": True, "lead": True, "contactClicks": False}},
+                        "forms": {"notifyEmail": "leads@acme.test", "subjectPrefix": "New enquiry"}})
+        self.assertEqual(r.status_code, 200, r.data)
+
+    def test_wrong_ids_are_rejected_with_an_example(self):
+        r = self.patch({"analytics": {"gtmId": "UA-12345", "ga4Id": "G-", "metaPixelId": "abc", "dataLayer": [{"key": "bad key", "value": 1}],
+                                      "consentDefault": "maybe", "googleAdsLeadLabel": "AbCdEf"}})
+        self.assertEqual(r.status_code, 400)
+        for key in ("analytics.gtmId", "analytics.ga4Id", "analytics.metaPixelId", "analytics.dataLayer[0].key",
+                    "analytics.consentDefault", "analytics.googleAdsLeadLabel"):
+            self.assertIn(key, r.data)
+        self.assertIn("GTM-", r.data["analytics.gtmId"])
+
+    def test_notification_email_must_be_an_email_or_alias(self):
+        self.assertEqual(self.patch({"forms": {"notifyEmail": "not an email"}}).status_code, 400)
+        self.assertEqual(self.patch({"forms": {"notifyEmail": "a1b2c3d4e5f6a7b8c9d0"}}).status_code, 200)
+
+
+class HiddenContentTests(AdminAuthMixin, APITestCase):
+    @override_settings(FORM_NOTIFICATION_EMAIL="x@acme.test")
+    def test_hidden_placeholders_do_not_block_launch(self):
+        self.admin_client.patch("/api/home/footer/", {"regulatory": [{"text": "[Insert ICO number]", "_hidden": True}],
+                                                      "promo": {"_hidden": True, "text": "lorem ipsum"}}, format="json")
+        ids = {i["id"] for i in self.admin_client.get("/api/launch-check/").data["items"]}
+        self.assertNotIn("placeholders", ids)
