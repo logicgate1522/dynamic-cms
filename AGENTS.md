@@ -59,6 +59,11 @@ instructions the docs already answer.
     the matching tag in `frontend-kit/src/lib/cms.js`.
   - Auth: session + CSRF (`api/auth_views.py`, `AdminLoginView` with
     `session: true`). Token login stays for scripts only.
+  - Launch readiness: `api/launch_check.py` (`GET launch-check/`). Anything
+    that silently hurts a live site belongs here as a blocker or warning.
+  - Cascades on delete (PageSEO and sections follow their page): `api/cleanup.py`.
+  - Title assembly (brand never doubled; dropped past 60 chars):
+    `seo_resolve.apply_title_template`.
   - Rate limits: `api/throttles.py`. Staff and the site's own server
     (`X-CMS-Frontend` = `REVALIDATE_SECRET`) skip the general limits;
     `login` and `form_submit` always apply. A new public endpoint with its own

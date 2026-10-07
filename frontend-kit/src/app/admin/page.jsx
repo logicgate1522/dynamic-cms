@@ -41,6 +41,8 @@ export default function AdminOverview() {
         <>
             <PageTitle title="Overview" description="Manage site content, articles, pages, enquiries and SEO." />
 
+            <LaunchReadiness />
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {tiles.map((tile) => (
                     <Link key={tile.href} href={tile.href}>
@@ -56,13 +58,55 @@ export default function AdminOverview() {
             <Card className="mt-6">
                 <h2 className="text-[15px] font-bold">Editing page content</h2>
                 <p className="mt-2 text-[13px] leading-6 text-[#475569]">
-                    Open any page of the site while signed in. The CMS bar at the bottom of the screen turns on
-                    <strong> editing mode</strong>: every editable section shows an <em>Edit</em> button, and the
-                    <strong> Sections</strong> menu lists them all. Use <strong>SEO</strong> in the same bar to edit that
-                    page&apos;s title, description, social image and indexing, or to run an SEO audit.
+                    Open any page of the site while signed in and <strong>click any outlined text to type</strong>.
+                    Hovering a block shows its tools (all fields, AI, history); hovering a list item shows ↑ ↓ ⧉ ✕.
+                    Edits save as <strong>drafts</strong> — visitors see them after <strong>Publish</strong> in the bar
+                    at the bottom. The bar also has <strong>✦ AI assist</strong> for the whole page, <strong>SEO</strong>
+                    (opens on Ask AI) and, on the articles and services pages, <strong>＋ New</strong>.
                 </p>
                 <Link href="/" className="mt-4 inline-block rounded-lg bg-[var(--cms-accent)] px-4 py-2 text-[13px] font-semibold text-white">Open the site →</Link>
             </Card>
         </>
+    );
+}
+
+// Blockers and warnings before going live (GET launch-check/).
+function LaunchReadiness() {
+    const [data, setData] = useState(null);
+    const [open, setOpen] = useState(false);
+    useEffect(() => {
+        apiRequest("launch-check/").then(setData).catch(() => setData(null));
+    }, []);
+    if (!data) return null;
+    const blockers = data.items.filter((i) => i.level === "blocker");
+    const warnings = data.items.filter((i) => i.level === "warning");
+    return (
+        <Card className={`mb-6 border-2 ${data.ready ? "border-[#86EFAC]" : "border-[#FCA5A5]"}`} data-cms-launch={data.ready ? "ready" : "blocked"}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 className="text-[15px] font-bold">{data.ready ? "Ready to launch" : `Not ready to launch — ${blockers.length} blocker${blockers.length === 1 ? "" : "s"}`}</h2>
+                    <p className="text-[13px] text-[#475569]">
+                        {data.ready ? "Nothing would embarrass the live site." : "Fix these before the site goes live."}
+                        {warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"}.` : ""}
+                    </p>
+                </div>
+                {data.items.length ? (
+                    <button type="button" onClick={() => setOpen((v) => !v)} className="rounded-lg border border-[#CBD5E1] px-3 py-1.5 text-[13px] font-semibold">
+                        {open ? "Hide details" : "Show details"}
+                    </button>
+                ) : null}
+            </div>
+            {open || !data.ready ? (
+                <ul className="mt-4 space-y-2">
+                    {[...blockers, ...(open ? warnings : [])].map((item) => (
+                        <li key={item.id} className={`rounded-lg px-3 py-2 text-[13px] ${item.level === "blocker" ? "bg-[#FEF2F2]" : "bg-[#FFFBEB]"}`}>
+                            <p className={`font-semibold ${item.level === "blocker" ? "text-[#991B1B]" : "text-[#92400E]"}`}>{item.level === "blocker" ? "✕" : "!"} {item.label}</p>
+                            {item.detail ? <p className="mt-0.5 text-[#475569]">{item.detail}</p> : null}
+                            {item.fix ? <p className="mt-0.5 text-[#0F172A]">→ {item.fix}</p> : null}
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
+        </Card>
     );
 }

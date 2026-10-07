@@ -1,3 +1,31 @@
+# Upgrade Notes — site audit and launch readiness
+
+**SEO fixes**
+- Titles never repeat the brand, and the brand is dropped when it would push a
+  title past 60 characters (`apply_title_template`).
+- The og-image check counts the site default.
+- A deleted page's SEO record and sections are removed with it.
+
+**Launch readiness**
+- New `GET launch-check/`, shown as a dashboard card. Its blockers:
+  - placeholder text
+  - a localhost site URL
+  - indexing off
+  - lead forms that notify nobody, or email that isn't really sent
+- Its warnings: debug mode, the webhook off, no default social image, weak
+  page SEO.
+
+**Other changes**
+- Form submissions can now be deleted (`DELETE forms/<name>/submissions/<id>/`).
+- New `frontend-kit/acceptance/site-audit.mjs`: per-page SEO, links,
+  contact-detail consistency, placeholders and forms end to end; it fails the
+  build gate with `LAUNCH=1`.
+- Spec rules R21 (site audit) and R22 (launch blockers).
+- The seed fills missing keys at any depth: default og image, article
+  descriptions.
+
+---
+
 # Upgrade Notes — focus-safe editing, rate limits that fit editors
 
 **Typing never loses focus**

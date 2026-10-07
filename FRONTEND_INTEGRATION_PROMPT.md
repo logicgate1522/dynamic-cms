@@ -7,9 +7,13 @@ conflicts with your habits or with older docs, this file wins.
 
 **Definition of done (no exceptions):** `next build` passes,
 `node scripts/check-inline.mjs src` passes, `node scripts/check-sections.mjs`
-passes, and `frontend-kit/acceptance/acceptance.mjs` passes **every** check
-against the running production build. Until all four are green, the work is not
+passes, `frontend-kit/acceptance/acceptance.mjs` passes **every** check, and
+`frontend-kit/acceptance/site-audit.mjs` reports **0 failures**, both against
+the running production build. Until all five are green, the work is not
 finished. Do not report success early.
+
+**Definition of launched:** additionally, `LAUNCH=1 node site-audit.mjs`
+passes, i.e. the backend's `launch-check/` has no blockers (R22).
 
 ---
 
@@ -38,6 +42,8 @@ Every rule is a MUST. Rule numbers are referenced from the rest of the spec.
 | R18 | **Typing never loses focus.** Every list that contains editable fields is keyed by the map **index** (`key={i}`), never by the item's own text (`key={item.title}`, `` key={`${item.name}-${i}`} ``). A text-derived key changes on every keystroke, React re-creates the element and the cursor is gone. `check:inline` fails on it, and the acceptance test types into list fields and asserts the element is never re-created. The kit also restores focus if a re-mount ever happens, but that is a safety net, not permission. |
 | R19 | **The site's server identifies itself.** Every server-side request to the CMS (`lib/cms.js`, `middleware.js`; the kit does both) sends `X-CMS-Frontend: <REVALIDATE_SECRET>`, so the one IP that renders every page isn't rate-limited as a single anonymous visitor. Never send this header from browser code or expose the secret through a `NEXT_PUBLIC_` variable. Staff sessions are also exempt from the general limits; login and form-spam limits always apply. |
 | R20 | **Responsive on every screen.** Converting a section must keep its behaviour at every width: phones (≈390px), tablets (≈768px), laptops (≈1280px) and large screens (≥1920px — content stays inside a max-width container, nothing stretches edge to edge, type and images scale up sensibly). No horizontal scroll at any width. The admin UI is responsive too: on phones the bar collapses behind "More" and panels fit the screen. The acceptance test checks visitors and admins at 390px and 1920px. |
+| R21 | **Every page passes the site audit** (`site-audit.mjs`). SEO: every sitemap URL returns 200 and is indexable, with a unique title (25–65 chars; ideal 50–60) and description (110–165; ideal 120–160), self canonical, og:title/description/image, twitter:card, `<html lang>`, exactly one `<h1>`, no skipped heading levels, valid JSON-LD with BreadcrumbList (Article/BlogPosting on articles, FAQPage on FAQ pages), alt on every `<img>`, robots.txt with a Sitemap line on the canonical origin. Consistency: no broken internal links; ONE phone number and ONE email across every `tel:`/`mailto:` link and the Organization JSON-LD; titles never repeat the brand. Data: a default social image (`seoDefaults.defaultOgImage`); real meta descriptions for every page and article. Forms: client validation blocks bad input, a valid submit is stored as a real (non-spam) submission, the honeypot is never filled by people. |
+| R22 | **Nothing launches with a launch-check blocker.** `GET launch-check/` (shown on the dashboard as "Launch readiness") must report no blockers: no placeholder text (`[Insert …]`, `example.com` emails, `0000 000000`, "New section"…), `seoDefaults.siteUrl` is the live https domain, indexing is on, lead forms notify a real address (`FORM_NOTIFICATION_EMAIL` or the form's `notify.email`) through a real email backend (SMTP), and the cache webhook is configured. Never invent business details to clear a blocker; ask the owner for them (this is the one case where R12 does not apply). |
 | R17 | **The admin UI is themed, not restyled.** Set the five `--cms-*` variables in `app/cms.css` to the site's palette. Never change admin markup, layout or wording to "match the site". Structure stays identical on every site. Pick shades with **≥4.5:1 contrast against white** (WCAG AA): admin buttons put white text on `--cms-accent`, and `--cms-accent-strong` is text on white. Darken the brand colour if needed; the acceptance test runs an axe contrast scan on the admin panels. |
 
 ---
@@ -156,15 +162,24 @@ posts work the same way with `kind="blog"`.
 calls `redirects/resolve/?path=`. Add the static routes to
 `SiteSettings.sitemap.extraPaths` so the backend sitemap report covers them.
 
-**P7 — Seed.** A `scripts/seed-cms.mjs` that fills empty CMS rows: site
-settings, **including the `ai` and `collections` blocks (§6.3)**, form
-definitions, per-route `seo/<path>/`, and `sitemap.extraPaths`. Without
-`--force` it writes only the top-level settings blocks that are still empty. It must be idempotent and skip
-non-empty rows unless `--force`.
+**P7 — Seed.** A `scripts/seed-cms.mjs` that fills the CMS:
+- site settings, **including the `ai` and `collections` blocks (§6.3)**
+- `seoDefaults.defaultOgImage`: a 1200×630 brand card
+- ONE canonical phone and email in `SiteSettings.contact`, which every
+  component uses (R21)
+- form definitions
+- per-route `seo/<path>/` with real meta descriptions (120–160 chars) for
+  every page and article
+- `sitemap.extraPaths`
 
-**P8 — Verify.** Run the four checks in the Definition of done. Fix and rerun
-until all four are green. Then walk the §13 checklist (one line per rule,
-R1–R20) and report it ticked, together with the acceptance output verbatim.
+It must be idempotent. Without `--force` it fills only what is still missing
+(at any depth) and never overwrites an admin's edit.
+
+**P8 — Verify.** Run the five checks in the Definition of done. Fix and rerun
+until all five are green (site-audit: 0 failures). Then report the launch-check
+blockers that need real business data or production config, so the owner can
+supply them (R22). Then walk the §13 checklist (one line per rule,
+R1–R22) and report it ticked, together with the acceptance and site-audit output verbatim.
 
 ---
 
@@ -863,6 +878,16 @@ unclosed/invalid JSON-LD, marking up invisible content.
   code (R19).
 - A section that breaks, overflows or stretches edge to edge at phone or
   large-screen widths, or admin panels wider than a phone screen (R20).
+- Any site-audit failure (R21): duplicate or brand-doubled titles,
+  descriptions outside 110–165 chars, a page without og:image, two `<h1>`s
+  (e.g. hidden mobile/desktop twins — make the hidden one
+  `<div role="heading" aria-level={1}>`), a card `<h3>` straight under the
+  `<h1>`, broken links, a sitemap URL that 404s or is noindex, contact details
+  that differ between the footer, contact page and JSON-LD, or a form that
+  sends empty data or stores real leads as spam.
+- Launching with placeholder business details, a localhost site URL, or lead
+  forms nobody is notified about (R22). Also inventing those details instead
+  of asking for them.
 - Visitors shown any admin markup, or extra client fetches for content
   (R8). Image URLs typed into text fields instead of uploaded (R11).
 - A rebuilt or "simplified" SEO panel or whole-page assist: Ask AI not first,
@@ -878,10 +903,11 @@ unclosed/invalid JSON-LD, marking up invisible content.
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R20, no exceptions. Kit: dynamic-cms/frontend-kit.
+exactly — every rule R1–R22, no exceptions. Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
-Finish only when build + check:inline + check:sections + acceptance.mjs all pass,
+Finish only when build + check:inline + check:sections + acceptance.mjs pass and
+site-audit.mjs reports 0 failures; list any launch blockers that need the owner,
 then walk the §13 checklist line by line and paste it, ticked, with the
 acceptance output in your report.
 ```
@@ -912,6 +938,8 @@ gate that proves it; a line with no automatic gate is yours to verify by hand.
 - [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus" + "never re-created")
 - [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (review; acceptance shows no 429s)
 - [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
+- [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
+- [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed in the report as "needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
 
 **Also checked by the acceptance test**
 - [ ] Exactly one `<h1>` in each page's HTML. Hidden mobile/desktop twins use `<div role="heading" aria-level={1}>` for the hidden copy.

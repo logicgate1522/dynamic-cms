@@ -104,6 +104,10 @@ function SeoDrawer({ path, initialTab = "ai", onClose }) {
     const [flash, setFlash] = useState("");
     const bodyRef = useRef(null);
     const coverage = useKeywordCoverage(path);
+    const [site, setSite] = useState({});
+    useEffect(() => {
+        apiRequest("settings/site/").then(setSite).catch(() => {});
+    }, []);
 
     const load = useCallback(async () => {
         try {
@@ -146,7 +150,7 @@ function SeoDrawer({ path, initialTab = "ai", onClose }) {
         }
     }
 
-    const checks = useMemo(() => (form ? seoChecks(form) : []), [form]);
+    const checks = useMemo(() => (form ? seoChecks(form, site) : []), [form, site]);
     const failing = checks.filter((c) => !c.pass && !c.skip);
     const score = seoScore(checks);
 

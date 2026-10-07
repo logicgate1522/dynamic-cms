@@ -44,6 +44,10 @@ backend.
   markdown links, wrappers) and refuses replies that would lose data
 - **Instant cache refresh:** every write sends a signed webhook to the frontend
   (`revalidateTag`), so edits made anywhere reach visitors immediately
+- **Launch readiness** (`launch-check/`, on the dashboard): blocks going live
+  with placeholder text, a localhost site URL, indexing off, or lead forms that
+  notify nobody. `frontend-kit/acceptance/site-audit.mjs` audits every page's
+  SEO, links, contact consistency and forms
 - Images auto-optimised to WebP on upload, with usage tracking and
   delete-protection for images still in use
 - Admin login: session cookie + CSRF for the browser, with token login kept for

@@ -13,7 +13,8 @@ export const SEARCH_INTENTS = ["informational", "commercial", "transactional", "
 // The subset the whole-page AI assist shows as "Other SEO rules".
 export const PAGE_ASSIST_RULES = ["keyword-set", "title-keyword", "desc-keyword", "title-length", "desc-length", "schema-enabled"];
 
-export function seoChecks(seo = {}) {
+// `site` = SiteSettings data (for the site-wide default social image).
+export function seoChecks(seo = {}, site = {}) {
     const keyword = String(seo.keywords?.primary || "").trim();
     const title = String(seo.seoTitle || "").trim();
     const desc = String(seo.metaDescription || "").trim();
@@ -48,8 +49,8 @@ export function seoChecks(seo = {}) {
             "Set an SEO title (social reuses it) or a dedicated social title."),
         rule("og-desc", "Social description is available", social.ogDescription || desc, "social.ogDescription", "sharing",
             "Set a meta description (social reuses it) or a dedicated social description."),
-        rule("og-image", "Social share image is set", social.ogImage, "social.ogImage", "sharing",
-            "Upload a 1200×630 social share image."),
+        rule("og-image", "Social share image is set (this page's or the site default)", social.ogImage || site?.seoDefaults?.defaultOgImage, "social.ogImage", "sharing",
+            "Upload a 1200×630 image for this page, or a site default in Settings → SEO defaults."),
         rule("og-alt", "Social image has alt text", !social.ogImage || social.ogImageAlt, "social.ogImageAlt", "sharing",
             "Describe the social image in one short sentence."),
         rule("indexable", "Page can be indexed", robots.index !== false, "robots.index", "sharing",

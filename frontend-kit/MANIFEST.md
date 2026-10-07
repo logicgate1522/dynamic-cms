@@ -56,6 +56,7 @@ their classes to match the site, but you must keep every `T`, `ItemTools`,
 |---|---|---|
 | `scripts/check-inline.mjs` | `node scripts/check-inline.mjs src` | Fails on any literal copy left in a `useCms` component (unless marked `cms-static`), and on any list keyed by its items' own text (fields would lose focus while typing). |
 | `scripts/check-sections.mjs` | `node scripts/check-sections.mjs` (backend running) | Fails when `registry.js` differs from `ai/section-schema/`. |
+| `acceptance/site-audit.mjs` | See its header (`LAUNCH=1` before go-live) | Every page: SEO (titles, descriptions, canonical, OG, one H1, heading order, JSON-LD, alt), broken links, one phone/email site-wide, placeholder text, forms end to end, plus the backend launch check. |
 | `acceptance/acceptance.mjs` | See its header | End-to-end test: visitor isolation, session login, inline edit → draft → publish → webhook, AI paste normalisation, discard, SEO AI, CMS-page section editing, create page, admin pages, sign out. Cleans up after itself. |
 
 ## Refreshing the kit (maintainers)
