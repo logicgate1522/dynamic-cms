@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+import { Layer } from "@/components/cms/floating";
+
 // Slide-over panel shared by every admin editor.
 export default function Drawer({ open, title, subtitle, onClose, footer, children, width = 520 }) {
     useEffect(() => {
@@ -13,7 +15,9 @@ export default function Drawer({ open, title, subtitle, onClose, footer, childre
 
     if (!open) return null;
 
+    // In the admin layer: above every site element, unaffected by site zoom.
     return (
+        <Layer>
         <div className="cms-ui fixed inset-0 z-[2000] flex justify-end" role="dialog" aria-modal="true" aria-label={title}>
             <button type="button" aria-label="Close editor" className="absolute inset-0 bg-[#020617]/45 backdrop-blur-[2px]" onClick={onClose} />
             <div
@@ -33,6 +37,7 @@ export default function Drawer({ open, title, subtitle, onClose, footer, childre
                 {footer ? <footer className="border-t border-[#E2E8F0] bg-[#F8FAFC] px-5 py-3">{footer}</footer> : null}
             </div>
         </div>
+        </Layer>
     );
 }
 

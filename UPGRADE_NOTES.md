@@ -1,3 +1,33 @@
+# Upgrade Notes — R30: edit mode never changes, hides or crowds the page
+
+- **New `components/cms/floating.jsx` (CORE).** One admin layer at the end of
+  `<body>`. It cancels any zoom or scale the site applies to the page, sits
+  above every site element and lets clicks through.
+  - Every edit tool is now a floating tool there: block pill and Hide, item
+    tools, "+ Add", 🔗, "Replace image", section toolbar/label/notices.
+  - In the page each tool leaves only a hidden zero-size anchor, so turning
+    editing on moves nothing.
+  - Tools appear for the hovered, focused or tapped target, stay on screen,
+    below the fixed header, clear of the admin bar and outside small targets,
+    and re-attach if their target re-mounts.
+- **Admin bar.** Always one line: actions that don't fit move into "More" and
+  are never dropped. Menus render in the layer, clamped to the screen. The bar
+  and drawers are unaffected by site zoom.
+- **`check-inline`.** Every list in a block's defaults (and one level of
+  nested lists) needs `E.Item` + `E.Add`, or a `cms-fixed-list: reason`
+  comment.
+- **Acceptance.**
+  - New checks: no edit chrome in the layout; the header doesn't move when
+    editing toggles; tools hidden until hovered; block tools never covered;
+    bar one line at desktop, phone and 1920px; "More" fully on screen.
+  - Hide steps hover first; menu items are found in the layer.
+  - Cleanup restores every section on the dynamic page.
+- Section toolbars carry `data-cms-section-tools="<id>"`.
+- **Upgrading a site:** re-sync the kit. A site-specific carousel or overlay
+  link must let the visible card take clicks while editing (see R30).
+
+---
+
 # Upgrade Notes — rules R26–R29: truthful claims, contact policy, services, structure
 
 - **R26 Every claim is true.**

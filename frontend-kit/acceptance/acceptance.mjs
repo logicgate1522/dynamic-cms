@@ -100,6 +100,15 @@ async function login(next) {
     await page.click('button[type="submit"]');
     await page.waitForURL((url) => url.pathname === next, { timeout: 15000 });
 }
+// Admin-bar actions sit inline when they fit and in "More" when they don't
+// (R30); menus render in the admin layer, outside the bar element.
+async function barAction(name) {
+    const inline = bar().getByRole("button", { name, exact: typeof name === "string" });
+    if (await inline.count()) return inline.first().click();
+    await bar().getByRole("button", { name: /^More/ }).click();
+    await page.locator("[data-cms-more-menu]").getByRole("menuitem", { name }).first().click();
+}
+const menuItem = (name) => page.locator("[data-cms-layer]").getByRole("button", { name }).first();
 async function ensureEditing() {
     const toggle = bar().locator("button[aria-pressed]").first();
     await toggle.waitFor({ timeout: 15000 });
@@ -119,7 +128,7 @@ async function settle() {
 }
 async function publishMenu(item) {
     await bar().getByRole("button", { name: /^Publish \(\d+\)/ }).click();
-    await bar().getByRole("button", { name: item }).click();
+    await menuItem(item).click();
 }
 const closeDrawer = () => page.locator('[role="dialog"] [aria-label="Close"]').first().click();
 
@@ -181,7 +190,7 @@ try {
     await adminWrite(`seo/${seoKey}/`, "PATCH", { keywords: { primary: KW } });
     await page.reload();
     await bar().waitFor({ timeout: 15000 });
-    await bar().getByRole("button", { name: /AI assist/ }).click();
+    await barAction(/AI assist/);
     const dialog5 = page.getByRole("dialog");
     const prompt = dialog5.locator("textarea[readonly]").first();
     await prompt.waitFor({ timeout: 10000 });
@@ -261,7 +270,7 @@ try {
     await closeDrawer();
     // Discard what the focus checks left on THIS page only.
     await bar().getByRole("button", { name: /^Publish \(\d+\)|All published/ }).first().click();
-    const discardPage = bar().getByRole("button", { name: /Discard this page/ });
+    const discardPage = menuItem(/Discard this page/);
     if (await discardPage.isEnabled()) await discardPage.click();
     else await bar().getByRole("button", { name: /^Publish \(\d+\)|All published/ }).first().click();
     await settle();
@@ -299,12 +308,70 @@ try {
         check("visitor page has no critical accessibility violations", critical.length === 0, critical.map((x) => `${x.id}: ${x.example}`).join(" | "));
     }
 
-    /* ---------- 7b. Edit tools never cover the page ---------- */
-    const pill = page.locator(".cms-hover-tools").first();
-    if (await pill.count()) {
-        await bar().hover();
-        const hidden = await pill.evaluate((el) => getComputedStyle(el).opacity);
-        check("edit tools are hidden until their block is hovered", hidden === "0", `opacity ${hidden}`);
+    /* ---------- 7b. Edit mode never changes or hides the page (R15, R30) ---------- */
+    {
+        // 1. Edit chrome takes no layout space: every in-page anchor is display:none.
+        const inFlow = await page.evaluate(() => [...document.querySelectorAll(".cms-ui, [data-cms-hidden], span[hidden]")]
+            .filter((el) => !el.closest("[data-cms-layer]"))
+            .filter((el) => { const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return cs.display !== "none" && cs.position !== "fixed" && cs.position !== "absolute" && (r.width > 0 || r.height > 0); })
+            .map((el) => el.outerHTML.slice(0, 80)));
+        check("edit tools take no layout space (rendered in the admin layer)", inFlow.length === 0, inFlow.slice(0, 2).join(" | "));
+        // 2. Turning editing on moves nothing in the header / navigation.
+        const headerBoxes = () => page.evaluate(() => [...document.querySelectorAll("header a, header button, header img")].filter((el) => el.offsetParent && !el.closest(".cms-ui"))
+            .map((el) => { const r = el.getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)}`; }));
+        const toggleEdit = bar().locator("button[aria-pressed]").first();
+        await toggleEdit.click(); await sleep(600);
+        const off = await headerBoxes();
+        await toggleEdit.click(); await sleep(600);
+        const on = await headerBoxes();
+        const moved = off.filter((box, i) => box !== on[i]);
+        check("editing on/off moves nothing in the header and navigation", off.length === on.length && moved.length === 0, moved.slice(0, 3).join(" | "));
+        // 3. Tools appear only for the hovered block, and nothing covers them.
+        await bar().hover(); await sleep(400);
+        const resting = await page.locator("[data-cms-block-tools]").count();
+        const pinnedBlocks = await page.locator('[data-cms-hidden="block"]').count();
+        check("edit tools are hidden until their block is hovered", resting <= pinnedBlocks, `${resting} toolbars showing`);
+        const roots = await page.evaluate(() => [...document.querySelectorAll("span.cms-ui[hidden]")].map((a, i) => ({ i, h: a.parentElement?.getBoundingClientRect().height || 0 })).filter((x) => x.h > 40).map((x) => x.i));
+        const covered = [];
+        for (const i of roots.slice(0, 8)) {
+            const point = await page.evaluate((idx) => {
+                const root = document.querySelectorAll("span.cms-ui[hidden]")[idx].parentElement;
+                root.scrollIntoView({ block: "center" });
+                const r = root.getBoundingClientRect();
+                // A point inside the block, clear of the fixed header and the admin bar.
+                const top = Math.max(r.top + 4, 100);
+                const bottom = Math.min(r.bottom - 4, innerHeight - 120);
+                return bottom > top ? { x: Math.max(4, r.left + 24), y: top + (bottom - top) / 3 } : null;
+            }, i);
+            if (!point) continue;
+            const vp = page.viewportSize() || { width: 1280, height: 800 };
+            await page.mouse.move(vp.width / 2, 2); // move away so the next move is a real hover
+            await page.mouse.move(point.x, point.y, { steps: 3 }); await sleep(350);
+            const hits = await page.evaluate(() => [...document.querySelectorAll("[data-cms-block-tools] button")].map((btn) => {
+                const r = btn.getBoundingClientRect();
+                const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                const inside = r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+                if (!inside) return `“${btn.textContent.trim()}” off-screen at ${Math.round(r.left)},${Math.round(r.top)}`;
+                return btn === el || btn.contains(el) ? "" : `“${btn.textContent.trim()}” under ${el?.tagName.toLowerCase()}.${String(el?.className || "").split(" ")[0]} at ${Math.round(r.top)}`;
+            }));
+            const bad = hits.filter(Boolean);
+            if (bad.length) covered.push(bad[0]);
+        }
+        check("block tools are never covered by the page", covered.length === 0, covered.join(" | "));
+        // 4. The admin bar is one line, whatever the width.
+        const rows = await page.locator("[data-cms-bar-row]").evaluate((row) => new Set([...row.querySelectorAll(":scope > button, :scope > a, :scope > div > button")]
+            .filter((el) => !/Minimise/.test(el.getAttribute("aria-label") || "")).map((el) => { const r = el.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 8); })).size);
+        check("the admin bar is one line", rows === 1, `${rows} rows`);
+        // Large screens: sites often zoom/scale the page; admin UI stays 1:1 and one line.
+        const restore = page.viewportSize();
+        await page.setViewportSize({ width: 1920, height: 1080 }); await sleep(500);
+        const wide = await page.locator("[data-cms-bar-row]").evaluate((row) => ({
+            rows: new Set([...row.querySelectorAll(":scope > button, :scope > a, :scope > div > button")].filter((el) => !/Minimise/.test(el.getAttribute("aria-label") || "")).map((el) => { const r = el.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 8); })).size,
+            height: Math.round(row.getBoundingClientRect().height),
+        }));
+        check("the admin bar is one line and unscaled on large screens", wide.rows === 1 && wide.height < 60, JSON.stringify(wide));
+        if (restore) await page.setViewportSize(restore);
+        await page.evaluate(() => window.scrollTo(0, 0));
     }
     await page.getByRole("button", { name: "Minimise the admin bar" }).click();
     check("admin bar minimises to a small pill", (await bar().locator("button[aria-pressed]").count()) === 0);
@@ -333,7 +400,7 @@ try {
         if (!role) {
             check("one-off CMS page: structure is locked (no add/move/delete)", (await page.locator('[title="Delete section"], [title="Add a section below"]').count()) === 0);
         }
-        await bar().getByRole("button", { name: /AI assist/ }).click();
+        await barAction(/AI assist/);
         await page.getByRole("dialog").locator("textarea[readonly]").first().waitFor({ timeout: 10000 });
         const sectionChips = await page.getByRole("dialog").locator("[data-cms-coverage-chip]").count();
         const sectionsOnPage = await page.locator('[data-cms-block^="section:"]').evaluateAll((els) => new Set(els.map((e) => e.dataset.cmsBlock)).size);
@@ -411,9 +478,20 @@ try {
     check("responsive: admin bar fits a phone screen", !!barBox && barBox.x >= 0 && barBox.x + barBox.width <= 391);
     const more = bar().getByRole("button", { name: /More/ });
     check("responsive: secondary admin actions collapse behind “More” on phones", (await more.count()) === 1);
+    const phoneRows = await page.locator("[data-cms-bar-row]").evaluate((row) => new Set([...row.querySelectorAll(":scope > button, :scope > a, :scope > div > button")]
+        .filter((el) => !/Minimise/.test(el.getAttribute("aria-label") || "")).map((el) => { const r = el.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 8); })).size);
+    check("responsive: the admin bar is one line on phones", phoneRows === 1, `${phoneRows} rows`);
     if (await more.count()) {
         await more.click();
-        const seo = bar().getByRole("button", { name: "SEO", exact: true });
+        const menu = page.locator("[data-cms-more-menu]");
+        const fits = await menu.evaluate((m) => {
+            const r = m.getBoundingClientRect();
+            const items = [...m.querySelectorAll("button, a")];
+            const reachable = items.every((it) => { const ir = it.getBoundingClientRect(); const el = document.elementFromPoint(ir.left + ir.width / 2, ir.top + ir.height / 2); return el === it || it.contains(el); });
+            return { inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, reachable, count: items.length };
+        });
+        check("responsive: “More” opens fully on screen with every action clickable", fits.inside && fits.reachable && fits.count >= 3, JSON.stringify(fits));
+        const seo = menu.getByRole("menuitem", { name: "SEO", exact: true });
         if (await seo.count()) {
             await seo.click();
             const panel = await page.locator('[role="dialog"] > div').last().boundingBox();
@@ -426,7 +504,7 @@ try {
     /* ---------- 9c. Hide blocks, list items and sections (R23) ---------- */
     async function publishPage() {
         await bar().getByRole("button", { name: /^Publish \(\d+\)/ }).click();
-        await bar().getByRole("button", { name: /Publish this page/ }).click();
+        await menuItem(/Publish this page/).click();
         await settle();
     }
     const visitorHtml = async (path) => (await (await fetch(`${SITE}${path}`)).text());
@@ -440,9 +518,22 @@ try {
     };
     await page.goto(`${SITE}${PAGE}`);
     await ensureEditing();
-    // Block: the first block whose Hide toggle we click.
-    const toggle = page.locator('[data-cms-action="toggle-hidden"]').first();
-    await toggle.click({ force: true });
+    // Block: hover the first block (its tools float in the admin layer), then Hide.
+    const revealBlockTools = async () => {
+        const point = await page.evaluate(() => {
+            const root = [...document.querySelectorAll("span.cms-ui[hidden]")].map((a) => a.parentElement).find((r) => r && r.getBoundingClientRect().height > 40);
+            root.scrollIntoView({ block: "center" });
+            const r = root.getBoundingClientRect();
+            return { x: Math.max(4, r.left + 24), y: Math.max(4, r.top + Math.min(40, r.height / 2)) };
+        });
+        // Move away first: moving to where the pointer already is fires no hover.
+        const vp = page.viewportSize() || { width: 1280, height: 800 };
+        await page.mouse.move(vp.width / 2, vp.height / 2);
+        await page.mouse.move(point.x, point.y, { steps: 4 });
+        await page.locator('[data-cms-action="toggle-hidden"]').first().waitFor({ timeout: 5000 });
+    };
+    await revealBlockTools();
+    await page.locator('[data-cms-action="toggle-hidden"]').first().click();
     const hiddenBlock = await poll(async () => {
         const d = (await admin("drafts/")).body?.components || [];
         for (const c of d) {
@@ -460,7 +551,8 @@ try {
         check("a hidden block is not in the visitor's HTML", !!gone, `${hiddenBlock.name}: “${needle}” ${before}→${await countIn(PAGE, needle)}`);
         await page.goto(`${SITE}${PAGE}`);
         await ensureEditing();
-        await page.locator('[data-cms-action="toggle-hidden"][aria-pressed="true"]').first().click({ force: true });
+        await revealBlockTools();
+        await page.locator('[data-cms-action="toggle-hidden"][aria-pressed="true"]').first().click();
         await poll(async () => !(await admin(`home/${hiddenBlock.name}/?mode=draft`)).body?._hidden);
         await publishPage();
         const back = await poll(async () => (await countIn(PAGE, needle)) >= before, { tries: 30, every: 700 });
@@ -506,18 +598,22 @@ try {
         const hostPath = hostKind === "blog" ? `blog/${DYNAMIC_PAGE.split("/").pop()}` : `content/${DYNAMIC_PAGE.replace(/^\//, "")}`;
         void role;
         const rows = (await admin(`${hostPath}/sections/`)).body;
-        const original = (Array.isArray(rows) ? rows : rows?.results || []).find((r) => String(r.id) === sectionId);
-        restoreSections.push({ hostPath, id: sectionId, content: original?.content });
+        const allRows = Array.isArray(rows) ? rows : rows?.results || [];
+        const original = allRows.find((r) => String(r.id) === sectionId);
+        // Snapshot EVERY section on the page, so cleanup restores the page even
+        // if a click lands on a neighbouring section.
+        for (const row of allRows) restoreSections.push({ hostPath, id: String(row.id), content: row.content });
         const sectionText = longestString(original?.content || {});
         // The toggle sits in the section's hover toolbar (below a fixed header
         // on the first section) — hover the section, then click it like a person.
         await slot.hover();
-        await page.locator('[data-cms-action="toggle-section-hidden"]').first().click();
+        // This section's own toolbar (a neighbour's may still be fading out).
+        await page.locator(`[data-cms-section-tools="${sectionId}"] [data-cms-action="toggle-section-hidden"]`).click();
         const savedSection = await poll(async () => {
             const r = (await admin(`${hostPath}/sections/`)).body;
             return (Array.isArray(r) ? r : r?.results || []).find((x) => String(x.id) === sectionId)?.draft_content?._hidden;
         });
-        check("“Hide” on a CMS-page section saves a draft", !!savedSection);
+        check("“Hide” on a CMS-page section saves a draft", !!savedSection, savedSection ? "" : `section ${sectionId}; toggles visible: ${await page.locator('[data-cms-action="toggle-section-hidden"]').count()}`);
         const sectionBefore = await countIn(DYNAMIC_PAGE, sectionText.slice(0, 40));
         await publishPage();
         const sectionGone = await poll(async () => (await countIn(DYNAMIC_PAGE, sectionText.slice(0, 40))) < sectionBefore, { tries: 30, every: 700 });
@@ -621,8 +717,9 @@ try {
 
     /* ---------- 11. Sign out ---------- */
     await page.goto(`${SITE}${PAGE}`);
-    await bar().getByRole("button", { name: /▾/ }).click();
-    await bar().getByRole("button", { name: "Sign out" }).click();
+    const account = bar().getByRole("button", { name: /▾/ }).last(); // the account pill, or "More ▾"
+    await account.click();
+    await menuItem("Sign out").click();
     await poll(async () => (await page.locator("[data-cms-adminbar]").count()) === 0);
     check("sign out removes the admin UI", (await page.locator("[data-cms-adminbar], [data-cms-block]").count()) === 0);
     check("sign out ends the server session", (await admin("auth/session/")).body?.authenticated === false);

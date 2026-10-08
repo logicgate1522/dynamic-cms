@@ -11,7 +11,7 @@ instructions the docs already answer.
 ## Job A — "Integrate this CMS into <frontend>"
 
 1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full, starting with "How to use
-   this file". Rules R1–R29 are mandatory; each has a rule card (Must / Never
+   this file". Rules R1–R30 are mandatory; each has a rule card (Must / Never
    / Proven by), a phase that builds it, an anti-pattern and a checklist line.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
@@ -45,6 +45,9 @@ instructions the docs already answer.
      entry pages (R28)
    - mix CTA wordings, ship a form-only contact page, or use slogan-only H1s
      (R29)
+   - place edit tools in the page flow or inside a section, let the admin bar
+     wrap, or leave a list without `E.Item` + `E.Add` (R30 — tools are
+     floating tools in the admin layer: `components/cms/floating.jsx`)
 
 ## Job B — Change the backend
 
@@ -110,7 +113,9 @@ instructions the docs already answer.
 ## Product principles (for any new feature)
 
 - **Inline first:** click the thing to change it. Panels exist for bulk, AI,
-  JSON and history. Edit tools appear on hover; nothing covers the page.
+  JSON and history. Edit tools appear on hover as floating tools in the admin
+  layer: editing never moves, covers or crowds the page, and the admin bar is
+  always one line.
   Typing never loses focus (index keys; `check:inline` + acceptance enforce it).
 - **Build only what repeats:** collections (articles, services, projects…)
   get "＋ New" on their index page, with one template. One-off pages keep

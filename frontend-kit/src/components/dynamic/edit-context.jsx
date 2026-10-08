@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, createContext, useContext, useState } from "react";
+import { Fragment, createContext, useContext, useRef, useState } from "react";
+
+import { FloatingTools, PLACE, useFloating } from "@/components/cms/floating";
 
 /* =========================================
    Inline editing inside dynamic section adapters.
@@ -44,31 +46,40 @@ export function AddItem({ path = "items", label = "Add item", className = "mt-6"
     return ctx?.editMode ? <ctx.E.Add path={path} label={label} className={className} /> : null;
 }
 
-export function SlotUpload({ slot = "image", className = "left-3 top-3" }) {
+// "Replace image" for a section image slot — a floating tool (R30): it never
+// moves the layout and can't be covered or clipped. `className` is ignored.
+export function SlotUpload({ slot = "image" }) {
     const ctx = useContext(SectionEditContext);
+    const anchor = useRef(null);
     const [busy, setBusy] = useState(false);
+    const tools = useFloating(anchor, { enabled: Boolean(ctx?.editMode), pinned: busy });
     if (!ctx?.editMode) return null;
     return (
-        <label className={`cms-ui ${busy ? "" : "cms-hover-tools"} absolute z-[55] inline-flex cursor-pointer items-center rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 hover:bg-[var(--cms-accent)] ${className}`}>
-            {busy ? "Uploading…" : "Replace image"}
-            <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                disabled={busy}
-                onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    if (!file) return;
-                    setBusy(true);
-                    try {
-                        await ctx.uploadSlot(slot, file);
-                    } finally {
-                        setBusy(false);
-                    }
-                }}
-            />
-        </label>
+        <>
+            <span ref={anchor} hidden />
+            <FloatingTools tools={tools} place={PLACE.insideTopLeft} data-cms-image-tools>
+                <label className="inline-flex cursor-pointer items-center rounded-full bg-[#0F172A]/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 hover:bg-[var(--cms-accent)]">
+                    {busy ? "Uploading…" : "Replace image"}
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={async (event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file) return;
+                            setBusy(true);
+                            try {
+                                await ctx.uploadSlot(slot, file);
+                            } finally {
+                                setBusy(false);
+                            }
+                        }}
+                    />
+                </label>
+            </FloatingTools>
+        </>
     );
 }
 

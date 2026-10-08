@@ -38,6 +38,7 @@ CORE = [
     "components/cms/CreatePage.jsx",
     "components/cms/Drawer.jsx",
     "components/cms/FieldEditor.jsx",
+    "components/cms/floating.jsx",
     "components/cms/inline.jsx",
     "components/cms/PageAssist.jsx",
     "components/cms/SectionEditor.jsx",

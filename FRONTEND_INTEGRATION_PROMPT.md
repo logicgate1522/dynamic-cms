@@ -10,7 +10,7 @@ this file wins.
 
 1. **Read all of it before writing code.** Every rule below exists because it
    was missed once and broke a real site.
-2. **There are 29 rules, R1–R29 (§0).** Each rule is stated five times, on
+2. **There are 30 rules, R1–R30 (§0).** Each rule is stated five times, on
    purpose. A test (`IntegrationSpecTests`) fails the CMS build if any copy is
    missing:
    - the **rule index** (§0.1): one line, its gate, its phase
@@ -88,6 +88,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R27 | Identity | Brand and contact details come from one place, and only what the owner publishes | `check:inline`, site-audit | P0, P3, P7 |
 | R28 | Pages | What the business sells is its real list, each a complete, linked page | site-audit, acceptance | P5 |
 | R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit, review | P3, P4 |
+| R30 | Editing | Edit mode never changes, hides or crowds the page; every list is editable | `check:inline`, acceptance | P1, P3 |
 
 ### §0.2 Rule cards
 
@@ -222,8 +223,8 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 
 #### R15 — Edit tools never cover the page
 - **Must:** block pills, item tools, 🔗 link buttons, "＋ Add", "Replace
-  image" and Hide chips are hover tools — hidden until their own block / item
-  is hovered or focused (always shown on touch). The admin bar minimises.
+  image" and Hide chips appear only while their own block / item is hovered,
+  focused or tapped (R30 says how they are drawn). The admin bar minimises.
   Set `--cms-first-section-tools-top` in `app/cms.css` to the site's fixed
   header height + 8px, so the first section's tools are never under the
   header.
@@ -445,6 +446,35 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   headings; contact page has content beyond the form); review (grep the CTA
   wording across `src`).
 
+#### R30 — Edit mode never changes, hides or crowds the page
+- **Must:** every edit tool — the block pill and Hide, item tools, "＋ Add",
+  🔗, "Replace image", section toolbars, labels and notices — is a kit
+  floating tool (`components/cms/floating.jsx`): it leaves only a hidden
+  zero-size anchor in the page and is drawn in the admin layer at the end of
+  `<body>`. So turning editing on moves nothing (outlines only), no
+  overlapping section or `overflow-hidden` card can cover or clip a tool, and
+  tools stay inside the viewport, below the fixed header, clear of the admin
+  bar and outside small targets (they never cover the text they edit or its
+  neighbours). The admin bar, its menus and every panel live in the same
+  layer, unaffected by any zoom/scale the site puts on the page: the bar is
+  always **one line** (actions that don't fit move into "More"; none are
+  dropped) and every menu opens fully on screen. **Every list a block owns is
+  editable:** `<E.Item>` on each item and `<E.Add>` for the list, nested lists
+  included (cards, reviews, steps, links, logos…). Interactive wrappers
+  (carousels, `pointer-events-none` layers, whole-card overlay links) let an
+  admin reach the editable content while editing (e.g. the visible card
+  accepts clicks; overlay links render only when editing is off).
+- **Never:** edit buttons placed in the page flow or positioned inside a
+  section; z-index fights with the site; a bar that wraps or hides actions;
+  menus positioned inside a transformed container; a list that can't grow or
+  shrink; site markup that blocks clicks on editable text in edit mode.
+- **Proven by:** `check:inline` (every list in a block's defaults has
+  `E.Item` and `E.Add`, or a `cms-fixed-list: reason` comment); acceptance
+  "edit tools take no layout space", "editing on/off moves nothing in the
+  header", "edit tools are hidden until their block is hovered", "block tools
+  are never covered", "the admin bar is one line" (desktop, phone, 1920px),
+  "“More” opens fully on screen with every action clickable".
+
 ---
 
 ## §1 — Modes
@@ -480,7 +510,7 @@ a list of the business details you'll need from the owner.
 
 **Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists. No file changed (`git status` clean).
 
-**P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25.**
+**P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25, R30.**
 1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
    that aren't in the manifest; if a path collides, stop and report it. The
    kit brings the API client (R4), prompt/paste UI (R5, R6), revalidate route
@@ -539,7 +569,7 @@ once in the page. That emits JSON-LD and gives the admin bar its SEO button
 **Exit check P2:** every route file exports `generateMetadata` and renders `<PageSeo>` (grep both, compare counts with the route list); the SEO button opens on each route.
 
 **P3 — Convert every section (§3 recipe). Rules: R2, R3, R8, R9, R10, R11,
-R15, R18, R20, R23, R26, R27, R29.** One component at a time. After each one,
+R15, R18, R20, R23, R26, R27, R29, R30.** One component at a time. After each one,
 `npm run check:inline` passes for it, it renders identically (R9), it
 returns `null` when `hidden` (R23), its lists are index-keyed (R18), and it
 works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
@@ -547,7 +577,8 @@ works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
 channels the owner publishes (R21, R27). Unconfirmed claims are removed and
 placeholder social proof ships hidden (R26). Every CTA uses the one primary
 action wording, H1s carry the keyword and footer titles are not headings
-(R29).
+(R29). Every list gets `E.Item` + `E.Add`, and carousels / overlay links
+stay editable with editing on (R30).
 
 **Exit check P3:** `npm run check:inline` reports **0 problems** for the whole of `src`; `next build` passes; side-by-side screenshots of every page at 390px and 1280px match the originals (R9); with editing on, each converted block shows Hide and All fields on hover.
 
@@ -624,7 +655,7 @@ business details (R22).
 
 **Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written.
 
-**P8 — Verify (three passes). Rules: all, R1–R29.** One green run is not
+**P8 — Verify (three passes). Rules: all, R1–R30.** One green run is not
 proof: a fix for one gate can break another, and some rules have no
 automatic gate. Do all three passes, in order.
 
@@ -800,7 +831,7 @@ route:
     the same panels as `/admin/*`), **Dashboard**, and an account menu with
     Sign out.
 - **Inline:** click text and type. Enter ends a single-line field, Esc
-  reverts, and paste is plain text. Hover tools (R15): item tools (↑ ↓ ⧉ ✕),
+  reverts, and paste is plain text. Floating hover tools (R15, R30): item tools (↑ ↓ ⧉ ✕),
   "＋ Add", 🔗 link editor, "Replace image", and the block's "All fields" pill.
 - **Hide / Show (R23):** a "Hide" chip beside every block's "All fields"
   pill, a hide button in every object item's tools, and "Hide" in every
@@ -1446,12 +1477,16 @@ any of these, stop and undo it.
   that don't link, or a removed URL without a 301.
 - **R29** Competing CTA wordings, a contact page that is only a form, slogan-only
   H1s, headings in the footer, or a redesign that leaves the site's look.
+- **R30** Edit buttons in the page flow (editing shifts the layout), tools a
+  neighbouring section covers, an admin bar that wraps or hides actions, menus
+  that open off-screen, a list that can't be added to or removed from, or a
+  carousel / overlay link that blocks editing.
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R29, no exceptions. Read the whole file first.
+exactly — every rule R1–R30, no exceptions. Read the whole file first.
 Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
@@ -1500,6 +1535,7 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R27** Brand and contact details come from settings only; only owner-approved channels appear; the notification address is never shown. (`check:inline`, site-audit contact checks)
 - [ ] **R28** One complete page per real offering, each ≥600 words, linked from its index, home and footer, with its guide; retired URLs 301. (site-audit collections, acceptance)
 - [ ] **R29** One primary CTA wording site-wide; contact page has real content; keyword H1 first; no footer headings; pricing explained when it varies. (site-audit headings/contact page, review)
+- [ ] **R30** Editing on moves nothing; tools float, never covered, inside the screen; the bar is one line at every width; every list has item tools and "+ Add". (`check:inline`, acceptance edit-mode checks)
 
 **Also checked by the gates**
 - [ ] Exactly one `<h1>` in each page's HTML. (acceptance, site-audit)

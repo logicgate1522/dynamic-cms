@@ -43,6 +43,25 @@
     font-style: italic;
 }
 
+/* ===== The admin layer (components/cms/floating.jsx) =====
+   Every edit tool, the admin bar, menus and panels are drawn here, at the
+   end of <body>: above every site element, at 1:1 scale whatever zoom the
+   site uses, and never taking layout space — editing on/off moves nothing. */
+.cms-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    pointer-events: none;
+}
+.cms-layer > * {
+    pointer-events: auto;
+}
+.cms-floating {
+    z-index: 10;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.2;
+}
+
 /* ===== Edit tools never cover the page =====
    Block pills ("All fields"), list-item tools (↑ ↓ ⧉ ✕) and "Replace image"
    chips appear only while their own block / item / image is hovered or has

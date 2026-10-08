@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdmin } from "@/components/cms/AdminProvider";
 import { useCmsInitial } from "@/components/cms/CmsDataProvider";
+import { FloatingTools, PLACE, useFloating } from "@/components/cms/floating";
 import { createInline } from "@/components/cms/inline";
 import { API, apiRequest, isEmpty, mergeDefaults, setPath } from "@/lib/api";
 import { HIDDEN_KEY, isHidden, stripHidden } from "@/lib/visibility";
@@ -212,32 +213,42 @@ const STATE_DOT = {
     idle: "bg-white/70",
 };
 
-function AllFieldsButton({ label, saveState, onClick, hidden, onToggleHidden, position = "right-3 top-3" }) {
+// The block's own tools (Hide · "Label ⋯"), floating at the block's top-right
+// in the admin layer: never covered by a neighbouring section, never moving
+// the layout (R30). The in-page anchor also carries the "hidden" marker that
+// dims the block (cms.css). `position` is accepted for compatibility.
+function AllFieldsButton({ label, saveState, onClick, hidden, onToggleHidden }) {
+    const anchor = useRef(null);
     const pinned = hidden || ["dirty", "saving", "error"].includes(saveState);
+    const tools = useFloating(anchor, { pinned });
     return (
-        <span className={`cms-ui ${pinned ? "" : "cms-hover-tools"} absolute z-[60] ${position} inline-flex items-center gap-1`}>
-            {/* Dims the block (cms.css) while it is hidden from visitors. */}
-            {hidden ? <span data-cms-hidden="block" hidden /> : null}
-            {onToggleHidden ? <button
-                type="button"
-                onClick={onToggleHidden}
-                title={hidden ? "Hidden from visitors (after Publish) — click to show" : "Hide this block from visitors"}
-                aria-pressed={hidden}
-                data-cms-action="toggle-hidden"
-                className={`inline-flex h-[30px] items-center rounded-full border px-2.5 text-[11px] font-semibold shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur ${hidden ? "border-[#F59E0B] bg-[#FEF3C7] text-[#92400E]" : "border-white/40 bg-[#0F172A]/85 text-white hover:bg-[#334155]"}`}
-            >
-                {hidden ? "Hidden · Show" : "Hide"}
-            </button> : null}
-            <button
-                type="button"
-                onClick={onClick}
-                title={`All fields, AI and history for “${label}”`}
-                className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur transition hover:bg-[var(--cms-accent)]"
-            >
-                <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />
-                {label}
-                <span aria-hidden="true">⋯</span>
-            </button>
-        </span>
+        <>
+            <span ref={anchor} className="cms-ui" hidden>
+                {/* Dims the block (cms.css) while it is hidden from visitors. */}
+                {hidden ? <span data-cms-hidden="block" hidden /> : null}
+            </span>
+            <FloatingTools tools={tools} place={PLACE.insideTopRight} data-cms-block-tools className="inline-flex items-center gap-1">
+                {onToggleHidden ? <button
+                    type="button"
+                    onClick={onToggleHidden}
+                    title={hidden ? "Hidden from visitors (after Publish) — click to show" : "Hide this block from visitors"}
+                    aria-pressed={hidden}
+                    data-cms-action="toggle-hidden"
+                    className={`inline-flex h-[30px] items-center rounded-full border px-2.5 text-[11px] font-semibold shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur ${hidden ? "border-[#F59E0B] bg-[#FEF3C7] text-[#92400E]" : "border-white/40 bg-[#0F172A]/90 text-white hover:bg-[#334155]"}`}
+                >
+                    {hidden ? "Hidden · Show" : "Hide"}
+                </button> : null}
+                <button
+                    type="button"
+                    onClick={onClick}
+                    title={`All fields, AI and history for “${label}”`}
+                    className="inline-flex h-[30px] items-center gap-2 whitespace-nowrap rounded-full border border-white/40 bg-[#0F172A]/90 px-3 text-[11px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur transition hover:bg-[var(--cms-accent)]"
+                >
+                    <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />
+                    {label}
+                    <span aria-hidden="true">⋯</span>
+                </button>
+            </FloatingTools>
+        </>
     );
 }

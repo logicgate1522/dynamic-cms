@@ -176,6 +176,50 @@ function hiddenGuard(ast, source, report) {
     });
 }
 
+// Every list a block owns must be fully editable: item tools (E.Item: move,
+// hide, duplicate, remove) and "+ Add" (E.Add) — reviews, cards, steps,
+// links… (R2, R30). Lists nested one level inside items count too
+// (e.g. features[].benefits). Mark a deliberately fixed list with a
+// "cms-fixed-list: reason" comment on its key.
+function listRules(ast, source, report) {
+    const arrays = new Map(); // const name -> ArrayExpression
+    visit(ast.program, (node) => {
+        if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && node.init?.type === "ArrayExpression") arrays.set(node.id.name, node.init);
+    });
+    const defaultsNames = new Set();
+    visit(ast.program, (node) => {
+        if (node.type === "CallExpression" && node.callee?.name === "useCms" && node.arguments[1]?.type === "Identifier") defaultsNames.add(node.arguments[1].name);
+    });
+    visit(ast.program, (node) => {
+        if (node.type !== "VariableDeclarator" || !defaultsNames.has(node.id?.name) || node.init?.type !== "ObjectExpression") return;
+        for (const prop of node.init.properties) {
+            if (prop.type !== "ObjectProperty") continue;
+            const key = prop.key?.name || prop.key?.value;
+            const arr = prop.value.type === "ArrayExpression" ? prop.value : prop.value.type === "Identifier" ? arrays.get(prop.value.name) : null;
+            if (!key || !arr || !arr.elements.length) continue;
+            const comments = [...(prop.leadingComments || []), ...(prop.trailingComments || [])].map((c) => c.value).join(" ");
+            const line = source.slice(0, prop.start).split("\n").length;
+            const prevLine = source.split("\n")[line - 2] || "";
+            if (/cms-fixed-list/.test(comments) || /cms-fixed-list/.test(prevLine)) continue;
+            const pathRe = (tool) => new RegExp(`(?:\\bE|data\\.E)\\.${tool}\\b[^>]*path=(?:"${key}"|\\{\\s*["'\`]${key}["'\`]\\s*\\})`);
+            if (!pathRe("Item").test(source)) report(line, `list “${key}” has no <E.Item path="${key}" …/> — items can't be moved, hidden or removed`);
+            if (!pathRe("Add").test(source)) report(line, `list “${key}” has no <E.Add path="${key}" /> — items can't be added`);
+            // One level down: arrays inside the list's object items.
+            const sample = arr.elements.find((el) => el?.type === "ObjectExpression");
+            for (const inner of sample?.properties || []) {
+                const innerKey = inner.key?.name || inner.key?.value;
+                if (inner.value?.type !== "ArrayExpression" || !inner.value.elements.length) continue;
+                const innerComments = (inner.leadingComments || []).map((c) => c.value).join(" ");
+                if (/cms-fixed-list/.test(innerComments)) continue;
+                const nested = (tool) => new RegExp(`(?:\\bE|data\\.E)\\.${tool}\\b[^>]*path=\\{\\s*\`${key}\\.\\$\\{[^}]+\\}\\.${innerKey}\`\\s*\\}`);
+                if (!nested("Item").test(source) || !nested("Add").test(source)) {
+                    report(line, `nested list “${key}[].${innerKey}” needs E.Item and E.Add (path={\`${key}.\${i}.${innerKey}\`})`);
+                }
+            }
+        }
+    });
+}
+
 let problems = 0;
 let scanned = 0;
 for (const file of files) {
@@ -201,6 +245,10 @@ for (const file of files) {
     const ast = parser.parse(source, {
         sourceType: "module",
         plugins: ["jsx", ...(file.endsWith(".tsx") ? ["typescript"] : [])],
+    });
+    listRules(ast, source, (line, message) => {
+        problems++;
+        console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);
     });
     hiddenGuard(ast, source, (line) => {
         problems++;
@@ -237,6 +285,7 @@ if (problems) {
     console.log(`\n${problems} problem(s) in ${scanned} CMS component file(s).`);
     console.log('Hard-coded text: wire it with <E.Text path="…" /> (original string -> defaults), or mark it {/* cms-static: reason */}.');
     console.log("Text-derived list keys: use the map index (key={index}).");
+    console.log("Lists → every list a block owns needs <E.Item> (on each item) and <E.Add> (after the list), or a cms-fixed-list comment.");
     console.log("Forms → submitForm() from @/lib/forms. Tracking → track() from @/lib/track. Hide → if (hidden) return null.");
     process.exit(1);
 }

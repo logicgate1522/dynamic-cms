@@ -1,11 +1,11 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 import { getPath, uploadImage } from "@/lib/api";
 import { HIDDEN_KEY, isHidden } from "@/lib/visibility";
 import { blankLike } from "@/components/cms/FieldEditor";
+import { FloatingTools, PLACE, useFloating } from "@/components/cms/floating";
 
 /* =========================================
    Inline editing primitives — the default way
@@ -202,90 +202,57 @@ export function createInline(stateRef) {
         );
     }
 
-    function ImageEdit({ path, category = "content", className = "left-2 top-2" }) {
+    // Every tool below is a floating tool (floating.jsx): a zero-size hidden
+    // anchor stays in the page; the tool itself is drawn in the admin layer
+    // beside its target. Edit mode therefore never changes the layout, and
+    // no section can cover or clip a tool (R30). `className` props are
+    // accepted for compatibility and ignored.
+
+    function ImageEdit({ path, category = "content" }) {
         const { editMode } = stateRef.current;
+        const anchor = useRef(null);
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState("");
+        const tools = useFloating(anchor, { enabled: editMode, pinned: busy || Boolean(error) });
         if (!editMode) return null;
         return (
-            <span className={`cms-ui ${busy || error ? "" : "cms-hover-tools"} absolute z-[55] flex flex-col items-start gap-1 ${className}`}>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#0F172A]/85 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 backdrop-blur hover:bg-[var(--cms-accent)]">
-                    {busy ? "Uploading…" : "Replace image"}
-                    <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={busy}
-                        onChange={async (event) => {
-                            const file = event.target.files?.[0];
-                            event.target.value = "";
-                            if (!file) return;
-                            setBusy(true);
-                            setError("");
-                            try {
-                                stateRef.current.update(path, await uploadImage(file, category));
-                            } catch (err) {
-                                setError(err.message);
-                            } finally {
-                                setBusy(false);
-                            }
-                        }}
-                    />
-                </label>
-                {error ? <span className="rounded bg-[#FEF3F2] px-2 py-1 text-[11px] text-[#B42318]">{error}</span> : null}
-            </span>
+            <>
+                <span ref={anchor} hidden />
+                <FloatingTools tools={tools} place={PLACE.insideTopLeft} className="flex flex-col items-start gap-1" data-cms-image-tools>
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#0F172A]/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 backdrop-blur hover:bg-[var(--cms-accent)]">
+                        {busy ? "Uploading…" : "Replace image"}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={busy}
+                            onChange={async (event) => {
+                                const file = event.target.files?.[0];
+                                event.target.value = "";
+                                if (!file) return;
+                                setBusy(true);
+                                setError("");
+                                try {
+                                    stateRef.current.update(path, await uploadImage(file, category));
+                                } catch (err) {
+                                    setError(err.message);
+                                } finally {
+                                    setBusy(false);
+                                }
+                            }}
+                        />
+                    </label>
+                    {error ? <span className="rounded bg-[#FEF3F2] px-2 py-1 text-[11px] text-[#B42318]">{error}</span> : null}
+                </FloatingTools>
+            </>
         );
     }
 
-    // List-item tools (↑ ↓ ⧉ ✕) float just ABOVE the hovered / focused item,
-    // rendered into <body>: they never cover the item's own text and can't be
-    // clipped by an overflow-hidden card. No per-site positioning needed
-    // (`className` is accepted for compatibility and ignored).
+    // List-item tools (↑ ↓ Hide ⧉ ✕) float just above the hovered / focused item.
     function Item({ path, index }) {
         const { data, editMode } = stateRef.current;
         const anchor = useRef(null);
-        const hideTimer = useRef(null);
-        const [rect, setRect] = useState(null);
-
-        useEffect(() => {
-            const item = anchor.current?.parentElement;
-            if (!editMode || !item) return undefined;
-            const show = () => {
-                clearTimeout(hideTimer.current);
-                setRect(item.getBoundingClientRect());
-            };
-            const hide = () => {
-                clearTimeout(hideTimer.current);
-                hideTimer.current = setTimeout(() => setRect(null), 180);
-            };
-            item.addEventListener("mouseenter", show);
-            item.addEventListener("mouseleave", hide);
-            item.addEventListener("focusin", show);
-            item.addEventListener("focusout", hide);
-            return () => {
-                clearTimeout(hideTimer.current);
-                item.removeEventListener("mouseenter", show);
-                item.removeEventListener("mouseleave", hide);
-                item.removeEventListener("focusin", show);
-                item.removeEventListener("focusout", hide);
-            };
-        }, [editMode]);
-
-        const visible = Boolean(rect);
-        useEffect(() => {
-            if (!visible) return undefined;
-            const follow = () => {
-                const item = anchor.current?.parentElement;
-                setRect(item ? item.getBoundingClientRect() : null);
-            };
-            window.addEventListener("scroll", follow, true);
-            window.addEventListener("resize", follow);
-            return () => {
-                window.removeEventListener("scroll", follow, true);
-                window.removeEventListener("resize", follow);
-            };
-        }, [visible]);
-
+        const tools = useFloating(anchor, { enabled: editMode });
         if (!editMode) return null;
         const list = getPath(data, path);
         if (!Array.isArray(list)) return null;
@@ -301,118 +268,114 @@ export function createInline(stateRef) {
         const canHide = item && typeof item === "object" && !Array.isArray(item);
         const hiddenItem = isHidden(item);
         const toggleHidden = () => write(list.map((entry, i) => (i === index ? { ...entry, [HIDDEN_KEY]: !hiddenItem } : entry)));
-        const above = rect && rect.top > 36;
-        const style = rect
-            ? {
-                  position: "fixed",
-                  top: above ? rect.top - 30 : rect.bottom + 4,
-                  right: Math.max(4, window.innerWidth - rect.right),
-              }
-            : null;
         return (
             <>
                 <span ref={anchor} hidden data-cms-hidden={hiddenItem ? "item" : undefined} />
-                {rect && typeof document !== "undefined"
-                    ? createPortal(
-                          <span
-                              data-cms-item-tools
-                              style={style}
-                              className="cms-ui z-[1450] flex gap-1 rounded-lg bg-white/95 p-0.5 shadow-lg ring-1 ring-black/10"
-                              onMouseEnter={() => clearTimeout(hideTimer.current)}
-                              onMouseLeave={() => {
-                                  hideTimer.current = setTimeout(() => setRect(null), 180);
-                              }}
-                              onMouseDown={(e) => e.preventDefault()}
-                          >
-                              <button type="button" title="Move earlier" aria-label="Move earlier" className={toolButton} disabled={index === 0} onClick={(e) => { stop(e); move(-1); }}>↑</button>
-                              <button type="button" title="Move later" aria-label="Move later" className={toolButton} disabled={index === list.length - 1} onClick={(e) => { stop(e); move(1); }}>↓</button>
-                              {canHide ? (
-                                  <button type="button" title={hiddenItem ? "Hidden from visitors — click to show" : "Hide from visitors (keeps it here)"} aria-label={hiddenItem ? "Show item" : "Hide item"} aria-pressed={hiddenItem} data-cms-action="toggle-item-hidden" className={`${toolButton} ${hiddenItem ? "bg-[#FEF3C7] text-[#92400E]" : ""}`} onClick={(e) => { stop(e); toggleHidden(); }}>
-                                      {hiddenItem ? "Show" : "Hide"}
-                                  </button>
-                              ) : null}
-                              <button type="button" title="Duplicate" aria-label="Duplicate" className={toolButton} onClick={(e) => { stop(e); write([...list.slice(0, index + 1), structuredClone(list[index]), ...list.slice(index + 1)]); }}>⧉</button>
-                              <button type="button" title="Remove" aria-label="Remove" className={`${toolButton} text-[#B42318]`} onClick={(e) => { stop(e); write(list.filter((_, i) => i !== index)); }}>✕</button>
-                          </span>,
-                          document.body
-                      )
-                    : null}
+                <FloatingTools
+                    tools={tools}
+                    place={PLACE.aboveRight}
+                    data-cms-item-tools
+                    className="flex gap-1 rounded-lg bg-white/95 p-0.5 shadow-lg ring-1 ring-black/10"
+                    onMouseDown={(e) => e.preventDefault()}
+                >
+                    <button type="button" title="Move earlier" aria-label="Move earlier" className={toolButton} disabled={index === 0} onClick={(e) => { stop(e); move(-1); }}>↑</button>
+                    <button type="button" title="Move later" aria-label="Move later" className={toolButton} disabled={index === list.length - 1} onClick={(e) => { stop(e); move(1); }}>↓</button>
+                    {canHide ? (
+                        <button type="button" title={hiddenItem ? "Hidden from visitors — click to show" : "Hide from visitors (keeps it here)"} aria-label={hiddenItem ? "Show item" : "Hide item"} aria-pressed={hiddenItem} data-cms-action="toggle-item-hidden" className={`${toolButton} ${hiddenItem ? "bg-[#FEF3C7] text-[#92400E]" : ""}`} onClick={(e) => { stop(e); toggleHidden(); }}>
+                            {hiddenItem ? "Show" : "Hide"}
+                        </button>
+                    ) : null}
+                    <button type="button" title="Duplicate" aria-label="Duplicate" className={toolButton} onClick={(e) => { stop(e); write([...list.slice(0, index + 1), structuredClone(list[index]), ...list.slice(index + 1)]); }}>⧉</button>
+                    <button type="button" title="Remove" aria-label="Remove" className={`${toolButton} text-[#B42318]`} onClick={(e) => { stop(e); write(list.filter((_, i) => i !== index)); }}>✕</button>
+                </FloatingTools>
             </>
         );
     }
 
-    function Add({ path, label = "Add item", className = "" }) {
+    // "+ Add" floats just outside the bottom-right of the list it belongs to (the
+    // element it is placed in), while that list is hovered or focused.
+    function Add({ path, label = "Add item" }) {
         const { data, editMode, defaults } = stateRef.current;
-        if (!editMode) return null;
+        const anchor = useRef(null);
         const list = getPath(data, path);
+        const empty = !Array.isArray(list) || list.length === 0;
+        // An empty list has nothing to hover, so its "+ Add" stays visible.
+        const tools = useFloating(anchor, { enabled: editMode, pinned: empty });
+        if (!editMode) return null;
         const sample = (Array.isArray(list) && list[0]) ?? getPath(defaults, path)?.[0] ?? "";
         return (
-            <button
-                type="button"
-                onClick={(e) => {
-                    stop(e);
-                    const current = getPath(stateRef.current.data, path);
-                    stateRef.current.update(path, [...(Array.isArray(current) ? current : []), blankLike(sample)]);
-                }}
-                className={`cms-ui cms-hover-tools inline-flex items-center gap-1.5 rounded-full border-2 border-dashed border-[var(--cms-accent)] bg-white/90 px-4 py-2 text-[12px] font-semibold text-[var(--cms-accent-strong)] shadow-sm hover:bg-[var(--cms-accent-soft)] ${className}`}
-            >
-                + {label}
-            </button>
+            <>
+                <span ref={anchor} hidden />
+                <FloatingTools tools={tools} place={PLACE.afterList} data-cms-add={path}>
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            stop(e);
+                            const current = getPath(stateRef.current.data, path);
+                            stateRef.current.update(path, [...(Array.isArray(current) ? current : []), blankLike(sample)]);
+                        }}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border-2 border-dashed border-[var(--cms-accent)] bg-white px-4 py-1.5 text-[12px] font-semibold text-[var(--cms-accent-strong)] shadow-md hover:bg-[var(--cms-accent-soft)]"
+                    >
+                        + {label}
+                    </button>
+                </FloatingTools>
+            </>
         );
     }
 
-    function LinkEdit({ path, className = "" }) {
+    // 🔗 perches on the top-right corner of the link it edits; its URL box opens under it.
+    function LinkEdit({ path }) {
         const { data, editMode } = stateRef.current;
+        const anchor = useRef(null);
         const [open, setOpen] = useState(false);
         const [value, setValue] = useState("");
+        const tools = useFloating(anchor, { enabled: editMode, pinned: open });
         if (!editMode) return null;
         const current = getPath(data, path) || "";
+        const save = () => {
+            stateRef.current.update(path, value.trim());
+            setOpen(false);
+        };
         return (
-            <span className={`cms-ui ${open ? "" : "cms-hover-tools"} relative inline-flex align-middle ${className}`} onClick={stop} onMouseDown={(e) => e.stopPropagation()}>
-                <button
-                    type="button"
-                    title={`Link: ${current || "not set"}`}
-                    aria-label="Edit link"
-                    className={`${toolButton} ml-1`}
-                    onClick={(e) => {
-                        stop(e);
-                        setValue(current);
-                        setOpen((v) => !v);
-                    }}
-                >
-                    🔗
-                </button>
-                {open ? (
-                    <span className="absolute left-0 top-full z-[70] mt-1 flex w-64 gap-1 rounded-lg bg-white p-1.5 shadow-xl ring-1 ring-black/10">
-                        <input
-                            autoFocus
-                            value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    stateRef.current.update(path, value.trim());
-                                    setOpen(false);
-                                }
-                                if (e.key === "Escape") setOpen(false);
-                            }}
-                            placeholder="/contact or https://…"
-                            className="min-w-0 flex-1 rounded-md border border-[#CBD5E1] px-2 py-1 text-[12px] font-normal text-[#0F172A] outline-none focus:border-[var(--cms-accent)]"
-                        />
-                        <button
-                            type="button"
-                            className="rounded-md bg-[var(--cms-accent)] px-2 text-[11px] font-semibold text-white"
-                            onClick={(e) => {
-                                stop(e);
-                                stateRef.current.update(path, value.trim());
-                                setOpen(false);
-                            }}
-                        >
-                            Save
-                        </button>
-                    </span>
-                ) : null}
-            </span>
+            <>
+                <span ref={anchor} hidden />
+                <FloatingTools tools={tools} place={PLACE.corner} data-cms-link-tools className="flex flex-col items-start gap-1" onClick={stop}>
+                    <button
+                        type="button"
+                        title={`Link: ${current || "not set"}`}
+                        aria-label="Edit link"
+                        className={`${toolButton} h-6 min-w-6 bg-white px-1 text-[11px] shadow-md ring-1 ring-black/10`}
+                        onClick={(e) => {
+                            stop(e);
+                            setValue(current);
+                            setOpen((v) => !v);
+                        }}
+                    >
+                        🔗
+                    </button>
+                    {open ? (
+                        <span className="flex w-64 gap-1 rounded-lg bg-white p-1.5 shadow-xl ring-1 ring-black/10">
+                            <input
+                                autoFocus
+                                value={value}
+                                onChange={(e) => setValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        save();
+                                    }
+                                    if (e.key === "Escape") setOpen(false);
+                                }}
+                                placeholder="/contact or https://…"
+                                className="min-w-0 flex-1 rounded-md border border-[#CBD5E1] px-2 py-1 text-[12px] font-normal text-[#0F172A] outline-none focus:border-[var(--cms-accent)]"
+                            />
+                            <button type="button" className="rounded-md bg-[var(--cms-accent)] px-2 text-[11px] font-semibold text-white" onClick={(e) => { stop(e); save(); }}>
+                                Save
+                            </button>
+                        </span>
+                    ) : null}
+                </FloatingTools>
+            </>
         );
     }
 

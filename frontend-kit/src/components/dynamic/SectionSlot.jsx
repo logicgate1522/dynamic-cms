@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdmin } from "@/components/cms/AdminProvider";
 import { Notice, PasteBox, PromptBox, Segmented, Step, STRATEGY_OPTIONS } from "@/components/cms/ai";
 import Drawer, { buttonStyles } from "@/components/cms/Drawer";
+import { FloatingTools, PLACE, useFloating } from "@/components/cms/floating";
 import { ObjectFields, humanize } from "@/components/cms/FieldEditor";
 import { createInline } from "@/components/cms/inline";
 import { SectionEditContext } from "@/components/dynamic/edit-context";
@@ -46,6 +47,9 @@ export default function SectionSlot({ base, host, section, index, total, sibling
     const [panel, setPanel] = useState(null);
     const [adding, setAdding] = useState(false);
     const [copied, setCopied] = useState(false);
+    const toolsAnchor = useRef(null);
+    const tools = useFloating(toolsAnchor, { enabled: editMode, pinned: adding || Boolean(panel) });
+    const noticeAnchor = useRef(null);
     const pending = useRef(null);
 
     useEffect(() => {
@@ -145,11 +149,13 @@ export default function SectionSlot({ base, host, section, index, total, sibling
             {!editMode && isHidden(content) ? null : <div data-cms-hidden={editMode && isHidden(content) ? "section" : undefined} className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
                 {editMode ? (
                     <>
-                        <span style={index === 0 ? { top: "var(--cms-first-section-tools-top)" } : undefined} className="cms-ui pointer-events-none absolute left-3 top-3 z-[56] rounded bg-[#0F172A] px-1.5 py-0.5 text-[10px] font-bold uppercase text-white opacity-0 transition group-hover/slot:opacity-100">
+                        <span ref={toolsAnchor} hidden />
+                        {/* Section label (top-left) and toolbar (top-right), floating (R30). */}
+                        <FloatingTools tools={tools} place={PLACE.insideTopLeft} data-cms-section-label className="pointer-events-none rounded bg-[#0F172A] px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
                             {index + 1}. {humanize(section.section_type)}
                             {saveState === "saving" || saveState === "dirty" ? " · saving…" : section.draft_content || saveState === "saved" ? " · draft" : ""}
-                        </span>
-                        <div style={index === 0 ? { top: "var(--cms-first-section-tools-top)" } : undefined} className="cms-ui pointer-events-none absolute right-3 top-3 z-[56] flex gap-1 opacity-0 transition group-hover/slot:opacity-100">
+                        </FloatingTools>
+                        <FloatingTools tools={tools} place={PLACE.insideTopRight} data-cms-section-tools={section.id} className="flex gap-1">
                             {canRestructure ? (
                                 <>
                                     <button type="button" className={chip} disabled={index === 0} onClick={() => move(-1)} title="Move up">↑</button>
@@ -172,16 +178,25 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                                 {copied ? "Copied" : "JSON"}
                             </button>
                             {canRestructure ? <button type="button" className={`${chip} text-[#B42318]`} onClick={remove} title="Delete section">✕</button> : null}
-                        </div>
+                        </FloatingTools>
                     </>
                 ) : null}
 
-                {missing.length && editMode ? (
-                    <div className="cms-ui relative z-[56] bg-[#FFFAEB] px-4 py-2 text-[12px] text-[#B54708]">
-                        Needs {missing.length} image{missing.length === 1 ? "" : "s"} before the page can be published: {missing.map((m) => m.image_prompt || m.slot).join(" · ")}
-                    </div>
+                {/* Publish blockers and errors float over the section's top edge
+                    (always shown while they apply) instead of pushing it down. */}
+                {editMode && (missing.length || error) ? (
+                    <>
+                        <span ref={noticeAnchor} hidden />
+                        <SectionNotice anchor={noticeAnchor}>
+                            {missing.length ? (
+                                <span className="block rounded-lg bg-[#FFFAEB] px-3 py-1.5 text-[12px] text-[#B54708] shadow ring-1 ring-[#FEC84B]">
+                                    Needs {missing.length} image{missing.length === 1 ? "" : "s"} before the page can be published: {missing.map((m) => m.image_prompt || m.slot).join(" · ")}
+                                </span>
+                            ) : null}
+                            {error ? <span className="mt-1 block rounded-lg bg-[#FEF3F2] px-3 py-1.5 text-[12px] text-[#B42318] shadow ring-1 ring-[#FDA29B]">{error}</span> : null}
+                        </SectionNotice>
+                    </>
                 ) : null}
-                {error && editMode ? <div className="cms-ui relative z-[56] bg-[#FEF3F2] px-4 py-2 text-[12px] text-[#B42318]">{error}</div> : null}
 
                 {Component ? <Component {...(editMode ? content : stripHidden(content))} media={section.media || []} /> : <Fallback type={section.section_type} />}
 
@@ -199,6 +214,15 @@ export default function SectionSlot({ base, host, section, index, total, sibling
                 </Drawer>
             ) : null}
         </SectionEditContext.Provider>
+    );
+}
+
+function SectionNotice({ anchor, children }) {
+    const tools = useFloating(anchor, { pinned: true });
+    return (
+        <FloatingTools tools={tools} place={(r, s) => ({ left: r.left + r.width / 2 - s.w / 2, top: r.top + 44 })} className="max-w-[min(640px,calc(100vw-16px))]">
+            {children}
+        </FloatingTools>
     );
 }
 
