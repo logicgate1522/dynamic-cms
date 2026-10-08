@@ -1,3 +1,14 @@
+# Upgrade Notes — R20 tightened: readable and nothing off-screen
+
+- site-audit now also loads every page at `RESPONSIVE_WIDTHS` (default
+  390,1024), after letting in-view animations finish. It fails visible text
+  under 11px and text pushed past the screen edge.
+- R20 now covers 1024px (laptops), and requires the following: no text under
+  11px; fixed or absolute cards that scale (`clamp()`, `%`) and stay inside
+  their container; decorative images never on top of copy.
+
+---
+
 # Upgrade Notes — R30: edit mode never changes, hides or crowds the page
 
 - **New `components/cms/floating.jsx` (CORE).** One admin layer at the end of

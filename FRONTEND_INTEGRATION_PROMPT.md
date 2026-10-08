@@ -78,7 +78,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R17 | Look | Admin UI themed via `--cms-*`, never restyled; ≥4.5:1 contrast | acceptance (axe) | P1 |
 | R18 | Editing | Typing never loses focus: lists keyed by index | `check:inline`, acceptance | P3 |
 | R19 | Foundation | The site's server sends `X-CMS-Frontend` | `check:inline`, acceptance | P1 |
-| R20 | Look | Responsive at 390 / 768 / 1280 / 1920px, admin included | acceptance | P3 |
+| R20 | Look | Responsive at 390 / 768 / 1024 / 1280 / 1920px: readable, nothing cut off, admin included | acceptance, site-audit | P3 |
 | R21 | Quality | Every page passes the site audit | site-audit | P2, P6, P7 |
 | R22 | Launch | No launch-check blockers; never invent business details | `LAUNCH=1` site-audit | P7, P8 |
 | R23 | Editing | Blocks, items and sections can be hidden; hidden = gone for visitors | `check:inline`, acceptance | P3, P5 |
@@ -279,12 +279,19 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 
 #### R20 — Responsive on every screen
 - **Must:** every converted section keeps its behaviour at 390px, 768px,
-  1280px and ≥1920px. Content stays in a max-width container on large
-  screens. No horizontal scroll at any width. The admin bar collapses behind
-  "More" on phones and panels fit the screen.
+  1024px, 1280px and ≥1920px. Content stays in a max-width container on large
+  screens. No horizontal scroll at any width. Text is readable: nothing
+  visible below 11px. Nothing is pushed past the screen edge — fixed-width or
+  absolutely positioned cards scale with the viewport (`clamp()`, `%`) and
+  stay inside their container at tablet and laptop widths; decorative images
+  never sit on top of copy (keep copy in its own column or a faded area). The
+  admin UI follows R30 (one-line bar, panels fit the screen).
 - **Never:** a section that overflows on phones or stretches edge to edge on
-  large screens.
-- **Proven by:** acceptance "responsive: …" checks.
+  large screens; `text-[8px]`-style sizes; cards positioned with negative
+  offsets that leave the screen; layouts designed only for 390px and 1440px.
+- **Proven by:** acceptance "responsive: …" checks; site-audit at 390px and
+  1024px fails visible text under 11px and text off the screen (after in-view
+  animations finish).
 
 #### R21 — Every page passes the site audit
 - **Must:**
@@ -1450,7 +1457,8 @@ any of these, stop and undo it.
 - **R19** Server-side CMS fetches without `X-CMS-Frontend`, or the secret in
   browser code.
 - **R20** A section that overflows on phones or stretches edge to edge on
-  large screens, or admin panels wider than a phone.
+  large screens, text under 11px, cards that leave the screen at tablet or
+  laptop widths, or admin panels wider than a phone.
 - **R21** Duplicate or brand-doubled titles; descriptions outside 110–165
   chars; a page without og:image; two `<h1>`s (hidden mobile/desktop twins);
   a card `<h3>` straight under the `<h1>`; broken links; a sitemap URL that
@@ -1525,7 +1533,7 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R17** The `--cms-*` theme variables are set to the site palette, at ≥4.5:1 contrast with white. (acceptance "admin panels meet WCAG AA contrast")
 - [ ] **R18** Lists with editable fields are index-keyed; typing never loses focus. (`check:inline`, acceptance "typing keeps focus")
 - [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (`check:inline`; acceptance shows no 429s)
-- [ ] **R20** Every page works at 390px, 768px, 1280px and 1920px with no horizontal scroll; admin panels fit a phone. (acceptance "responsive…")
+- [ ] **R20** Every page works at 390px, 768px, 1024px, 1280px and 1920px: no horizontal scroll, no text under 11px, nothing cut off; admin panels fit a phone. (acceptance "responsive…", site-audit responsive checks)
 - [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
 - [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
 - [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")

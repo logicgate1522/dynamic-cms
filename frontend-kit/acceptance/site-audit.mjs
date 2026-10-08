@@ -35,6 +35,9 @@
      - a collection entry not linked from its index page; entries under
        ENTRY_MIN_WORDS (default 600) words of main content; a FORM_PAGE with
        under 120 words besides the form
+   - responsive (R20), at RESPONSIVE_WIDTHS (default 390,1024): visible text
+     smaller than 11px, or text pushed past the screen edge (after in-view
+     animations have finished)
    With LAUNCH=1 it also fails on launch blockers (placeholder text on pages,
    GET launch-check/: localhost site URL, leads that notify nobody, email not
    really sent, indexing off…). Without LAUNCH they are printed as warnings.
@@ -201,6 +204,49 @@ if (robotsSitemap && canonicalOrigin && new URL(robotsSitemap).origin !== canoni
     fail("/robots.txt", `Sitemap origin ${new URL(robotsSitemap).origin} ≠ canonical origin ${canonicalOrigin}`);
 }
 if (canonicalOrigin && /localhost|127\.0\.0\.1/.test(canonicalOrigin)) launch("site", `canonicals use ${canonicalOrigin} — set seoDefaults.siteUrl to the live domain`);
+
+/* ---------- responsive: readable and nothing off-screen (R20) ---------- */
+for (const width of (process.env.RESPONSIVE_WIDTHS || "390,1024").split(",").map(Number)) {
+    await page.setViewportSize({ width, height: width < 800 ? 844 : 900 });
+    for (const url of urls) {
+        const path = new URL(url).pathname;
+        await page.goto(`${SITE}${path}`, { waitUntil: "load" });
+        // Scroll through slowly so in-view animations run, then let them finish.
+        await page.evaluate(async () => {
+            for (let y = 0; y < document.body.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 120)); }
+            window.scrollTo(0, 0);
+        });
+        await page.waitForTimeout(1400);
+        const r = await page.evaluate((vw) => {
+            const out = { tiny: [], cut: [] };
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent.trim().length > 2 ? 1 : 2) });
+            const parents = new Set();
+            while (walker.nextNode()) parents.add(walker.currentNode.parentElement);
+            for (const el of parents) {
+                if (!el || el.closest("[aria-hidden='true'], [data-cms-adminbar], [data-cms-layer], script, style, noscript, [inert]")) continue;
+                const rect = el.getBoundingClientRect();
+                if (!rect.width || !rect.height) continue;
+                const cs = getComputedStyle(el);
+                if (cs.visibility === "hidden" || cs.opacity === "0") continue;
+                const text = el.textContent.trim().replace(/\s+/g, " ").slice(0, 40);
+                if (parseFloat(cs.fontSize) < 11) out.tiny.push(`${parseFloat(cs.fontSize)}px “${text}”`);
+                if (rect.right > vw + 2 || rect.left < -2) {
+                    let clip = null;
+                    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+                        const st = getComputedStyle(a);
+                        if (/(hidden|clip)/.test(st.overflowX + st.overflow)) { clip = a.getBoundingClientRect(); break; }
+                    }
+                    const cut = clip ? rect.right > Math.min(clip.right, vw) + 2 || rect.left < Math.max(clip.left, 0) - 2 : true;
+                    if (cut) out.cut.push(`“${text}” at ${Math.round(rect.left)}→${Math.round(rect.right)}`);
+                }
+            }
+            return { tiny: [...new Set(out.tiny)], cut: [...new Set(out.cut)] };
+        }, width);
+        if (r.tiny.length) fail(path, `[${width}px] text smaller than 11px: ${r.tiny.slice(0, 4).join(" | ")}`);
+        if (r.cut.length) fail(path, `[${width}px] text off the screen: ${r.cut.slice(0, 3).join(" | ")}`);
+    }
+}
+await page.setViewportSize({ width: 1440, height: 900 });
 
 /* ---------- internal links ---------- */
 const listed = new Set(urls.map((u) => new URL(u).pathname));
