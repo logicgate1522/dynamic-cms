@@ -1,3 +1,40 @@
+# Upgrade Notes — launch guide, search verification, analytics warnings
+
+- **New `LAUNCH_GUIDE.md`** (generic, owner-facing). It covers:
+  - the domain and Site URL;
+  - FormSubmit activation and alias;
+  - Google Search Console (DNS or HTML tag, submit the sitemap);
+  - Bing (import from Search Console);
+  - GTM + GA4 setup for the kit's events (`page_view`, `generate_lead`,
+    `contact_click`), with no double counting;
+  - cookie consent.
+
+  The P8 report and AGENTS point the owner to it. `IntegrationSpecTests`
+  checks that it covers every launch warning.
+- **Launch check:** new warnings:
+  - `search-verification`: no Google or Bing code;
+  - `analytics`: no tracking ID;
+  - `consent`: tracking on, but the consent default is not chosen.
+- **Settings API:** `verification` codes are validated. A pasted
+  `<meta … content="…">` is reduced to its code (`normalize_site_settings`).
+- **Settings page (kit):**
+  - New "Search engine verification" card under Tracking. It has help for
+    each engine, accepts the whole tag, and shows the sitemap URL to submit.
+  - Generic defaults: `Organization`, `en_US`, no country, no theme colour.
+  - More `organizationType` options.
+- **site-audit (R25):** fails when a verification code set in Settings is
+  missing from the home page `<head>`. Warns when none is set.
+- **Acceptance:** `frontend-kit/acceptance/package.json`. Run
+  `npm run setup` once in that folder to install playwright, axe-core and
+  chromium, then use the npm scripts.
+- **Spec:**
+  - R25 now covers verification.
+  - R22 mentions the warnings and the guide.
+  - The `launch-check/` contract row lists the real fields (`label`, `fix`,
+    `where`).
+
+---
+
 # Upgrade Notes — fresh-install test, keyword H1 check, touch check
 
 - **New `frontend-kit/acceptance/fresh-install.mjs`.** It scaffolds a blank

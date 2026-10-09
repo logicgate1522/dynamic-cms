@@ -21,7 +21,7 @@ const TEMPLATE = {
             addressLocality: "",
             addressRegion: "",
             postalCode: "",
-            addressCountry: "GB",
+            addressCountry: "",
             telephone: "",
             priceRange: "",
             openingHours: [{ days: ["Monday"], opens: "09:00", closes: "17:30" }],
@@ -37,12 +37,11 @@ const TEMPLATE = {
         twitterHandle: "",
         twitterCard: "summary_large_image",
         robots: { index: true, follow: true },
-        themeColor: "#071224",
-        locale: "en_GB",
+        themeColor: "",
+        locale: "en_US",
         searchUrl: "",
     },
-    verification: { google: "", bing: "", yandex: "", pinterest: "", facebookDomain: "" },
-    schema: { organizationType: "AccountingService", enabled: true },
+    schema: { organizationType: "Organization", enabled: true },
     robotsTxt: { disallow: ["/api/"], allow: [""] },
 };
 
@@ -57,11 +56,24 @@ const HINTS = {
     "seoDefaults.twitterCard": { type: "select", options: ["summary_large_image", "summary"] },
     "seoDefaults.robots.index": { label: "Allow search engines to index the site (turn off on staging)" },
     "seoDefaults.searchUrl": { help: "Optional. e.g. https://site/search?q={query}" },
-    "schema.organizationType": { type: "select", options: ["Organization", "LocalBusiness", "AccountingService", "ProfessionalService"] },
+    "seoDefaults.locale": { help: "Language_REGION, e.g. en_GB or en_US." },
+    "schema.organizationType": { help: "The schema.org type that best fits the business (LocalBusiness subtypes only with a real address)." },
+    "schema.organizationType": { type: "select", options: ["Organization", "LocalBusiness", "ProfessionalService", "AccountingService", "LegalService", "FinancialService", "HomeAndConstructionBusiness", "Store", "Restaurant", "MedicalBusiness"] },
     "locations[].openingHours[].days": { label: "Days" },
 };
 
 // Shown in their own cards at the top (not in the generic form below).
+const VERIFICATION_DEFAULTS = { google: "", bing: "", yandex: "", pinterest: "", facebookDomain: "" };
+const VERIFICATION_FIELDS = [
+    ["google", "Google Search Console", "google-site-verification", "Search Console → Add property → URL prefix → HTML tag."],
+    ["bing", "Bing Webmaster Tools", "msvalidate.01", "Or skip this: Bing can import your site from Search Console."],
+    ["yandex", "Yandex Webmaster", "yandex-verification", ""],
+    ["pinterest", "Pinterest", "p:domain_verify", ""],
+    ["facebookDomain", "Meta (Facebook) domain", "facebook-domain-verification", "Business settings → Brand safety → Domains → Meta-tag."],
+];
+// Owners paste the whole <meta> tag; keep only its content="…" code.
+const verificationCode = (text) => (String(text).match(/content\s*=\s*["']([^"']+)["']/i)?.[1] ?? text).trim();
+
 const FORMS_DEFAULTS = { notifyEmail: "", subjectPrefix: "New website enquiry" };
 const ANALYTICS_DEFAULTS = {
     gtmId: "", ga4Id: "", googleAdsId: "", googleAdsLeadLabel: "", metaPixelId: "", tiktokPixelId: "",
@@ -105,6 +117,7 @@ export default function SettingsPage() {
             setDraft({
                 ...mergeDefaults(TEMPLATE, data),
                 forms: { ...FORMS_DEFAULTS, ...(data.forms || {}) },
+                verification: { ...VERIFICATION_DEFAULTS, ...(data.verification || {}) },
                 analytics: { ...ANALYTICS_DEFAULTS, ...(data.analytics || {}), events: { ...ANALYTICS_DEFAULTS.events, ...(data.analytics?.events || {}) } },
             });
         }
@@ -137,6 +150,7 @@ export default function SettingsPage() {
                 <div className="mb-6 space-y-6">
                     <FormNotificationsCard value={draft.forms} onChange={(forms) => setDraft({ ...draft, forms })} />
                     <TrackingCard value={draft.analytics} onChange={(analytics) => setDraft({ ...draft, analytics })} />
+                    <VerificationCard value={draft.verification} siteUrl={draft.seoDefaults?.siteUrl} onChange={(verification) => setDraft({ ...draft, verification })} />
                 </div>
             ) : null}
             {draft ? (
@@ -276,6 +290,36 @@ function TrackingCard({ value, onChange }) {
                     </label>
                 ))}
             </details>
+        </Card>
+    );
+}
+
+// Search engine ownership. Without it the owner can't see indexing, queries or
+// errors, or submit the sitemap — the launch check warns until one is set.
+function VerificationCard({ value, siteUrl, onChange }) {
+    const base = String(siteUrl || "").replace(/\/+$/, "");
+    const live = /^https:\/\//.test(base) && !/localhost|127\.0\.0\.1/.test(base);
+    return (
+        <Card data-cms-settings="verification">
+            <h2 className="text-[15px] font-bold">Search engine verification</h2>
+            <p className="mt-1 text-[13px] text-[#475569]">
+                Proves you own the site so you can use Google Search Console and Bing Webmaster Tools. Paste the code or the whole
+                {" "}<code>&lt;meta&gt;</code> tag you were given; the tag is added to every page. Verifying the whole domain with a DNS
+                record at your domain registrar works too and needs nothing here.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {VERIFICATION_FIELDS.map(([key, label, meta, help]) => (
+                    <label key={key} className="block">
+                        <Label help={help}>{label}</Label>
+                        <input className={inputClass} value={value[key] || ""} placeholder={`code from <meta name="${meta}" …>`} onChange={(e) => onChange({ ...value, [key]: verificationCode(e.target.value) })} data-cms-field={`verification.${key}`} />
+                    </label>
+                ))}
+            </div>
+            <p className="mt-4 text-[12px] text-[#64748B]">
+                After saving, click <strong>Verify</strong> in the search tool, then submit your sitemap:{" "}
+                <code>{live ? `${base}/sitemap.xml` : "https://your-domain/sitemap.xml"}</code>
+                {live ? null : " (set the Public site URL below to your live https:// domain first)"}.
+            </p>
         </Card>
     );
 }

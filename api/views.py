@@ -37,7 +37,7 @@ from . import schema_builders
 from .seo_resolve import resolve_seo
 from .form_validation import validate_submission
 from .schema_validation import validate_against_schema
-from .settings_validation import validate_site_settings
+from .settings_validation import normalize_site_settings, validate_site_settings
 from .serializers import (
     BlogPostSerializer,
     ComponentRevisionSerializer,
@@ -386,15 +386,16 @@ class SiteSettingsView(APIView):
         return Response(settings_row.data if settings_row else {})
 
     def patch(self, request, *args, **kwargs):
-        errors = validate_site_settings(request.data)
+        payload = normalize_site_settings(request.data)
+        errors = validate_site_settings(payload)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             settings_row, created = SiteSettings.objects.select_for_update().get_or_create(
-                pk=1, defaults={"data": request.data}
+                pk=1, defaults={"data": payload}
             )
             if not created:
-                settings_row.data = deep_merge(settings_row.data or {}, request.data)
+                settings_row.data = deep_merge(settings_row.data or {}, payload)
                 settings_row.save()
         return Response(settings_row.data)
 

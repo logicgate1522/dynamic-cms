@@ -204,6 +204,11 @@ is referenced (`?force=1` overrides).
   `frontend-kit/acceptance/acceptance.mjs` (end-to-end test: login, inline edit
   → draft → publish → webhook → visitor sees it, AI paste, discard, SEO AI,
   section editing, page creation, admin pages, sign out).
+  `site-audit.mjs` checks every page (SEO, consistency, forms, responsive,
+  launch readiness). Run them from `frontend-kit/acceptance` after
+  `npm run setup`.
+- **`LAUNCH_GUIDE.md`**: the owner's go-live steps outside the code: domain,
+  lead emails, Google Search Console, Bing, GTM/GA4 and cookie consent.
 
 ## Configuration
 
@@ -240,6 +245,8 @@ the load-bearing ones:
 6. Run under `gunicorn backend.wsgi:application` (already in
    `requirements.txt`).
 7. Optional: set `REDIS_URL` once you're running more than one worker.
+8. Hand the owner `LAUNCH_GUIDE.md` (Search Console, analytics, consent);
+   the dashboard's launch check lists what's still open.
 
 All of the above has been verified end-to-end (production-mode `check`,
 `collectstatic`, cache behavior with and without `REDIS_URL`, a real

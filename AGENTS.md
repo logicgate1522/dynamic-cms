@@ -24,7 +24,10 @@ instructions the docs already answer.
    production build. Every phase ends with its Exit check; P8 verifies in three
    passes (fix until green → clean re-verification with no code changes →
    rule-by-rule audit against §13 and §11). Paste the Pass 2 output in your
-   report, plus any launch-check blockers that need the owner.
+   report, plus any launch-check blockers and warnings that need the owner,
+   and point the owner to `LAUNCH_GUIDE.md` (domain, leads, Search Console,
+   Bing, GTM/GA4, consent). The gates run from `frontend-kit/acceptance`
+   (`npm run setup` once).
 5. Never:
    - put a token in browser storage
    - build modal-first editing
@@ -35,8 +38,10 @@ instructions the docs already answer.
    - leave a `useCms` component without `if (hidden) return null` (R23)
    - submit a form any way but `submitForm()` from `lib/forms.js`, or
      hard-code / invent the recipient (R24 — it's Settings → Form notifications)
-   - hard-code a tracking tag or call `gtag`/`fbq`/`dataLayer.push` outside
-     `lib/track.js` (R25 — IDs live in Settings → Tracking & analytics)
+   - hard-code a tracking tag or a search-verification `<meta>`, or call
+     `gtag`/`fbq`/`dataLayer.push` outside `lib/track.js` (R25 — IDs live in
+     Settings → Tracking & analytics, codes in Settings → Search engine
+     verification)
    - publish a claim the owner hasn't confirmed: stats, ratings, reviews,
      credentials, "fixed fees" (R26)
    - hard-code or publish a contact channel the owner didn't approve, or
@@ -82,7 +87,8 @@ instructions the docs already answer.
   - Auth: session + CSRF (`api/auth_views.py`, `AdminLoginView` with
     `session: true`). Token login stays for scripts only.
   - Launch readiness: `api/launch_check.py` (`GET launch-check/`). Anything
-    that silently hurts a live site belongs here as a blocker or warning.
+    that silently hurts a live site belongs here as a blocker or warning,
+    and any owner step it asks for is explained in `LAUNCH_GUIDE.md`.
   - Cascades on delete (PageSEO and sections follow their page): `api/cleanup.py`.
   - Title assembly (brand never doubled; dropped past 60 chars):
     `seo_resolve.apply_title_template`.

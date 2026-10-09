@@ -1,0 +1,17 @@
+{
+  "name": "dynamic-cms-acceptance",
+  "private": true,
+  "description": "Gates for a dynamic-cms integration: run them from this folder (npm run setup once).",
+  "type": "module",
+  "scripts": {
+    "setup": "npm install && npx playwright install chromium",
+    "acceptance": "node acceptance.mjs",
+    "audit": "node site-audit.mjs",
+    "audit:launch": "LAUNCH=1 node site-audit.mjs",
+    "fresh-install": "node fresh-install.mjs"
+  },
+  "dependencies": {
+    "axe-core": "^4.14.0",
+    "playwright": "^1.56.1"
+  }
+}

@@ -23,6 +23,27 @@ TRACKING_IDS = (
     ("hotjarId", r"^\d{5,12}$", "1234567"),
 )
 
+# Search engine verification codes (rendered as <meta> tags by the frontend).
+VERIFICATION_KEYS = ("google", "bing", "yandex", "pinterest", "facebookDomain")
+VERIFICATION_RE = re.compile(r"^[A-Za-z0-9_\-+=/.:]{4,200}$")
+_META_CONTENT_RE = re.compile(r"""content\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def verification_code(value):
+    """Owners paste the whole tag Google/Bing give them; keep only the code."""
+    text = str(value or "").strip()
+    match = _META_CONTENT_RE.search(text)
+    return (match.group(1) if match else text).strip()
+
+
+def normalize_site_settings(payload):
+    """Clean values owners commonly paste wrong, before validation."""
+    if isinstance(payload, dict) and isinstance(payload.get("verification"), dict):
+        payload = {**payload, "verification": {
+            k: verification_code(v) if k in VERIFICATION_KEYS else v for k, v in payload["verification"].items()}}
+    return payload
+
+
 _STR_ARRAY_KEYS = [
     ("analytics", "customHead"),
     ("analytics", "customBodyStart"),
@@ -105,6 +126,16 @@ def validate_site_settings(payload):
                 errors["forms.notifyEmail"] = "Must be an email address (or the FormSubmit alias from its activation email)."
             if "subjectPrefix" in forms and not isinstance(forms["subjectPrefix"], str):
                 errors["forms.subjectPrefix"] = "Must be a string."
+
+    verification = payload.get("verification")
+    if verification is not None:
+        if not isinstance(verification, dict):
+            errors["verification"] = "Must be an object."
+        else:
+            for key in VERIFICATION_KEYS:
+                value = str(verification.get(key) or "").strip()
+                if value and not VERIFICATION_RE.match(value):
+                    errors[f"verification.{key}"] = "Paste only the code (the content=\"…\" value of the tag you were given)."
 
     # Tracking IDs: a wrong ID silently tracks nothing, so check the shape.
     analytics = payload.get("analytics")

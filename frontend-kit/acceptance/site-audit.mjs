@@ -18,6 +18,8 @@
    - invalid JSON-LD; no BreadcrumbList (except home); articles without
      Article/BlogPosting; FAQ pages without FAQPage
    - <img> without alt
+   - a search engine verification code set in Settings whose <meta> tag is
+     missing from the home page <head>
    - broken internal links; robots.txt without a Sitemap line, or one whose
      origin differs from the canonicals
    - contact details that disagree: more than one phone number or email
@@ -42,7 +44,7 @@
    GET launch-check/: localhost site URL, leads that notify nobody, email not
    really sent, indexing off…). Without LAUNCH they are printed as warnings.
 
-   Setup: npm i playwright && npx playwright install chromium
+   Setup (once, in this folder): npm run setup
    The submission it creates is deleted again at the end.
 ========================================================================= */
 
@@ -86,6 +88,25 @@ const publicSettings = await (await fetch(`${API}/settings/site/`)).json().catch
 const allowedPhone = String(publicSettings.contact?.phone || "").replace(/\(0\)/g, "").replace(/[^\d]/g, "").replace(/^44/, "0");
 const allowedEmail = String(publicSettings.contact?.email || "").toLowerCase().trim();
 const notifyAddress = String(publicSettings.forms?.notifyEmail || "").toLowerCase().trim();
+
+/* ---------- search engine verification (R25) ---------- */
+// Every code set in Settings must be in the home page's <head> as the meta
+// tag the search engine looks for, or "Verify" fails in its console.
+{
+    const VERIFY_META = { google: "google-site-verification", bing: "msvalidate.01", yandex: "yandex-verification", pinterest: "p:domain_verify", facebookDomain: "facebook-domain-verification" };
+    const home = await (await fetch(`${SITE}/`)).text();
+    const head = home.split(/<\/head>/i)[0];
+    for (const [key, name] of Object.entries(VERIFY_META)) {
+        const code = String(publicSettings.verification?.[key] || "").trim();
+        if (!code) continue;
+        const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const tag = new RegExp(`<meta[^>]*name="${esc(name)}"[^>]*content="${esc(code)}"|<meta[^>]*content="${esc(code)}"[^>]*name="${esc(name)}"`, "i");
+        if (!tag.test(head)) fail("/", `verification.${key} is set but <meta name="${name}" content="${code}"> is not in the home page <head>`);
+    }
+    if (!["google", "bing"].some((k) => String(publicSettings.verification?.[k] || "").trim())) {
+        warn("/", "no Google or Bing verification code in Settings (fine if the domain is verified by DNS) — see LAUNCH_GUIDE.md");
+    }
+}
 const note = (map, value, path) => { if (!map.has(value)) map.set(value, new Set()); map.get(value).add(path); };
 const descriptions = {};
 const links = new Map();

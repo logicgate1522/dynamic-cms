@@ -22,3 +22,7 @@ staticfiles/
 
 .venv/
 venvs/
+
+# acceptance test dependencies (npm run setup)
+frontend-kit/acceptance/node_modules/
+frontend-kit/acceptance/package-lock.json

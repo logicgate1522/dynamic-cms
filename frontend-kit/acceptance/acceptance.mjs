@@ -3,8 +3,8 @@
    Acceptance test for a frontend wired with the dynamic-cms frontend kit.
    An integration is DONE only when every check here passes.
 
-   Setup (once, in any folder):
-     npm i playwright axe-core && npx playwright install chromium
+   Setup (once):
+     cd frontend-kit/acceptance && npm run setup   (playwright, axe-core and chromium)
 
    Run (frontend production build + backend both running):
      SITE_URL=http://localhost:3000 API_URL=http://localhost:8000 \

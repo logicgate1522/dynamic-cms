@@ -137,6 +137,26 @@ def run_launch_check():
         add("robots-off", "blocker", "Search engines are blocked site-wide",
             "seoDefaults.robots.index is false (a staging setting).", "Turn indexing back on in Settings → SEO defaults.")
 
+    verification = site.get("verification") or {}
+    if not any(str(verification.get(k) or "").strip() for k in ("google", "bing")):
+        add("search-verification", "warning", "Search Console is not verified",
+            "No Google or Bing verification code is set, so you can't see indexing, queries or errors, or submit the sitemap.",
+            "Search Console → Add property → URL prefix → HTML tag: paste it in Settings → Search engine verification "
+            "(or verify the whole domain with a DNS record). Then submit /sitemap.xml. See LAUNCH_GUIDE.md.")
+
+    # 2b. Measurement: without an ID no visit or lead is counted.
+    from .settings_validation import TRACKING_IDS
+    analytics = site.get("analytics") or {}
+    tracking = [key for key, _, _ in TRACKING_IDS if key != "googleAdsLeadLabel" and str(analytics.get(key) or "").strip()]
+    if not tracking and not any(analytics.get(k) for k in ("customHead", "customBodyStart", "customBodyEnd")):
+        add("analytics", "warning", "No analytics is set up",
+            "No tracking ID is set, so visits and leads are not measured anywhere.",
+            "Add a Google Tag Manager or GA4 ID in Settings → Tracking & analytics. See LAUNCH_GUIDE.md.")
+    elif tracking and not analytics.get("consentDefault"):
+        add("consent", "warning", "Consent default is not chosen",
+            "Tracking is on but the Consent Mode default is “Not set”.",
+            "Choose it in Settings → Tracking & analytics: “denied” with a cookie banner where the law requires opt-in (UK/EU).")
+
     # 3. Leads must reach someone: FormSubmit (Settings → Form notifications)
     #    is the standard; backend SMTP (FORM_NOTIFICATION_EMAIL) is optional.
     formsubmit = str((site.get("forms") or {}).get("notifyEmail") or "").strip()

@@ -83,7 +83,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R22 | Launch | No launch-check blockers; never invent business details | `LAUNCH=1` site-audit | P7, P8 |
 | R23 | Editing | Blocks, items and sections can be hidden; hidden = gone for visitors | `check:inline`, acceptance | P3, P5 |
 | R24 | Leads | Forms use `submitForm()`; email via FormSubmit to Settings address | `check:inline`, acceptance | P4, P7 |
-| R25 | Tracking | Tracking configured in Site tools; events via `track()` | `check:inline`, acceptance | P1, P7 |
+| R25 | Tracking | Tracking and search verification configured in Site tools; events via `track()` | `check:inline`, acceptance, site-audit | P1, P7 |
 | R26 | Truth | Every claim is true: no invented stats, ratings, reviews, credentials or price promises | launch-check, site-audit | P0, P3, P7 |
 | R27 | Identity | Brand and contact details come from one place, and only what the owner publishes | `check:inline`, site-audit | P0, P3, P7 |
 | R28 | Pages | What the business sells is its real list, each a complete, linked page | site-audit, acceptance | P5 |
@@ -322,7 +322,10 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   `0000 000000`, "New section"…); `seoDefaults.siteUrl` is the live https
   domain; indexing on; lead forms email a real, activated address (R24); the
   cache webhook is configured. Anything left is listed in the report under
-  "Needs from the owner".
+  "Needs from the owner". Launch-check **warnings** cover the owner's own
+  launch steps (search verification, analytics, consent default, FormSubmit
+  alias, default social image); `LAUNCH_GUIDE.md` explains each one step by
+  step, and the P8 report hands it to the owner.
 - **Never:** invent business details to clear a blocker (this is the one
   case where R12 does not apply).
 - **Proven by:** `LAUNCH=1 node site-audit.mjs`; the dashboard card.
@@ -360,8 +363,12 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   via FormSubmit to the Settings address", "generate_lead is pushed…", "the
   submission is also in the CMS inbox".
 
-#### R25 — Tracking is configured in Site tools, never in code
-- **Must:** GTM, GA4, Google Ads (+ lead label), Meta Pixel, TikTok, LinkedIn
+#### R25 — Tracking and verification are configured in Site tools, never in code
+- **Must:** search engine verification codes (Google, Bing, Yandex,
+  Pinterest, Meta domain) are set in **Site tools → Settings → Search engine
+  verification** (a pasted `<meta>` tag is reduced to its code, then
+  validated) and rendered in every page's `<head>` by `verificationFrom()` in
+  `lib/seo.js` through the root layout's metadata. GTM, GA4, Google Ads (+ lead label), Meta Pixel, TikTok, LinkedIn
   (+ lead conversion id), Clarity and Hotjar are IDs in **Site tools →
   Settings → Tracking & analytics** (validated server-side), together with
   **data layer variables** (pushed before GTM loads), the Google
@@ -371,11 +378,14 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   `lib/track.js` only. The kit fires `page_view` (in-site navigation),
   `generate_lead` (`{form_name}`) and `contact_click` (`{method, value}`);
   with GTM present it does not also call gtag (no double counting).
-- **Never:** a tag snippet or ID hard-coded in the layout; `gtag` / `fbq` /
-  `dataLayer.push` called from a component; data layer variables added in code.
+- **Never:** a tag snippet, ID or verification `<meta>` hard-coded in the
+  layout; `gtag` / `fbq` / `dataLayer.push` called from a component; data
+  layer variables added in code.
 - **Proven by:** `check:inline`; acceptance "data layer variables are pushed
   before GTM", "the GTM container from Settings is loaded", "page_view is
-  pushed on in-site navigation".
+  pushed on in-site navigation"; site-audit fails when a verification code set
+  in Settings is missing from the home page `<head>`; launch-check warns while
+  no verification code, no analytics ID or no consent default is set.
 
 #### R26 — Every claim is true
 - **Must:** publish only numbers, ratings, reviews, credentials, memberships,
@@ -691,7 +701,8 @@ Then report:
 3. "Defaults taken" (R12)
 4. "Needs from the owner": every launch-check blocker that needs real
    business data or production config (R22), plus the FormSubmit activation
-   step (R24)
+   step (R24), every remaining launch-check warning, and a pointer to
+   `LAUNCH_GUIDE.md` (domain, leads, Search Console, Bing, GTM/GA4, consent)
 
 **Exit check P8:** Pass 2 ran with no file changes after it; every §13 line
 has evidence; nothing in §11 exists in the code.
@@ -1013,7 +1024,7 @@ returns 403.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET/PATCH | `settings/site/` | public / admin | Site identity, SEO defaults, `forms` (R24), `analytics` (R25), `ai`, `collections`, `sitemap` (validated) |
-| GET | `launch-check/` | admin | `{ready, items:[{id, level: blocker\|warning, title, detail}]}` (R22) |
+| GET | `launch-check/` | admin | `{ready, blockers, warnings, items:[{id, level: blocker\|warning, label, detail, fix, where?}]}` (R22; owner steps for the warnings: `LAUNCH_GUIDE.md`) |
 | GET | `settings/site/schema/organization/` | public | Organization + WebSite JSON-LD |
 | GET | `seo/` · GET/PATCH `seo/<path>/` | public / admin | Per-page SEO blob (home = `seo/home/`) |
 | GET | `seo/resolve/` · `seo/resolve/<path>/` | public | Fully resolved metadata + JSON-LD (root = home) |
@@ -1083,6 +1094,8 @@ Blog posts mirror all of these under `blog/<slug>/…`.
   "seoDefaults": { "siteUrl", "titleTemplate": "%s | Site", "defaultTitle", "defaultDescription",
                    "defaultOgImage", "defaultOgImageAlt", "twitterHandle", "twitterCard",
                    "robots": { "index": true, "follow": true }, "themeColor", "locale": "en_US" },
+  // R25 — Settings → Search engine verification. Codes only; a pasted
+  // <meta … content="…"> is reduced to its content before validation.
   "verification": { "google", "bing", "yandex", "pinterest", "facebookDomain" },
   // R24 — Settings → Form notifications (first card). FormSubmit.co recipient:
   // a plain email, or the FormSubmit alias (16–64 letters/digits) after activation.
@@ -1364,10 +1377,16 @@ rules, the runtime resolver for CMS-managed ones.
 
 ### Verification & analytics
 
-GSC + Bing Webmaster via `settings/site/verification`. Every tracking tag
-via IDs in `analytics` (R25), rendered by `<Analytics>`, events via
-`track()`. Consent: set `analytics.consentDefault` to `denied` where the
-law requires opt-in, and let the consent banner/GTM update it.
+GSC + Bing Webmaster via `settings/site/verification` (R25), edited in the
+"Search engine verification" settings card; Search Console's DNS (Domain
+property) method needs nothing in the site. Every tracking tag via IDs in
+`analytics` (R25), rendered by `<Analytics>`, events via `track()`
+(`page_view` on in-site navigation, `generate_lead`, `contact_click`). With
+GTM, leave the GA4 field empty and fire GA4 from GTM; turn off GA4's
+"page changes based on browser history events" (the kit already sends
+those). Consent: set `analytics.consentDefault` to `denied` where the law
+requires opt-in, and let a consent banner (GTM template or custom code)
+update it. The owner-facing steps are in `LAUNCH_GUIDE.md`.
 UTM hygiene; `referrerPolicy`.
 
 ### Social / preview
@@ -1475,7 +1494,7 @@ any of these, stop and undo it.
 - **R24** A form posted with its own `fetch`, `mailto:`, EmailJS / Formspree
   or a hard-coded recipient instead of `submitForm()` and the Settings
   address; a lead address invented to clear the launch check.
-- **R25** A tracking snippet or ID hard-coded in the layout; `gtag` / `fbq` /
+- **R25** A tracking snippet, ID or verification `<meta>` hard-coded in the layout; `gtag` / `fbq` /
   `dataLayer.push` called from a component; a data layer variable added in
   code instead of Settings → Tracking.
 - **R26** Invented stats, ratings, testimonials, credentials or "fixed fees";
@@ -1540,7 +1559,7 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
 - [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")
 - [ ] **R24** Every form uses `submitForm()`; leads are stored, emailed via FormSubmit to Settings → Form notifications (first settings card, test button works) and tracked. (`check:inline`, acceptance "emailed via FormSubmit…")
-- [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking; `<Analytics>` renders them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…")
+- [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking, and verification codes in Settings → Search engine verification; `<Analytics>` and the layout metadata render them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…", site-audit verification check)
 - [ ] **R26** Every claim on the site is confirmed by the owner; none invented; placeholder social proof hidden; industry facts current. (launch-check "claims", site-audit `[claims]`)
 - [ ] **R27** Brand and contact details come from settings only; only owner-approved channels appear; the notification address is never shown. (`check:inline`, site-audit contact checks)
 - [ ] **R28** One complete page per real offering, each ≥600 words, linked from its index, home and footer, with its guide; retired URLs 301. (site-audit collections, acceptance)

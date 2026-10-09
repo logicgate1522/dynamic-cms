@@ -2043,6 +2043,20 @@ class IntegrationSpecTests(APITestCase):
                 stale = {m for m in re.findall(r"R1[–-]R(\d+)", path.read_text()) if int(m) != rules[-1]}
                 self.assertFalse(stale, f"{doc} names a stale rule range (rules go to R{rules[-1]})")
 
+    def test_owner_launch_guide_covers_every_launch_warning(self):
+        """Every owner step the launch check asks for is explained in LAUNCH_GUIDE.md,
+        and the spec, AGENTS and README send people there."""
+        root, spec, _, _ = self._spec()
+        guide = (root / "LAUNCH_GUIDE.md").read_text()
+        for topic in ("Public site URL", "Form notifications", "FormSubmit", "Search Console", "sitemap.xml",
+                      "Search engine verification", "Bing", "Tag Manager", "GA4", "generate_lead",
+                      "Consent default", "cookie banner", "launch check"):
+            self.assertIn(topic, guide, f"LAUNCH_GUIDE.md must cover {topic}")
+        self.assertIn("LAUNCH_GUIDE.md", spec)
+        for doc in ("AGENTS.md", "README.md"):
+            self.assertIn("LAUNCH_GUIDE.md", (root / doc).read_text(), doc)
+        self.assertNotRegex(guide, r"(?i)zfk|accountan", "the launch guide is generic")
+
 
 class TitleTemplateTests(APITestCase):
     def test_brand_is_not_doubled_and_long_titles_drop_it(self):
@@ -2112,6 +2126,54 @@ class LaunchCheckTests(AdminAuthMixin, APITestCase):
 
     def test_admin_only(self):
         self.assertEqual(self.client.get("/api/launch-check/").status_code, 401)
+
+    def test_warns_until_search_console_and_analytics_are_set_up(self):
+        _, ids = self._ids()
+        self.assertEqual(ids["search-verification"]["level"], "warning")
+        self.assertEqual(ids["analytics"]["level"], "warning")
+        self.assertIn("LAUNCH_GUIDE.md", ids["search-verification"]["fix"])
+        self.admin_client.patch("/api/settings/site/", {"verification": {"google": "abc123XYZ_-"}, "analytics": {"gtmId": "GTM-ABC1234"}}, format="json")
+        _, ids = self._ids()
+        self.assertNotIn("search-verification", ids)
+        self.assertNotIn("analytics", ids)
+        self.assertEqual(ids["consent"]["level"], "warning")
+        self.admin_client.patch("/api/settings/site/", {"analytics": {"consentDefault": "denied"}}, format="json")
+        _, ids = self._ids()
+        self.assertNotIn("consent", ids)
+
+    def test_bing_alone_counts_as_verified(self):
+        self.admin_client.patch("/api/settings/site/", {"verification": {"bing": "0123456789ABCDEF0123456789ABCDEF"}}, format="json")
+        _, ids = self._ids()
+        self.assertNotIn("search-verification", ids)
+
+
+class SearchVerificationSettingsTests(AdminAuthMixin, APITestCase):
+    def patch(self, body):
+        return self.admin_client.patch("/api/settings/site/", body, format="json")
+
+    def test_a_pasted_meta_tag_is_reduced_to_its_code(self):
+        r = self.patch({"verification": {
+            "google": '<meta name="google-site-verification" content="AbC123_dEf-456" />',
+            "bing": "<meta name='msvalidate.01' content='0123456789ABCDEF' >",
+            "pinterest": "  abc123def456  ",
+        }})
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["verification"]["google"], "AbC123_dEf-456")
+        self.assertEqual(r.data["verification"]["bing"], "0123456789ABCDEF")
+        self.assertEqual(r.data["verification"]["pinterest"], "abc123def456")
+
+    def test_garbage_is_rejected_with_a_hint(self):
+        r = self.patch({"verification": {"google": "<script>alert(1)</script>", "bing": "has spaces in it"}})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("verification.google", r.data)
+        self.assertIn("verification.bing", r.data)
+        self.assertIn("content=", r.data["verification.google"])
+
+    def test_codes_reach_the_resolved_metadata(self):
+        self.patch({"verification": {"google": "gsc-code-1"}})
+        r = self.client.get("/api/seo/resolve/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["verification"]["google"], "gsc-code-1")
 
 
 class SubmissionDeleteTests(AdminAuthMixin, APITestCase):
