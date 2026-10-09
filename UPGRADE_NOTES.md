@@ -1,3 +1,22 @@
+# Upgrade Notes — fresh-install test, keyword H1 check, touch check
+
+- **New `frontend-kit/acceptance/fresh-install.mjs`.** It scaffolds a blank
+  Next app, installs the kit verbatim, applies the MANIFEST ADAPT steps, adds
+  the spec's layout and a §3 section, then runs `check-inline` and
+  `next build` with the CMS unreachable. Run it after every kit change
+  (AGENTS.md).
+- **MANIFEST.** `DraftPreview` also imports `RelatedArticles`, and the
+  "no legacy article components" adaptation is now spelled out.
+- **site-audit (R29).** An H1 that shares no keyword with the page title
+  fails. The brand phrase is ignored when comparing.
+- **Acceptance.**
+  - New check: tapping a block on a touch device shows its tools.
+  - Scrolling is instant, so smooth-scroll sites can't skew the checks.
+  - Keyword leftovers from killed runs are ignored when recording originals.
+- The "new page" form's placeholders are generic.
+
+---
+
 # Upgrade Notes — R20 tightened: readable and nothing off-screen
 
 - site-audit now also loads every page at `RESPONSIVE_WIDTHS` (default

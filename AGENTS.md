@@ -99,6 +99,11 @@ instructions the docs already answer.
   the acceptance test, then pulled in with
   `python frontend-kit/sync_kit.py <frontend>`. Never hand-edit
   `frontend-kit/src` alone.
+- **The kit must work in any project.** After any kit change run
+  `NODE_MODULES=<frontend>/node_modules node frontend-kit/acceptance/fresh-install.mjs`
+  (a blank Next app + the kit + the MANIFEST ADAPT steps must build), and keep
+  the kit, spec, AGENTS and MANIFEST free of any one site's names, services or
+  wording — site specifics live only in the site's own files and CMS data.
 - **Adding or changing a rule in the spec:** keep its five copies in step —
   the §0.1 index row (with its gate and phase), a §0.2 card with Must / Never
   / Proven by, the `Rules:` line of the §2 phase that builds it, a §11

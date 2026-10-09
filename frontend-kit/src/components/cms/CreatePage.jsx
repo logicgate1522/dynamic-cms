@@ -93,10 +93,10 @@ export function CreatePageForm({ onDone, defaultKind = "content" }) {
             {mode === "brief" ? (
                 <Step number={1} title="Brief">
                     <Segmented value={kind} onChange={setKind} options={[["content", "Page"], ["blog", "Blog article"]]} />
-                    <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title / H1 (e.g. VAT Returns for Small Businesses)" />
+                    <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title / H1 (e.g. Our Services for Small Businesses)" />
                     {kind === "content" ? (
                         <div className="grid grid-cols-2 gap-2">
-                            <input className={field} value={path} onChange={(e) => setPath(e.target.value)} placeholder={`URL path, e.g. services/${slug(title) || "vat-returns"}`} />
+                            <input className={field} value={path} onChange={(e) => setPath(e.target.value)} placeholder={`URL path, e.g. ${slug(title) || "our-services"}`} />
                             <select className={field} value={pageType} onChange={(e) => setPageType(e.target.value)}>
                                 {["service", "landing", "local-service", "generic"].map((t) => <option key={t} value={t}>{humanize(t)} page</option>)}
                             </select>

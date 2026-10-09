@@ -186,6 +186,9 @@ try {
     // A unique keyword so coverage starts at 0% and must rise after Apply.
     const seoKey = PAGE.replace(/^\/+|\/+$/g, "") || "home";
     originalSeo = (await admin(`seo/${seoKey}/`)).body || {};
+    // A run that was killed mid-way can leave its test keyword behind; never
+    // "restore" to that.
+    if (/^kwacc/.test(originalSeo.keywords?.primary || "")) originalSeo = { ...originalSeo, keywords: { ...originalSeo.keywords, primary: "" } };
     const KW = `kw${STAMP.toLowerCase()}`;
     await adminWrite(`seo/${seoKey}/`, "PATCH", { keywords: { primary: KW } });
     await page.reload();
@@ -336,7 +339,7 @@ try {
         for (const i of roots.slice(0, 8)) {
             const point = await page.evaluate((idx) => {
                 const root = document.querySelectorAll("span.cms-ui[hidden]")[idx].parentElement;
-                root.scrollIntoView({ block: "center" });
+                root.scrollIntoView({ block: "center", behavior: "instant" });
                 const r = root.getBoundingClientRect();
                 // A point inside the block, clear of the fixed header and the admin bar.
                 const top = Math.max(r.top + 4, 100);
@@ -370,6 +373,26 @@ try {
             height: Math.round(row.getBoundingClientRect().height),
         }));
         check("the admin bar is one line and unscaled on large screens", wide.rows === 1 && wide.height < 60, JSON.stringify(wide));
+        // Touch devices have no hover: tapping a block shows its tools.
+        const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, storageState: await context.storageState() });
+        const tp = await touch.newPage();
+        await tp.goto(`${SITE}${PAGE}`);
+        await tp.locator("[data-cms-adminbar]").waitFor({ timeout: 15000 });
+        const editToggle = tp.locator("[data-cms-adminbar] button[aria-pressed]").first();
+        if ((await editToggle.getAttribute("aria-pressed")) !== "true") await editToggle.tap();
+        const tapPoint = await tp.evaluate(() => {
+            const root = [...document.querySelectorAll("span.cms-ui[hidden]")].map((a) => a.parentElement).find((r) => r && r.getBoundingClientRect().top > 120 && r.getBoundingClientRect().height > 80);
+            if (!root) return null;
+            root.scrollIntoView({ block: "center", behavior: "instant" });
+            const r = root.getBoundingClientRect();
+            return { x: Math.round(r.left + 12), y: Math.round(Math.max(r.top + 12, 130)) };
+        });
+        if (tapPoint) {
+            await tp.touchscreen.tap(tapPoint.x, tapPoint.y);
+            const shown = await poll(async () => (await tp.locator("[data-cms-block-tools]").count()) > 0, { tries: 10, every: 300 });
+            check("touch: tapping a block shows its edit tools", !!shown);
+        }
+        await touch.close();
         if (restore) await page.setViewportSize(restore);
         await page.evaluate(() => window.scrollTo(0, 0));
     }
@@ -522,7 +545,7 @@ try {
     const revealBlockTools = async () => {
         const point = await page.evaluate(() => {
             const root = [...document.querySelectorAll("span.cms-ui[hidden]")].map((a) => a.parentElement).find((r) => r && r.getBoundingClientRect().height > 40);
-            root.scrollIntoView({ block: "center" });
+            root.scrollIntoView({ block: "center", behavior: "instant" });
             const r = root.getBoundingClientRect();
             return { x: Math.max(4, r.left + 24), y: Math.max(4, r.top + Math.min(40, r.height / 2)) };
         });

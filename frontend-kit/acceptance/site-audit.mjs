@@ -31,7 +31,7 @@
      - a phone number or email on a page that isn't in SiteSettings.contact,
        or the private form-notification address shown anywhere
      - headings inside <footer> (use styled text); a page whose first
-       heading isn't its <h1>
+       heading isn't its <h1>; an H1 that shares no keyword with the title
      - a collection entry not linked from its index page; entries under
        ENTRY_MIN_WORDS (default 600) words of main content; a FORM_PAGE with
        under 120 words besides the form
@@ -121,6 +121,16 @@ for (const url of urls) {
             tel: [...document.querySelectorAll('a[href^="tel:"]')].map((a) => a.getAttribute("href").slice(4)),
             mail: [...document.querySelectorAll('a[href^="mailto:"]')].map((a) => a.getAttribute("href").slice(7).split("?")[0]),
             text: document.body.innerText,
+            // Text pieces joined with spaces: line-broken spans must not glue words
+            // ("accountants" + "behind"), even when the H1 is a hidden twin.
+            h1Text: (() => {
+                const h1 = document.querySelector("h1");
+                if (!h1) return "";
+                const walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
+                const parts = [];
+                while (walker.nextNode()) parts.push(walker.currentNode.textContent);
+                return parts.join(" ").replace(/\s+/g, " ").trim();
+            })(),
             footerHeadings: document.querySelectorAll("footer h1, footer h2, footer h3").length,
             // Visible headings only: hidden mobile/desktop twins don't count.
             firstHeading: [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")].find((h) => h.offsetParent !== null && h.getClientRects().length)?.tagName || "",
@@ -185,6 +195,17 @@ for (const url of urls) {
     if (notifyAddress.includes("@") && m.text.toLowerCase().includes(notifyAddress)) fail(path, "the private form-notification address is shown on the page");
     if (m.footerHeadings) fail(path, `${m.footerHeadings} heading(s) inside <footer> — style footer titles as text, not h1–h3`);
     if (m.firstHeading && m.firstHeading !== "H1") fail(path, `the first heading is ${m.firstHeading.toLowerCase()}, not the page's <h1>`);
+    // R29: the H1 names the page's topic — it shares at least one meaningful
+    // word with the (keyword-led) title. A slogan-only H1 fails.
+    {
+        // Drop the brand as a phrase (the title template appends it), not its words.
+        const brandName = String(publicSettings.organization?.name || "").toLowerCase().trim();
+        const STOP = new Set("about your with from that this what when where which their there have will into than then them they more most just only also every each very much many over under after before while home page".split(" "));
+        const words = (t) => new Set((t.toLowerCase().match(/[a-z]{4,}/g) || []).map((w) => w.replace(/(ies)$/, "y").replace(/s$/, "")).filter((w) => !STOP.has(w)));
+        const titleWords = words((m.title || "").toLowerCase().split(brandName).join(" "));
+        const shared = [...words(m.h1Text || "")].filter((w) => titleWords.has(w));
+        if (m.h1Text && titleWords.size && !shared.length) fail(path, `H1 “${m.h1Text.slice(0, 60)}” shares no keyword with the title “${m.title}” — name the topic in the H1, keep slogans in the eyebrow/subtitle (R29)`);
+    }
     pageWords.set(path, m.mainWords);
     pageLinks.set(path, new Set(m.hrefs.map((h) => (h || "").replace(SITE, "").split("#")[0].split("?")[0])));
     const placeholders = [...new Set(m.text.match(PLACEHOLDER) || [])];

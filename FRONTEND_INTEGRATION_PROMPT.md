@@ -87,7 +87,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R26 | Truth | Every claim is true: no invented stats, ratings, reviews, credentials or price promises | launch-check, site-audit | P0, P3, P7 |
 | R27 | Identity | Brand and contact details come from one place, and only what the owner publishes | `check:inline`, site-audit | P0, P3, P7 |
 | R28 | Pages | What the business sells is its real list, each a complete, linked page | site-audit, acceptance | P5 |
-| R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit, review | P3, P4 |
+| R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit | P3, P4 |
 | R30 | Editing | Edit mode never changes, hides or crowds the page; every list is editable | `check:inline`, acceptance | P1, P3 |
 
 ### §0.2 Rule cards
@@ -449,9 +449,10 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Never:** competing CTA wordings; a contact page that is only a form;
   slogan-only H1s; h1–h3 in the footer; a redesign that leaves the existing
   look.
-- **Proven by:** site-audit (first visible heading is the H1; no footer
-  headings; contact page has content beyond the form); review (grep the CTA
-  wording across `src`).
+- **Proven by:** site-audit (the H1 shares a keyword with the page title —
+  slogan-only H1s fail; first visible heading is the H1; no footer headings;
+  contact page has content beyond the form); review (grep the CTA wording
+  across `src`).
 
 #### R30 — Edit mode never changes, hides or crowds the page
 - **Must:** every edit tool — the block pill and Hide, item tools, "＋ Add",
@@ -480,7 +481,8 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   "edit tools take no layout space", "editing on/off moves nothing in the
   header", "edit tools are hidden until their block is hovered", "block tools
   are never covered", "the admin bar is one line" (desktop, phone, 1920px),
-  "“More” opens fully on screen with every action clickable".
+  "“More” opens fully on screen with every action clickable", "touch: tapping
+  a block shows its edit tools".
 
 ---
 
