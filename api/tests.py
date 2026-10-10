@@ -2032,10 +2032,45 @@ class IntegrationSpecTests(APITestCase):
             self.assertIn(f"**Exit check P{i}:**", sections["§2"], f"P{i} has no Exit check")
         p8 = sections["§2"][sections["§2"].index("**P8 — "):]
         for marker in ("**Pass 1 — fix until green.**", "**Pass 2 — clean re-verification.**", "**Pass 3 — rule-by-rule audit.**",
-                       "rerun **all five**", "go back to Pass 1"):
+                       "rerun **every gate**", "go back to Pass 1", "--pass 1", "--pass 2", "--pass 3 --report"):
             self.assertIn(marker, p8)
         self.assertIn("Audit at three levels", spec)
         self.assertIn("Pass 3", sections["§13"], "the checklist must be walked in the final audit pass")
+
+    def test_every_rule_has_machine_evidence(self):
+        """No rule is left to memory: rules-map.json maps every rule in §0.1
+        to gates that run-gates.mjs runs, and no rule is "review" only."""
+        import json
+        import re
+        root, spec, sections, rules = self._spec()
+        acceptance = root / "frontend-kit" / "acceptance"
+        mapping = json.loads((acceptance / "rules-map.json").read_text())
+        mapping.pop("_about", None)
+        self.assertEqual(sorted(mapping), sorted(f"R{n}" for n in rules), "rules-map.json must list exactly R1..Rn")
+        runner = (acceptance / "run-gates.mjs").read_text()
+        for rule, items in mapping.items():
+            self.assertTrue(items, f"{rule} has no evidence")
+            for item in items:
+                self.assertIn(f'"{item["gate"]}"', runner, f"{rule}: gate {item['gate']} isn't run by run-gates.mjs")
+        for n in rules:
+            row = re.search(rf"^\| R{n} \|(.+)\|$", sections["§0"], re.M).group(1)
+            self.assertNotIn("review", row.split("|")[-2].lower(), f"R{n} is proven only by review — give it a gate")
+        self.assertNotIn("(review", sections["§13"])
+
+    def test_the_definition_of_done_is_unmissable(self):
+        root, spec, sections, rules = self._spec()
+        done = "ALL GATES GREEN — 3 of 3 passes"
+        self.assertIn(done, spec[:3000], "the done-line must be stated in the first screen of the spec")
+        self.assertIn(done, sections["§12"])
+        self.assertTrue(spec.rstrip().split("## ")[-1].startswith("FINAL CHECK"), "the spec must END with the FINAL CHECK section")
+        self.assertIn(done, spec.rstrip().split("## ")[-1])
+        for phrase in ("visual.mjs --baseline", "CMS_REPORT.md", "Never weaken a gate", "fingerprint"):
+            self.assertIn(phrase, spec)
+        self.assertIn("visual/baseline/index.json", sections["§2"], "P0 must exit with the visual baseline taken")
+        runner = (root / "frontend-kit" / "acceptance" / "run-gates.mjs").read_text()
+        self.assertIn(done, runner)
+        for doc in ("AGENTS.md", "frontend-kit/MANIFEST.md"):
+            self.assertIn("run-gates.mjs", (root / doc).read_text(), doc)
 
     def test_companion_docs_name_the_current_rule_range(self):
         import re

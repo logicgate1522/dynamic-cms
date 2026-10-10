@@ -216,8 +216,11 @@ is referenced (`?force=1` overrides).
   → draft → publish → webhook → visitor sees it, AI paste, discard, SEO AI,
   section editing, page creation, admin pages, sign out).
   `site-audit.mjs` checks every page (SEO, consistency, forms, responsive,
-  launch readiness). Run them from `frontend-kit/acceptance` after
-  `npm run setup`.
+  launch readiness). **`run-gates.mjs` runs them all** (plus kit-verbatim,
+  visual, tracking-edge and verify-tracking), maps every result to R1–R33
+  and enforces three passes; an integration is done only when it prints
+  `ALL GATES GREEN — 3 of 3 passes`. Run from `frontend-kit/acceptance`
+  after `npm run setup`.
 - **`LAUNCH_GUIDE.md`**: the owner's go-live steps outside the code: domain,
   lead emails, Google Search Console, Bing, GTM/GA4 and cookie consent.
 

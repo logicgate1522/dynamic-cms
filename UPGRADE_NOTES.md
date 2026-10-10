@@ -1,3 +1,51 @@
+# Upgrade Notes — run-gates: one definition of done, three enforced passes
+
+**What's new**
+- **`frontend-kit/acceptance/run-gates.mjs`** is the definition of done. It
+  runs every gate against the production build:
+  - kit-verbatim, check-inline, check-sections;
+  - production-build (the served build id must match `.next/BUILD_ID`);
+  - visual, acceptance, tracking-edge, verify-tracking, site-audit;
+  - report.
+
+  It maps every result to R1–R33 through `rules-map.json`, and enforces P8's
+  three passes:
+  - pass 2 needs a green pass 1 on identical files and a fresh build;
+  - pass 3 needs a green pass 2 on identical files plus `CMS_REPORT.md`.
+    The report must tick every rule with evidence, quote the pass-2
+    fingerprint, confirm the §11 sweep, and list Defaults taken and Needs
+    from the owner.
+
+  It prints `ALL GATES GREEN — 3 of 3 passes`.
+- **The "(review)" rules now have gates:**
+  - R1 kit-verbatim: CORE files and gate scripts byte-identical; only the
+    `cms.css` theme block may differ;
+  - R9 `visual.mjs`: P0 baseline vs every later pass, 390/1280px,
+    pixelmatch ≤0.5%;
+  - R11 check-inline: every rendered image field has an `<E.Image>`;
+  - R12 the report gate.
+- **The spec** opens with a "READ THIS FIRST" block (five non-negotiables)
+  and ends with a FINAL CHECK. The done-line appears at the top, in P8, §12,
+  §13 and the FINAL CHECK. P0 now takes the visual baseline, and §13 gives
+  the exact `CMS_REPORT.md` format. AGENTS.md, README and MANIFEST say the
+  same.
+- **`IntegrationSpecTests`** fails if:
+  - a rule lacks `rules-map.json` evidence;
+  - a mapped gate isn't run by run-gates;
+  - a rule is proven by "review" only;
+  - the done-line is missing from the first screen, §12 or the closing
+    FINAL CHECK.
+
+**Fixes found while running it**
+- The tracking checker's test bookings hit the 5-a-minute form limit.
+  Submissions with a valid, signed verification token now skip it; forged
+  or expired tokens don't.
+- The build id is read from the RSC payload, so revalidating (non-static)
+  pages work too.
+- `cms.css`: only the theme block may differ from the kit.
+
+---
+
 # Upgrade Notes — tracking edge-case pass
 
 New gates: `api/tests_tracking_edge.py` (100 backend edge cases) and

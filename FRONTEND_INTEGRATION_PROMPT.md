@@ -6,6 +6,31 @@ patterns that are not here, and do not "simplify" any rule. If something here
 conflicts with your habits, with the site's existing code or with older docs,
 this file wins.
 
+> ## ⛔ READ THIS FIRST — five things no agent may skip
+>
+> 1. **Done means one thing:** `frontend-kit/acceptance/run-gates.mjs`
+>    printed **`ALL GATES GREEN — 3 of 3 passes`**. Not "the build works",
+>    not "the tests I ran pass", not "it looks right". Until that line is on
+>    your screen, you are not done and you must not say you are.
+> 2. **Three passes, in order, every time** (P8): `--pass 1` until green →
+>    fresh build, change nothing → `--pass 2` → write `CMS_REPORT.md` →
+>    `--pass 3 --report CMS_REPORT.md`. Pass 2 refuses to run if any file
+>    changed after pass 1; pass 3 refuses if any file changed after pass 2.
+>    Any change, however small, sends you back to pass 1.
+> 3. **Take the visual baseline before you change anything** (P0):
+>    `node frontend-kit/acceptance/visual.mjs --baseline --dir <frontend>/.gates/visual`.
+>    Without it R9 can't be proven, and run-gates stays red.
+> 4. **Never weaken a gate.** Never edit a kit CORE file (only ADAPT files
+>    and the `cms.css` theme block), never edit `rules-map.json`, a gate
+>    script or a check to make it pass, never skip or comment out a check,
+>    never delete content to dodge a check. Fix the cause.
+> 5. **Every rule R1–R33 is checked by a machine** (`rules-map.json` maps
+>    each rule to the gate lines that prove it). Your report ticks every rule
+>    with its evidence and quotes the pass-2 fingerprint; pass 3 checks this.
+>
+> These five points are repeated in §2 P8, §12, §13 and the FINAL CHECK at
+> the end of this file, on purpose.
+
 ## How to use this file
 
 1. **Read all of it before writing code.** Every rule below exists because it
@@ -20,8 +45,9 @@ this file wins.
    - the **final checklist** line you tick in your report (§13)
 3. **Work in the order of §2** (phases P0–P8). Each phase lists the rules it
    builds, so nothing is left for "later".
-4. **Rely on the gates, not memory.** Most rules have an automatic gate. Where
-   a rule says "(review)", you check it by hand and say how in your report.
+4. **Rely on the gates, not memory.** Every rule has an automatic gate, and
+   `rules-map.json` lists the exact gate lines that prove each one. If a rule
+   isn't proven, run-gates says which line is missing.
 5. **Audit at three levels, not once at the end:**
    - **every change:** after each component, `npm run check:inline` and a
      visual comparison (P3);
@@ -31,19 +57,36 @@ this file wins.
      re-verification with no code changes, then a rule-by-rule audit against
      §13 and §11. Only Pass 2 output counts.
 
-**Definition of done (no exceptions).** All five gates pass against the
-running **production build** (`next build && next start`, never `next dev`):
+**Definition of done (no exceptions).** `run-gates.mjs` runs every gate
+below against the running **production build** (`rm -rf .next && next build
+&& next start`, never `next dev`), maps every result to R1–R33, and is green
+only when every gate passed AND every rule has its evidence in the same run:
 
-| Gate | Command | Proves |
-|---|---|---|
-| 1. Build | `next build` | compiles, prerenders, no server/client import mistakes |
-| 2. Inline | `npm run check:inline` | no hard-coded copy, index keys, `hidden` guard, no raw `url(`, forms only via `submitForm`, tracking only via `track`, no `dangerouslySetInnerHTML`, no secret / `X-CMS-Frontend` in browser code, no prompt wording, no token in browser storage |
-| 3. Sections | `npm run check:sections` (backend running) | renderer registry = backend section types |
-| 4. Acceptance | `node frontend-kit/acceptance/acceptance.mjs` | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, auth |
-| 5. Site audit | `node frontend-kit/acceptance/site-audit.mjs` → **0 failures** | SEO on every page, links, contact consistency, placeholders, forms end to end |
+```
+cd frontend-kit/acceptance && npm run setup                 # once
+export SITE_URL=… API_URL=… CMS_USER=… CMS_PASSWORD=… FORM_PAGE=/contact \
+       CMS_DYNAMIC_PAGE=/<a CMS page> RUNNER_SECRET=<backend REVALIDATE_SECRET>
+node run-gates.mjs --frontend <frontend> --pass 1            # fix until green
+node run-gates.mjs --frontend <frontend> --pass 2            # fresh build, no changes
+node run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT.md
+```
 
-Until all five are green the work is not finished. Do not report success
-early, and never weaken a gate to make it pass.
+| Gate | Proves |
+|---|---|
+| kit-verbatim | every kit CORE file and gate script is byte-identical to the kit (theme block excepted) — R1 |
+| check-inline | no hard-coded copy, index keys, `hidden` guard, `{editButton}` marker, forms via `submitForm` + `data-cms-form`, tracking via `track`, uploads via `E.Image`, no unsafe HTML, no secrets, no prompt text, no visitor storage without consent |
+| check-sections | renderer registry = backend section types |
+| production-build | the server under test is THIS build (build id matches) |
+| visual | every page matches the P0 baseline at 390px and 1280px (R9) |
+| acceptance | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, consent, contacts, auth |
+| tracking-edge | every tracking, consent and contacts edge case |
+| verify-tracking | every plan conversion triggered and checked in a real browser |
+| site-audit | 0 failures: SEO on every page, links, contacts, claims, placeholders, forms, responsive, consent, privacy page |
+| report (pass 3) | `CMS_REPORT.md` ticks every rule with evidence and quotes the pass-2 fingerprint |
+
+Until run-gates prints `ALL GATES GREEN — 3 of 3 passes`, the work is not
+finished. Do not report success early, and never weaken a gate to make it
+pass.
 
 **Definition of launched.** Additionally, `LAUNCH=1 node site-audit.mjs`
 passes, i.e. `GET launch-check/` has no blockers (R22). Blockers that need
@@ -59,7 +102,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 
 | # | Area | Rule | Proven by | Built in |
 |---|---|---|---|---|
-| R1 | Foundation | Install the kit verbatim; change only ADAPT files and the theme block | review, `check:sections` | P1 |
+| R1 | Foundation | Install the kit verbatim; change only ADAPT files and the theme block | kit-verbatim, `check:sections` | P1 |
 | R2 | Editing | Inline editing first: `E.Text` / `E.Image` / `E.Item` + `E.Add` / `E.Link` | `check:inline`, acceptance | P3 |
 | R3 | Editing | Every edit is a draft; only Publish goes live | acceptance | P3 |
 | R4 | Foundation | Session cookie + CSRF auth only | `check:inline`, acceptance | P1 |
@@ -67,10 +110,10 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R6 | AI | Every pasted AI/JSON reply goes through `ai/normalize` | acceptance | P1, P8 |
 | R7 | Foundation | The signed backend webhook refreshes caches | acceptance | P1 |
 | R8 | Foundation | Visitors get zero CMS UI and zero CMS cost | acceptance | P1, P3 |
-| R9 | Editing | Defaults = the original copy, verbatim | review (screenshots) | P3 |
+| R9 | Editing | Defaults = the original copy, verbatim | visual (P0 baseline) | P3 |
 | R10 | Editing | Plain text only; no `dangerouslySetInnerHTML` for CMS text | `check:inline` | P3 |
-| R11 | Editing | Images are uploaded, never typed | review | P3 |
-| R12 | Process | No clarifying questions; take the stated default | report | P0–P8 |
+| R11 | Editing | Images are uploaded, never typed | `check:inline`, acceptance | P3 |
+| R12 | Process | No clarifying questions; take the stated default | run-gates report | P0–P8 |
 | R13 | Pages | Only collections are buildable from the site | acceptance | P5 |
 | R14 | Pages | New entries look exactly like their siblings | acceptance | P5 |
 | R15 | Editing | Edit tools never cover the page | acceptance | P1, P3 |
@@ -104,7 +147,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Never:** rewrite, "improve", re-implement or hand-roll a kit file — no
   custom admin bar, editor modal, API client, SEO panel, form sender or
   tracking loader. If a kit file seems wrong, report it; don't fork it.
-- **Proven by:** review against `MANIFEST.md`; `check:sections`.
+- **Proven by:** run-gates `kit-verbatim` (every CORE file and gate script byte-identical to the kit; only the `cms.css` theme block may differ); `check:sections`.
 
 #### R2 — Inline editing is the primary way to edit
 - **Must:** every visible string in a CMS-wired component is
@@ -182,7 +225,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   animation, provider, font and wrapper. Keep good existing metadata as the
   `pageMetadata` fallback.
 - **Never:** reworded, shortened or "cleaned up" defaults; dropped styling.
-- **Proven by:** review (before/after screenshots at 390px and 1280px).
+- **Proven by:** run-gates `visual`: every sitemap page at 390px and 1280px matches the baseline taken in P0 (`visual.mjs --baseline`), ≤0.5% pixels differing.
 
 #### R10 — Plain text only
 - **Must:** CMS and AI text renders as text; paragraphs come from blank-line
@@ -195,14 +238,14 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Must:** `<E.Image>`, `SlotUpload` or `uploadImage()`; alt text in its own
   key.
 - **Never:** an image-URL text input.
-- **Proven by:** review.
+- **Proven by:** `check:inline` (every image a block renders from its data has an `<E.Image>` for that field); acceptance "/admin/images renders".
 
 #### R12 — Don't ask clarifying questions
 - **Must:** take the default this file states and list it in the report.
 - **Never:** stop to ask about something this file decides. Exception: real
   business details (phone, email, address, company numbers, lead email,
   domain) — ask the owner, never invent them (R22).
-- **Proven by:** the report's "defaults taken" list.
+- **Proven by:** run-gates pass 3 `report` (a "Defaults taken" section, every rule ticked with evidence).
 
 #### R13 — Only collections are buildable from the site
 - **Must:** a *collection* is a set of pages sharing ONE section structure,
@@ -615,7 +658,12 @@ questions visitors ask — the tracking plan is built from them in P7 (R31).
 Output one table: `file → what's hard-coded → useCms name → phase`, and
 a list of the business details you'll need from the owner.
 
-**Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists. No file changed (`git status` clean).
+**Before any change, take the visual baseline** of the site as it is today
+(production build running): `node frontend-kit/acceptance/visual.mjs
+--baseline --dir <frontend>/.gates/visual`. It is what R9 is measured
+against in every later pass. Never retake it after you start changing code.
+
+**Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists; `<frontend>/.gates/visual/baseline/index.json` exists. No file changed (`git status` clean, `.gates/` aside).
 
 **P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25, R30, R32.**
 1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
@@ -777,37 +825,41 @@ business details (R22).
 **Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written; `GET tracking/plan/` shows an approved plan with no dangling triggers and the latest check passed.
 
 **P8 — Verify (three passes). Rules: all, R1–R33.** One green run is not
-proof: a fix for one gate can break another, and some rules have no
-automatic gate. Do all three passes, in order.
+proof: a fix for one gate can break another. `run-gates.mjs` enforces the
+order; you cannot skip a pass.
 
 1. **Pass 1 — fix until green.** Production build (`rm -rf .next && next
-   build && next start`), backend running, seed applied. Run the five gates.
-   Fix every failure at its cause (never by weakening a gate, skipping a
-   check or deleting content), then rerun **all five**, not just the one that
-   failed. Repeat until all five are green in the same run.
-2. **Pass 2 — clean re-verification.** Without touching the code: delete
-   `.next`, rebuild, restart, rerun the seed (it must change nothing), then run
-   all five gates again from scratch. If anything fails, or you change any file
-   during this pass, go back to Pass 1. The outputs you report come from this
-   pass.
-3. **Pass 3 — rule-by-rule audit.** Walk §13 line by line. For each rule, write
-   its evidence: the gate output line that proves it, or for "(review)" lines
-   what you checked and how (screenshots compared for R9, the upload path for
-   R11, the MANIFEST diff for R1). Then read §11 top to bottom and confirm that
-   none of the anti-patterns exist in the code (search for each one). Any gap
-   sends you back to Pass 1.
+   build && next start`), backend running, seed applied, tracking plan
+   approved (Site tools → Tracking → Scan → Build → Approve). Run
+   `node run-gates.mjs --frontend <frontend> --pass 1`. Fix every failure at
+   its cause (never by weakening a gate, skipping a check or deleting
+   content), then rerun **every gate** with `--pass 1` again, not just the
+   one that failed (`--only` helps you iterate but never counts as a pass).
+   Repeat until it prints `PASS 1 GREEN`.
+2. **Pass 2 — clean re-verification.** Change nothing. `rm -rf .next`,
+   rebuild, restart, rerun the seed (it must change nothing), then
+   `--pass 2`. It refuses to run if any file changed since pass 1 and fails
+   if the build id didn't change. If anything fails, go back to Pass 1. The
+   outputs you report come from this pass; note its **fingerprint**.
+3. **Pass 3 — rule-by-rule audit.** Write `<frontend>/CMS_REPORT.md` (format
+   in §13): walk §13 line by line and tick each rule with its evidence, using
+   `.gates/pass-2-rules.md` (the gate lines that proved it); read §11 top to
+   bottom and confirm that none of the anti-patterns exist (search for each
+   one); list "Defaults taken" and "Needs from the owner"; quote the pass-2
+   fingerprint. Then `--pass 3 --report <frontend>/CMS_REPORT.md`. Any gap
+   sends you back to Pass 1 (or to the report).
 
 Then report:
-1. the five gate outputs from Pass 2, verbatim
-2. the §13 checklist, one line per rule, ticked, with its evidence (Pass 3)
+1. the last line of each pass (`PASS 1 GREEN`, `PASS 2 GREEN — fingerprint …`,
+   `ALL GATES GREEN — 3 of 3 passes`) and `.gates/pass-2-rules.md`, verbatim
+2. the §13 checklist from `CMS_REPORT.md`, one line per rule, with evidence
 3. "Defaults taken" (R12)
 4. "Needs from the owner": every launch-check blocker that needs real
    business data or production config (R22), plus the FormSubmit activation
    step (R24), every remaining launch-check warning, and a pointer to
    `LAUNCH_GUIDE.md` (domain, leads, Search Console, Bing, GTM/GA4, consent)
 
-**Exit check P8:** Pass 2 ran with no file changes after it; every §13 line
-has evidence; nothing in §11 exists in the code.
+**Exit check P8:** run-gates printed `ALL GATES GREEN — 3 of 3 passes`; no file changed after pass 2.
 
 ---
 
@@ -1654,11 +1706,14 @@ exactly — every rule R1–R33, no exceptions. Read the whole file first.
 Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
-Finish only when the five gates pass against the production build:
-next build, check:inline, check:sections, acceptance.mjs (every check),
-site-audit.mjs (0 failures). Then report, in this order:
-  1. the five gate outputs, verbatim
-  2. the §13 checklist, one line per rule, ticked, with evidence
+Take the visual baseline in P0 before changing anything
+(visual.mjs --baseline). Finish only when
+frontend-kit/acceptance/run-gates.mjs prints
+"ALL GATES GREEN — 3 of 3 passes" (--pass 1 until green, fresh build,
+--pass 2, write CMS_REPORT.md, --pass 3 --report). Never weaken a gate.
+Then report, in this order:
+  1. the last line of each pass and .gates/pass-2-rules.md, verbatim
+  2. the §13 checklist from CMS_REPORT.md, one line per rule, with evidence
   3. Defaults taken
   4. Needs from the owner (launch blockers, FormSubmit activation)
 ```
@@ -1666,11 +1721,30 @@ site-audit.mjs (0 failures). Then report, in this order:
 ## §13 — Final checklist (every rule, one more time)
 
 Walk this list in P8 Pass 3, after the clean re-verification. Every line
-must be true and carry evidence. Each line names the
-gate that proves it; a "(review)" line is yours to verify by hand — say how.
+must be true and carry evidence. Each line names the gate that proves it.
+
+**`CMS_REPORT.md` format** (pass 3 checks it, line by line):
+
+```
+# CMS integration report
+Pass 2 fingerprint: <the fingerprint pass 2 printed>
+
+### Rules
+- [x] **R1** <the rule> — evidence: kit-verbatim green (72 files); check-sections green
+- [x] **R2** … — evidence: <gate line(s) from .gates/pass-2-rules.md>
+… one line for EVERY rule R1–R33 …
+
+§11: none found — searched for <how you searched for each anti-pattern>
+
+### Defaults taken
+- …
+
+### Needs from the owner
+- …
+```
 
 **The rules**
-- [ ] **R1** The kit is installed verbatim; only MANIFEST ADAPT files, the `cms.css` theme block and adapter classes changed. (review, `check:sections`)
+- [ ] **R1** The kit is installed verbatim; only MANIFEST ADAPT files and the `cms.css` theme block changed. (run-gates kit-verbatim, `check:sections`)
 - [ ] **R2** Every visible string in a CMS component is `<E.Text>`; images, lists and links use `E.Image` / `E.Item` + `E.Add` / `E.Link`; backgrounds use `bgImage()`. No modal-first editing. (`check:inline`, acceptance)
 - [ ] **R3** Every edit saves as a draft; only Publish makes it live. (acceptance "public data unchanged before publish")
 - [ ] **R4** Session cookie + CSRF only; no token in browser storage. (`check:inline`, acceptance "session cookie…")
@@ -1678,10 +1752,10 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R6** Every pasted AI/JSON reply goes through `ai/normalize/` or a server paste endpoint. (acceptance "AI paste normalised")
 - [ ] **R7** The webhook route is installed, and visitors see a publish without a rebuild. (acceptance "visitor HTML updated")
 - [ ] **R8** Visitors get zero CMS UI and no extra content fetches. (acceptance "visitor: no admin bar")
-- [ ] **R9** Defaults are the original copy, verbatim; the page looks identical before any edit. (review: screenshots)
+- [ ] **R9** Defaults are the original copy, verbatim; every page looks identical to the P0 baseline. (run-gates visual)
 - [ ] **R10** No `dangerouslySetInnerHTML` for CMS/AI text. (`check:inline`)
-- [ ] **R11** Images are uploaded, never typed as URLs. (review)
-- [ ] **R12** No clarifying questions were needed; defaults are listed in the report; no business detail was invented. (report)
+- [ ] **R11** Images are uploaded, never typed as URLs: every rendered image field has an `<E.Image>`. (`check:inline`)
+- [ ] **R12** No clarifying questions were needed; defaults are listed in the report; no business detail was invented. (run-gates report)
 - [ ] **R13** Collections are decided and seeded; "＋ New …" appears only on their index pages; one-off pages are structure-locked. (acceptance "collections…", "structure is locked")
 - [ ] **R14** New entries follow the template exactly, like their siblings. (acceptance "new entry follows the collection template exactly")
 - [ ] **R15** Edit tools are hover-only, never cover content or sit under the header; the bar minimises. (acceptance "edit tools are hidden…", "admin bar minimises")
@@ -1718,3 +1792,22 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] Sitemap and robots honour SEO flags; redirects run in middleware; `sitemap.extraPaths` seeded
 - [ ] `SiteSettings.ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and `analytics` seeded; seed is idempotent
 - [ ] Env: `REVALIDATE_SECRET` on both sides, `FRONTEND_REVALIDATE_URL`, CORS + CSRF trusted origins
+
+---
+
+## FINAL CHECK — read this last, before you say anything is finished
+
+1. Did `run-gates.mjs` print **`ALL GATES GREEN — 3 of 3 passes`** in this
+   session, on the code you are handing over? If not, you are not done:
+   say exactly which pass and gate is red, and keep working.
+2. Was the visual baseline taken in P0, before any change, and never retaken?
+3. Did pass 2 run on a fresh build with no file changed after pass 1, and
+   pass 3 with no file changed after pass 2?
+4. Is every kit CORE file untouched (only ADAPT files and the `cms.css`
+   theme block differ), and is every gate, check and `rules-map.json` exactly
+   as shipped?
+5. Does `CMS_REPORT.md` tick every rule R1–R33 with evidence, quote the
+   pass-2 fingerprint, confirm the §11 sweep, and list "Defaults taken" and
+   "Needs from the owner" — with no invented business detail?
+If any answer is no, go back to the pass it points to. Do not mention this
+checklist in your report; just make every answer yes.

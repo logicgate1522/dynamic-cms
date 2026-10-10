@@ -201,6 +201,26 @@ function editButtonRule(ast, source, report) {
     });
 }
 
+// Every image a block renders from its own data is replaceable by upload:
+// the field it reads has an <E.Image path="…"> (R11 — images are uploaded,
+// never typed as URLs). Compared by field name (desktop + mobile copies of
+// the same image share one E.Image).
+function imageRule(source, report) {
+    const lines = source.split("\n");
+    const editable = new Set();
+    for (const m of source.matchAll(/E\.Image\b[^>]*?path=(?:"([^"]+)"|\{\s*`([^`]+)`\s*\}|\{\s*"([^"]+)"\s*\})/g)) {
+        const path = (m[1] || m[2] || m[3] || "").replace(/\$\{[^}]+\}/g, "#");
+        editable.add(path.split(".").pop());
+    }
+    lines.forEach((line, i) => {
+        if (/cms-static/.test(line)) return;
+        for (const m of line.matchAll(/(?:src=\{\s*(?:mediaUrl\()?|bgImage\()\s*(?:data|item|content|member|card|post|step|entry|slide|logo|person)\.([\w.]+)/g)) {
+            const field = m[1].split(".").pop();
+            if (!editable.has(field)) report(i + 1, `image from “${m[1]}” has no <E.Image path="…${field}"> — images are replaced by upload, never typed as URLs (R11)`);
+        }
+    });
+}
+
 // A component that renders a useCms block must honour `hidden`
 // (if (hidden) return null;) — otherwise "Hide" does nothing for visitors.
 function hiddenGuard(ast, source, report) {
@@ -290,6 +310,10 @@ for (const file of files) {
         plugins: ["jsx", ...(file.endsWith(".tsx") ? ["typescript"] : [])],
     });
     listRules(ast, source, (line, message) => {
+        problems++;
+        console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);
+    });
+    imageRule(source, (line, message) => {
         problems++;
         console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);
     });

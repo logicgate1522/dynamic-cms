@@ -17,16 +17,26 @@ instructions the docs already answer.
    ADAPT files, and only as the manifest says.
 3. Run the spec's Autonomous mode, phases P0–P8, in order. Convert every
    section with the §3 recipe.
-4. You are done only when all five gates pass:
-   `next build`, `npm run check:inline`, `npm run check:sections` (backend
-   running), `frontend-kit/acceptance/acceptance.mjs` and
-   `frontend-kit/acceptance/site-audit.mjs` (0 failures) against the
-   production build. Every phase ends with its Exit check; P8 verifies in three
-   passes (fix until green → clean re-verification with no code changes →
-   rule-by-rule audit against §13 and §11). Paste the Pass 2 output in your
-   report, plus any launch-check blockers and warnings that need the owner,
-   and point the owner to `LAUNCH_GUIDE.md` (domain, leads, Search Console,
-   Bing, GTM/GA4, consent). The gates run from `frontend-kit/acceptance`
+4. **You are done only when `frontend-kit/acceptance/run-gates.mjs` prints
+   `ALL GATES GREEN — 3 of 3 passes`.** Nothing else counts. It runs every
+   gate (kit-verbatim, check-inline, check-sections, production-build,
+   visual, acceptance, tracking-edge, verify-tracking, site-audit, report)
+   against the production build and maps the results to R1–R33
+   (`rules-map.json`):
+   - P0: `node frontend-kit/acceptance/visual.mjs --baseline --dir <frontend>/.gates/visual`
+     BEFORE changing anything (R9 is measured against it).
+   - P8: `--pass 1` until green → `rm -rf .next`, rebuild, restart, change
+     nothing → `--pass 2` → write `<frontend>/CMS_REPORT.md` (spec §13
+     format: every rule ticked with evidence, the pass-2 fingerprint, the §11
+     sweep, Defaults taken, Needs from the owner) → `--pass 3 --report …`.
+     Pass 2 and 3 refuse to run if any file changed; any change means pass 1
+     again.
+   - Never weaken a gate, edit a kit CORE file (only ADAPT files and the
+     `cms.css` theme block), edit `rules-map.json` or a check, or delete
+     content to dodge one.
+   Paste the last line of each pass and `.gates/pass-2-rules.md` in your
+   report, plus the launch-check items that need the owner, and point the
+   owner to `LAUNCH_GUIDE.md`. The gates run from `frontend-kit/acceptance`
    (`npm run setup` once).
 5. Never:
    - put a token in browser storage
@@ -134,8 +144,9 @@ instructions the docs already answer.
   / Proven by, the `Rules:` line of the §2 phase that builds it, a §11
   anti-pattern line and a §13 checklist line ending in its gate. Bump every
   `R1–Rn` range (spec, AGENTS, READMEs). `IntegrationSpecTests` fails on any
-  gap. Prefer an automatic gate (`check-inline.mjs`, acceptance, site-audit,
-  launch-check) over "(review)".
+  gap. Every rule needs an automatic gate AND an entry in
+  `frontend-kit/acceptance/rules-map.json` naming the gate lines that prove
+  it (`IntegrationSpecTests` fails otherwise); "review" is not a gate.
 - Record notable changes in `UPGRADE_NOTES.md`.
 - **Git:** this repo has one branch, `main`. Commit and push to `main`
   directly; never create feature branches or pull requests.

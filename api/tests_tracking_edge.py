@@ -424,6 +424,19 @@ class LeadEdgeTests(TrackingBase):
         lead = next(c for c in r.data["conversions"] if c["id"] == "lead")
         self.assertEqual((lead["value"], lead["currency"]), (300.0, "GBP"))
 
+    def test_verified_test_bookings_skip_the_form_limit_but_others_dont(self):
+        from .tracking_verify import create_run, make_token
+        self.approved_plan()
+        token = make_token(create_run())
+        cache.clear()
+        codes = [self.client.post("/api/forms/quote/submit/", lead_body(email=f"t{i}@acme.test", _cms={"verify": token}), format="json").status_code
+                 for i in range(8)]
+        self.assertEqual(set(codes), {201})
+        cache.clear()
+        forged = [self.client.post("/api/forms/quote/submit/", lead_body(email=f"f{i}@acme.test", _cms={"verify": "forged"}), format="json").status_code
+                  for i in range(8)]
+        self.assertIn(429, forged)
+
     def test_expired_and_finished_tokens_are_not_tests(self):
         from django.core import signing
 

@@ -63,4 +63,26 @@ class SiteAwareScopedRateThrottle(ScopedRateThrottle):
         scope = getattr(view, self.scope_attr, None)
         if scope not in ALWAYS_LIMITED_SCOPES and (is_staff(request) or is_site_server(request)):
             return True
+        # Tracking checks (R31) submit several test bookings a minute; a valid,
+        # signed, short-lived verification token is not spam. Everyone else —
+        # including a forged or expired token — stays limited.
+        if scope == "form_submit" and verified_test_submission(request):
+            return True
         return super().allow_request(request, view)
+
+
+def verified_test_submission(request):
+    import json
+
+    from .tracking_verify import run_from_token
+    try:
+        envelope = request.data.get("_cms") if hasattr(request.data, "get") else None
+    except Exception:
+        return False
+    if isinstance(envelope, str):
+        try:
+            envelope = json.loads(envelope)
+        except ValueError:
+            return False
+    token = envelope.get("verify") if isinstance(envelope, dict) else None
+    return bool(token and run_from_token(token))
