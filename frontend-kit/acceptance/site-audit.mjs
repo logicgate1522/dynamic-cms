@@ -148,7 +148,7 @@ for (const url of urls) {
             mail: [...document.querySelectorAll('a[href^="mailto:"]')].map((a) => a.getAttribute("href").slice(7).split("?")[0]),
             text: document.body.innerText,
             // Text pieces joined with spaces: line-broken spans must not glue words
-            // ("accountants" + "behind"), even when the H1 is a hidden twin.
+            // ("the" + "experts"), even when the H1 is a hidden twin.
             h1Text: (() => {
                 const h1 = document.querySelector("h1");
                 if (!h1) return "";

@@ -266,21 +266,35 @@ All of the above has been verified end-to-end (production-mode `check`,
 `collectstatic`, cache behavior with and without `REDIS_URL`, a real
 login → PATCH → persistence round trip) — not just asserted.
 
-## Dropping this into a different project
+## Dropping this into a different project (standalone integration)
 
-1. Copy this entire directory.
-2. `pip install -r requirements.txt` in a fresh virtualenv — verified to
-   work with nothing else added (26 packages total, every one traced back
-   to an actual import in this codebase).
-3. `cp .env.example .env`, fill in real values.
-4. `python manage.py migrate && python manage.py createsuperuser`.
-5. Give your agent the frontend repo and this directory. `AGENTS.md` sends it
-   to `FRONTEND_INTEGRATION_PROMPT.md` and `frontend-kit/`, and it's done when
-   the acceptance test passes.
+1. Clone this repository (one branch, `main`).
+2. Backend:
+   ```
+   python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+   cp .env.example .env          # fill in SECRET_KEY, REVALIDATE_SECRET, TRACKING_SECRET_KEY, …
+   ./venv/bin/python manage.py migrate && ./venv/bin/python manage.py createsuperuser
+   ./venv/bin/python manage.py runserver 8000
+   ```
+3. Gates (once): `cd frontend-kit/acceptance && npm run setup` (playwright,
+   axe-core, pixelmatch, chromium).
+4. Give your coding agent the frontend repo and this directory and say:
+   "Integrate this frontend with dynamic-cms. Follow AGENTS.md." `AGENTS.md`
+   sends it to `FRONTEND_INTEGRATION_PROMPT.md` (rules R1–R33, phases P0–P8)
+   and `frontend-kit/` (the kit, installed verbatim). It takes the visual
+   baseline in P0, before changing anything.
+5. It is done only when
+   `node frontend-kit/acceptance/run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT.md`
+   prints `ALL GATES GREEN — 3 of 3 passes` (after `--pass 1` and a fresh-build
+   `--pass 2`). Then hand the owner `LAUNCH_GUIDE.md`.
+6. In production also run `./venv/bin/python manage.py tracking_worker` (or
+   `--once` from cron) and, for nightly tracking checks,
+   `frontend-kit/acceptance/tracking-checks.github-workflow.yml`.
 
 Nothing here references a specific business, domain, or dataset. Every
 `home/<name>/` row, blog post, and page's SEO data is created by whoever
 uses the admin login — there's nothing to strip out or rename first.
+`docs/history/` holds superseded build notes; never follow them.
 
 ## History
 

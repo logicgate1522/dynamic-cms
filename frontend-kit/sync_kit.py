@@ -126,6 +126,11 @@ def main(frontend):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
     (out_root / "lib/brand.js").write_text(BRAND)
+    # ADAPT hook: the reference site's own blog categories never ship in the kit.
+    blog = out_root / "lib/blog.js"
+    blog.write_text(re.sub(r"export const ARTICLE_CATEGORIES = \[[^\]]*\];",
+                           'export const ARTICLE_CATEGORIES = ["News", "Guides", "Updates"]; // ADAPT: the site\'s own categories',
+                           blog.read_text(), count=1))
     scripts_out = out_root.parent / "scripts"
     for name in SCRIPTS:
         src = Path(frontend).resolve() / "scripts" / name

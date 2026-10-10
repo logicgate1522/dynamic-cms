@@ -1,3 +1,9 @@
+> **HISTORICAL — SUPERSEDED. Do not follow this file.** It is the original
+> master task that built dynamic-cms (2026). Its paths, section numbers and
+> instructions are out of date. To integrate a site, follow `AGENTS.md` and
+> `FRONTEND_INTEGRATION_PROMPT.md`; done means `run-gates.mjs` prints
+> `ALL GATES GREEN — 3 of 3 passes`.
+
 # MASTER TASK — Upgrade the Universal Dynamic CMS + build a zero-instruction Frontend Integration agent
 
 > Paste this whole file into Claude Code (or Codex) opened at

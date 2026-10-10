@@ -15,15 +15,7 @@ import { articles as localArticles } from "@/data/articles";
    }
 ========================================= */
 
-export const ARTICLE_CATEGORIES = [
-    "VAT",
-    "Payroll",
-    "Accounting",
-    "Personal Tax",
-    "Compliance",
-    "Small Business",
-    "Tax",
-];
+export const ARTICLE_CATEGORIES = ["News", "Guides", "Updates"]; // ADAPT: the site's own categories
 
 function formatDate(iso) {
     if (!iso) return "";

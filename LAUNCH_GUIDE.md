@@ -100,7 +100,7 @@ where they are in the decision (stage).
 3. **Build the plan:** Site tools → Tracking → **Scan site** → **Build from
    library** (or **Ask AI**) → review what's proposed and why → **Approve**.
    It lists the conversions for *your* business (for example "Booking
-   request", "Lead: Payroll", "Read a guide"), the audiences to retarget and
+   request", "Lead: <your service>", "Read a guide"), the audiences to retarget and
    what to say to each.
 4. **Connect each tool once** (Tracking → Tools → Connect): a Google service
    account key (add its email as Editor on GA4 and Tag Manager), a Meta

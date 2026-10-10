@@ -112,6 +112,26 @@ try {
     token = (await adminWrite("tracking/verify/runs/", "POST", { mode: "in_browser", trigger: "acceptance" })).body?.token || "";
     check("setup: an acceptance run token for test traffic", !!token);
     const pages = facts.pages || [];
+    // The site's enquiry form: the one on FORM_PAGE (else the first with an email field).
+    const leadForms = (facts.forms || []).filter((f) => (f.fields || []).some((x) => x.type === "email" || x.name === "email"));
+    const leadForm = leadForms.find((f) => (f.pages || []).includes(FORM_PAGE)) || leadForms[0] || null;
+    const formName = leadForm?.name || "contact";
+    /** A valid submission for the site's own form definition (any fields). */
+    const formPayload = (email) => {
+        const body = {};
+        for (const f of leadForm?.fields || []) {
+            const opts = (f.options || []).map((o) => o.value);
+            const value = {
+                email, tel: "07700 900777", number: 1, url: "https://example.org", consent_marketing: false,
+                date: new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10), time: "10:00", datetime: `${new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10)}T10:00`,
+                select: opts[0], radio: opts[0], checkboxes: opts.slice(0, 1), multiselect: opts.slice(0, 1), checkbox: true,
+            }[f.type];
+            if (f.type === "hidden" || f.type === "file") continue;
+            body[f.name] = value !== undefined ? value : f.name === "name" ? "Edge Contact" : `Edge ${STAMP}`;
+        }
+        if (!body.email) body.email = email;
+        return body;
+    };
     const servicePage = Object.keys(config.pageIntents || {})[0];
     const article = pages.find((p) => p.type === "article")?.path;
     const faqPage = pages.find((p) => p.type === "faq")?.path;
@@ -444,11 +464,11 @@ try {
         await form.locator("button[type=submit]").first().click();
         await poll(async () => response, { tries: 30, every: 300 });
         check("profile: the enquiry carries the visit's source", (response?.summary || "").includes("via google / cpc"), response?.summary);
-        const subs = (await admin("forms/quote/submissions/?is_read=0")).body;
+        const subs = (await admin(`forms/${formName}/submissions/?is_read=0`)).body;
         const sub = (subs?.results || subs || []).find((s) => JSON.stringify(s.data).includes(`profile+${STAMP}`));
         check("profile: the stored enquiry has the click id and first source", sub?.profile?.click?.gclid === `G-${STAMP}` && sub?.profile?.first?.utm?.campaign === STAMP);
         check("profile: verification traffic is stored as a test (no email, no contact)", sub?.is_test === true);
-        if (sub) await adminWrite(`forms/quote/submissions/${sub.id}/`, "DELETE");
+        if (sub) await adminWrite(`forms/${formName}/submissions/${sub.id}/`, "DELETE");
         await ctx.close();
     }
 
@@ -556,11 +576,9 @@ try {
     if (want("E")) {
         // A real (non-test) enquiry to work with.
         const leadEmail = `contact+${STAMP}@example.org`;
-        const res = await page.evaluate(async ([api, email]) => (await fetch(`${api}/forms/quote/submit/`, {
-            method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit",
-            body: JSON.stringify({ name: "Edge Contact", email, phone: "07700 900777", business_type: "Sole trader", services: ["Monthly payroll"],
-                                   preferred_date: "2030-01-01", preferred_time: "Morning", meeting: "Video call", message: "edge" }),
-        })).status, [API, leadEmail]);
+        const res = await page.evaluate(async ([api, form, body]) => (await fetch(`${api}/forms/${form}/submit/`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", body: JSON.stringify(body),
+        })).status, [API, formName, formPayload(leadEmail)]);
         check("contacts: a real enquiry is accepted", res === 201, res);
         await page.goto(`${SITE}/admin/contacts`);
         const panel = page.locator("[data-cms-contacts-panel]");
