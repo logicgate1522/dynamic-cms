@@ -10,7 +10,8 @@
     "audit:launch": "LAUNCH=1 node site-audit.mjs",
     "fresh-install": "node fresh-install.mjs",
     "verify-tracking": "node verify-tracking.mjs",
-    "verify-tracking:schedule": "node verify-tracking.mjs --schedule"
+    "verify-tracking:schedule": "node verify-tracking.mjs --schedule",
+    "tracking-edge": "node tracking-edge.mjs"
   },
   "dependencies": {
     "axe-core": "^4.14.0",

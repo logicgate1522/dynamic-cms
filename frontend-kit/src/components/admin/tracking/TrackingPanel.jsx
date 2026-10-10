@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatDate, useApi } from "@/components/admin/useApi";
 import { PasteBox, PromptBox, Step } from "@/components/cms/ai";
@@ -31,15 +31,22 @@ export default function TrackingPanel({ initialTab = "overview", inDrawer = fals
     const overview = useApi("tracking/overview/");
     const settings = useApi("settings/site/");
     const [draft, setDraft] = useState(null);
-    const [dirty, setDirty] = useState(false);
+    const [dirty, setDirtyState] = useState(false);
+    // Read synchronously: a plan load must never replace unsaved edits made
+    // in the same render (e.g. "Pick on page" adding a conversion on mount).
+    const dirtyRef = useRef(false);
+    const setDirty = (value) => {
+        dirtyRef.current = value;
+        setDirtyState(value);
+    };
     const [proposal, setProposal] = useState(null);
     const [busy, setBusy] = useState("");
     const [message, setMessage] = useState({ error: "", success: "" });
     const [scanProgress, setScanProgress] = useState("");
 
     useEffect(() => {
-        if (state.data?.plan && !dirty) setDraft(state.data.plan);
-    }, [state.data, dirty]);
+        if (state.data?.plan && !dirtyRef.current) setDraft(state.data.plan);
+    }, [state.data]);
 
     const reloadAll = useCallback(() => {
         state.reload();

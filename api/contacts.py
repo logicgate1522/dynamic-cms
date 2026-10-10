@@ -262,12 +262,20 @@ def matches(contact, rule):
                 ok = False
         elif op in ("before", "after"):
             from django.utils.dateparse import parse_date, parse_datetime
-            when = parse_datetime(str(value)) or parse_date(str(value))
-            if when is None or actual is None:
+            try:
+                when_dt = parse_datetime(str(value))
+                when_d = None if when_dt else parse_date(str(value))
+            except ValueError:
+                when_dt = when_d = None
+            if actual is None or (when_dt is None and when_d is None):
                 ok = False
+            elif when_dt is not None:
+                if timezone.is_naive(when_dt):
+                    when_dt = timezone.make_aware(when_dt)
+                ok = actual < when_dt if op == "before" else actual > when_dt
             else:
-                a = actual.date() if hasattr(actual, "date") and not hasattr(when, "hour") else actual
-                ok = a < when if op == "before" else a > when
+                a = actual.date() if hasattr(actual, "date") else actual
+                ok = a < when_d if op == "before" else a > when_d
         elif op == "exists":
             ok = bool(actual) if not isinstance(actual, list) else bool(actual)
         else:

@@ -61,16 +61,20 @@ def page_type_for(path, collections, form_pages):
         prefix = norm_path(c["pathPrefix"])
         if prefix != "/" and p.startswith(prefix + "/"):
             return c.get("pageType") or ("article" if c.get("hostKind") == "blog" else "entry")
-    if p in form_pages or CONTACT_RE.search(p):
-        return "contact"
+    # A specific purpose wins over "has a form" (many sites repeat the
+    # enquiry form on About, FAQ or legal pages).
     if LEGAL_RE.search(p):
         return "legal"
     if FAQ_RE.search(p):
         return "faq"
     if ABOUT_RE.search(p):
         return "about"
+    if CONTACT_RE.search(p):
+        return "contact"
     if p.startswith("/blog/"):
         return "article"
+    if p in form_pages:
+        return "contact"
     return "other"
 
 
@@ -223,8 +227,12 @@ def finalise(facts):
     # Where a call-to-action leads: the dedicated contact/booking pages that
     # hold a form — never the home page (a logo link isn't a CTA), even when
     # the home page also shows the form.
+    # A form repeated on many pages (a site-wide enquiry block) doesn't make
+    # each of them a destination: prefer the pages that ARE the contact or
+    # booking page; fall back to the form pages only if none is.
+    named = sorted(p["path"] for p in facts["pages"].values() if p["path"] in form_pages and CONTACT_RE.search(p["path"]))
     contact_pages = sorted(p["path"] for p in facts["pages"].values() if p["type"] == "contact" and p["path"] in form_pages)
-    facts["ctaPages"] = contact_pages or sorted(p for p in form_pages if p != "/")
+    facts["ctaPages"] = named or contact_pages or sorted(p for p in form_pages if p != "/")
     facts["pages"] = sorted(facts["pages"].values(), key=lambda p: p["path"])
     facts["has"]["articles"] = any(p["type"] == "article" for p in facts["pages"])
     # De-duplicate FAQ questions (same text from SEO data and the scan).

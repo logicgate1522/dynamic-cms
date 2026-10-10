@@ -1,3 +1,41 @@
+# Upgrade Notes — tracking edge-case pass
+
+New gates: `api/tests_tracking_edge.py` (100 backend edge cases) and
+`frontend-kit/acceptance/tracking-edge.mjs` (67 browser checks across every
+tracking, consent and contacts use case). Bugs they found, all fixed:
+
+**Correctness**
+- A page that merely shows the enquiry form (About, FAQ, legal…) was typed
+  "contact" and became a booking-click target. Specific page types now win;
+  CTA targets are the pages that *are* the contact/booking page. The scanner
+  follows the same rule.
+- An unknown trigger condition (e.g. a typo'd `optoin`) was silently
+  dropped, broadening a per-service conversion to every lead. It's now an
+  error.
+
+**Contacts**
+- Erasing one person blocked everyone sharing their phone number for 30
+  days. Tombstones now identify by email (phone only when there's no email).
+- Group rules with "before/after <date>" crashed (naive vs aware dates).
+
+**Capture**
+- Reading with the mouse/wheel (no clicks) stopped the engaged-reading clock.
+  `pointermove` and `wheel` now count as activity.
+- The cookie banner could miss its first-load setup when tracking rendered
+  later (Suspense). The banner configures consent itself, and late
+  configuration notifies listeners.
+
+**Endpoints**
+- The headless runner endpoint shared the visitor throttle; it now uses
+  `verify`.
+- The panel's check frames were `visibility:hidden`, so section views never
+  fired. They now render invisibly.
+- **Panel race:** "Pick on page" added a conversion, then the panel's plan load
+  overwrote it. Unsaved edits are now tracked synchronously, and a load never
+  replaces them.
+
+---
+
 # Upgrade Notes — business-aware tracking, consent and contacts (R31–R33)
 
 Implements TRACKING_IMPLEMENTATION_PLAN.md. New rules **R31** (tracking plan

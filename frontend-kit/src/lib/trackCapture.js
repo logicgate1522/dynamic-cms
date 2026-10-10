@@ -306,7 +306,9 @@ export function startCapture() {
     document.addEventListener("input", onInput, opts);
     document.addEventListener("change", onInput, opts);
     window.addEventListener("scroll", onScroll, { passive: true });
-    for (const type of ["pointerdown", "keydown", "scroll", "touchstart"]) {
+    // Activity keeps the reading clock running (a reader moves the mouse or
+    // the wheel without clicking). Cheap: one timestamp write per event.
+    for (const type of ["pointerdown", "pointermove", "keydown", "scroll", "wheel", "touchstart"]) {
         window.addEventListener(type, () => page && (page.lastInput = Date.now()), { passive: true });
     }
     window.addEventListener("cms:form-result", onFormResult);

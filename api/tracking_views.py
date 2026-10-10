@@ -375,6 +375,11 @@ class VerifyPendingView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    def get_throttles(self):
+        from .throttles import SiteAwareScopedRateThrottle
+        self.throttle_scope = "verify"  # secret-gated: throttled against guessing, not by the visitor limit
+        return [SiteAwareScopedRateThrottle()]
+
     def get(self, request):
         import hmac as _hmac
 

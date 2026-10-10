@@ -140,8 +140,12 @@ export async function scanSite({ onProgress } = {}) {
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
     // CTAs = links to pages that hold a form, plus explicit [data-track-cta].
-    // (Not the home page: a logo link isn't a call-to-action.)
-    const formPages = new Set(pages.filter((p) => p.forms.length && p.path !== "/").map((p) => p.path));
+    // Not the home page (a logo link isn't a call-to-action), and when the
+    // form repeats on many pages, only the ones that ARE the contact or
+    // booking page (mirrors site_facts.CONTACT_RE).
+    const withForm = pages.filter((p) => p.forms.length && p.path !== "/").map((p) => p.path);
+    const named = withForm.filter((p) => /(^|\/)(contact|book|booking|enquir|quote|get-started|appointment)/i.test(p));
+    const formPages = new Set(named.length ? named : withForm);
     for (const page of pages) {
         const ctas = page.ctaCandidates.filter((c) => c.explicit || formPages.has(c.target));
         page.ctas = ctas.slice(0, 60).map(({ label, target, block }) => ({ label, target, block }));

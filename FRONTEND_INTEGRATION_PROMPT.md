@@ -534,7 +534,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   FAQ, form start/abandon, lead with server conversions and matching event
   ids, no personal data); site-audit (every intent page carries the block
   markers; no dangling trigger); launch-check (plan approved, not stale,
-  checks passing, worker running); backend `api/tests_tracking.py`.
+  checks passing, worker running); backend `api/tests_tracking.py`; `tracking-edge.mjs` (edge cases).
 
 #### R32 — Consent first
 - **Must:** `<Analytics>` (inside `<AdminProvider>`) sets Google Consent Mode
@@ -558,7 +558,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   consent and profile modules); acceptance "consent: …" checks (denied → no
   Meta/TikTok/LinkedIn requests and no `_fbp`; accepted → tags load;
   withdrawn → stored profile gone); site-audit (banner and Cookie settings
-  present when tags are set; privacy page keywords).
+  present when tags are set; privacy page keywords); `tracking-edge.mjs` (edge cases).
 
 #### R33 — Contacts are privacy-safe
 - **Must:** every stored, non-test enquiry with an email or phone creates or
@@ -578,7 +578,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Proven by:** backend tests (permissions, opt-in gate, purge, erase
   cascade + tombstone, export content, audit log); `check:inline` (opt-in
   never pre-ticked); acceptance "contacts: a test lead creates no contact; a
-  real lead does; erase removes it".
+  real lead does; erase removes it"; `tracking-edge.mjs` (edge cases).
 ---
 
 ## §1 — Modes

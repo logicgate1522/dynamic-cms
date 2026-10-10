@@ -236,6 +236,13 @@ def validate(plan, facts):
         }
 
     out["conversions"] = take("conversions", plan.get("conversions"), CAPS["conversions"], clean_conversion)
+    # Unknown conditions would silently broaden a trigger (a typo'd "optoin"
+    # makes a per-service conversion fire on every lead): refuse them.
+    for raw in plan.get("conversions") or []:
+        if isinstance(raw, dict) and isinstance(raw.get("trigger"), dict) and isinstance(raw["trigger"].get("where"), dict):
+            for key in raw["trigger"]["where"]:
+                if key not in WHERE_KEYS:
+                    report["errors"].append(f"conversion “{raw.get('id')}”: unknown condition “{key}”")
     for c in out["conversions"]:
         if len(c["id"]) > 37:
             report["errors"].append(f"conversion “{c['id']}”: id must be at most 37 characters (GA4 event cv_<id> ≤ 40)")
