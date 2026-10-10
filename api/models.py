@@ -435,6 +435,16 @@ class FormSubmission(models.Model):
     ip_hash = models.CharField(max_length=64, blank=True)
     user_agent = models.CharField(max_length=400, blank=True)
     referer = models.CharField(max_length=500, blank=True)
+    # Tracking (R31): the visitor's intent profile and the lead's event id,
+    # sent by the kit's submitForm() as `_cms` and never part of `data`.
+    event_id = models.CharField(max_length=64, blank=True, db_index=True)
+    profile = models.JSONField(default=dict, blank=True)
+    consent = models.JSONField(default=dict, blank=True)
+    is_test = models.BooleanField(default=False, db_index=True)
+    country = models.CharField(max_length=2, blank=True)
+    region = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    contact = models.ForeignKey("Contact", null=True, blank=True, on_delete=models.SET_NULL, related_name="submissions")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -442,3 +452,211 @@ class FormSubmission(models.Model):
 
     def __str__(self):
         return f"{self.form_name} submission #{self.pk}"
+
+
+# ==================== TRACKING (R31–R33) ====================
+# See TRACKING_IMPLEMENTATION_PLAN.md. The plan itself lives in
+# SiteSettings.data.analytics.plan; these models hold state around it.
+
+class TrackingScan(models.Model):
+    """What the site looks like to a visitor (pages, blocks, CTAs, forms,
+    FAQs), collected by the admin's browser or the headless runner. Singleton
+    (pk=1). Combined with DB facts in site_facts.py."""
+    data = models.JSONField(default=dict)
+    scanned_at = models.DateTimeField(null=True, blank=True)
+    source = models.CharField(max_length=20, blank=True)  # browser | headless
+
+
+class TrackingJob(models.Model):
+    """Work for `manage.py tracking_worker` (a separate process, so the
+    request→worker handoff must be in the database, not the cache)."""
+    kind = models.CharField(max_length=20)  # sync|verify|audience_sync|contact_purge
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, default="pending", db_index=True)  # pending|running|done|error
+    result = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+
+class TrackingConnection(models.Model):
+    TOOLS = [(t, t) for t in ("google", "meta", "tiktok", "linkedin", "google_ads")]
+    tool = models.CharField(max_length=20, choices=TOOLS, unique=True)
+    status = models.CharField(max_length=20, default="not_connected")  # not_connected|connected|error|needs_reauth
+    account = models.JSONField(default=dict, blank=True)   # non-secret ids (pixel, ad account, property…)
+    secret = models.TextField(blank=True)                  # Fernet-encrypted JSON; never serialised
+    secret_hint = models.CharField(max_length=12, blank=True)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    last_ok_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+
+class TrackingSyncItem(models.Model):
+    """One plan item as it exists in one tool (the CMS only manages what it created)."""
+    tool = models.CharField(max_length=20)
+    kind = models.CharField(max_length=40)
+    plan_id = models.CharField(max_length=60)
+    remote_id = models.CharField(max_length=200, blank=True)
+    desired_hash = models.CharField(max_length=64, blank=True)
+    remote_hash = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=20, default="pending")  # pending|in_sync|failed|refused|orphaned|manual|drifted|unmanaged
+    error = models.TextField(blank=True)
+    detail = models.JSONField(default=dict, blank=True)
+    synced_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("tool", "kind", "plan_id")]
+
+
+class EventOutbox(models.Model):
+    """Server-side copies of events, delivered to each tool with retries."""
+    event_id = models.CharField(max_length=64)
+    name = models.CharField(max_length=60)
+    params = models.JSONField(default=dict)
+    consent = models.JSONField(default=dict)
+    identifiers = models.JSONField(default=dict)   # hashed only
+    context = models.JSONField(default=dict)       # url, ua, ip, click ids, client ids
+    tools_pending = models.JSONField(default=list)
+    results = models.JSONField(default=dict)       # tool -> {ok, status, detail, at}
+    attempts = models.IntegerField(default=0)
+    next_at = models.DateTimeField(default=timezone.now, db_index=True)
+    status = models.CharField(max_length=20, default="pending", db_index=True)  # pending|done|dead|skipped
+    locked_until = models.DateTimeField(null=True, blank=True)
+    is_test = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        unique_together = [("event_id", "name")]
+
+
+class TrackingDaily(models.Model):
+    """Aggregate counts only (no visitor data): powers "last seen" and anomaly alerts."""
+    date = models.DateField()
+    name = models.CharField(max_length=60)
+    conversion_id = models.CharField(max_length=60, blank=True)
+    intent = models.CharField(max_length=60, blank=True)
+    count = models.IntegerField(default=0)
+    test_count = models.IntegerField(default=0)
+    last_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("date", "name", "conversion_id", "intent")]
+
+
+class VerificationRun(models.Model):
+    trigger = models.CharField(max_length=20, default="manual")  # manual|publish|deploy|schedule
+    mode = models.CharField(max_length=20, default="in_browser")  # in_browser|headless|static
+    status = models.CharField(max_length=20, default="pending")  # pending|running|passed|failed|error
+    scope = models.JSONField(default=list, blank=True)           # conversion ids ([] = all)
+    tests = models.JSONField(default=list, blank=True)           # compiled steps
+    summary = models.JSONField(default=dict, blank=True)
+    nonce = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class VerificationResult(models.Model):
+    run = models.ForeignKey(VerificationRun, on_delete=models.CASCADE, related_name="results")
+    conversion_id = models.CharField(max_length=60)
+    tool = models.CharField(max_length=20, blank=True)
+    step = models.CharField(max_length=20)  # trigger|sent|received
+    status = models.CharField(max_length=20)  # ok|fail|skipped|blocked|inactive|warn
+    detail = models.TextField(blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+
+
+class TrackingAlert(models.Model):
+    key = models.CharField(max_length=120, unique=True)
+    level = models.CharField(max_length=10, default="warning")
+    message = models.TextField()
+    opened_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+
+class Contact(models.Model):
+    """A person who contacted the business (R33). Admin-only; never public."""
+    email_norm = models.CharField(max_length=254, blank=True, db_index=True)
+    phone_e164 = models.CharField(max_length=20, blank=True, db_index=True)
+    name = models.CharField(max_length=200, blank=True)
+    name_locked = models.BooleanField(default=False)
+    status = models.CharField(max_length=40, default="new")
+    status_history = models.JSONField(default=list, blank=True)
+    notes = models.JSONField(default=list, blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    marketing_opt_in = models.BooleanField(default=False)
+    opt_in_at = models.DateTimeField(null=True, blank=True)
+    opt_in_source = models.JSONField(default=dict, blank=True)
+    country = models.CharField(max_length=2, blank=True)
+    region = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    first_source = models.JSONField(default=dict, blank=True)
+    last_source = models.JSONField(default=dict, blank=True)
+    intents = models.JSONField(default=dict, blank=True)
+    segment = models.CharField(max_length=60, blank=True)
+    stages = models.JSONField(default=list, blank=True)
+    answers = models.JSONField(default=dict, blank=True)  # latest non-free-text form answers
+    value = models.FloatField(default=0)
+    visits = models.IntegerField(default=0)
+    vid = models.CharField(max_length=64, blank=True, db_index=True)
+    is_client = models.BooleanField(default=False)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+    retain_until = models.DateTimeField(null=True, blank=True)
+    merge_suggestions = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-last_seen"]
+
+
+class ContactEvent(models.Model):
+    contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="events")
+    at = models.DateTimeField(default=timezone.now)
+    name = models.CharField(max_length=60)
+    params = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-at"]
+
+
+class ContactGroup(models.Model):
+    key = models.CharField(max_length=60, unique=True)
+    label = models.CharField(max_length=100)
+    kind = models.CharField(max_length=10, default="custom")  # auto|custom
+    rule = models.JSONField(default=dict, blank=True)
+    sync_to = models.JSONField(default=list, blank=True)
+    remote = models.JSONField(default=dict, blank=True)      # tool -> {id, size, synced_at, error}
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ErasureTombstone(models.Model):
+    """Hash of an erased contact's identifiers: blocks re-creation from
+    in-flight events for 30 days (never the identifiers themselves)."""
+    key_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ConsentLog(models.Model):
+    visitor_hash = models.CharField(max_length=64)
+    choice = models.JSONField(default=dict)
+    banner_version = models.CharField(max_length=20, blank=True)
+    at = models.DateTimeField(auto_now_add=True)
+
+
+class AdminAuditLog(models.Model):
+    user = models.CharField(max_length=150)
+    action = models.CharField(max_length=40)
+    target = models.CharField(max_length=200, blank=True)
+    detail = models.JSONField(default=dict, blank=True)
+    at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-at"]

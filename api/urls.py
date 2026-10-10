@@ -44,6 +44,8 @@ from .section_views import (
     SectionSchemaView,
 )
 from .auth_views import CsrfTokenView, LogoutView, SessionStatusView
+from . import contact_views as cv
+from . import tracking_views as tv
 from .sitemaps import SitemapReportView
 from .draft_views import DraftDiscardView, DraftListView, DraftPublishView
 from .views import (
@@ -160,6 +162,41 @@ urlpatterns = [
 
     path('redirects/resolve/', RedirectResolveView.as_view(), name='redirect-resolve'),
     path('redirects/io/', RedirectImportExportView.as_view(), name='redirect-io'),
+
+    # Tracking (R31–R32): plan, scan, checks, connections, beacon.
+    path('tracking/config/', tv.TrackingConfigView.as_view(), name='tracking-config'),
+    path('tracking/plan/approve/', tv.TrackingPlanApproveView.as_view(), name='tracking-plan-approve'),
+    path('tracking/plan/build/', tv.TrackingPlanBuildView.as_view(), name='tracking-plan-build'),
+    path('tracking/plan/', tv.TrackingPlanView.as_view(), name='tracking-plan'),
+    path('tracking/facts/', tv.TrackingFactsView.as_view(), name='tracking-facts'),
+    path('tracking/scan/', tv.TrackingScanView.as_view(), name='tracking-scan'),
+    path('tracking/overview/', tv.TrackingOverviewView.as_view(), name='tracking-overview'),
+    path('tracking/verify/pending/', tv.VerifyPendingView.as_view(), name='tracking-verify-pending'),
+    path('tracking/verify/runs/<int:pk>/results/', tv.VerifyResultsView.as_view(), name='tracking-verify-results'),
+    path('tracking/verify/runs/<int:pk>/', tv.VerifyRunDetailView.as_view(), name='tracking-verify-run'),
+    path('tracking/verify/runs/', tv.VerifyRunsView.as_view(), name='tracking-verify-runs'),
+    path('tracking/connections/<slug:tool>/', tv.ConnectionDetailView.as_view(), name='tracking-connection'),
+    path('tracking/connections/', tv.ConnectionsView.as_view(), name='tracking-connections'),
+    path('tracking/sync/items/<int:pk>/', tv.SyncItemView.as_view(), name='tracking-sync-item'),
+    path('tracking/sync/', tv.SyncNowView.as_view(), name='tracking-sync'),
+    path('tracking/gtm/', tv.GtmContainerView.as_view(), name='tracking-gtm'),
+    path('ai/tracking-plan/prompt/', tv.TrackingAiPromptView.as_view(), name='ai-tracking-plan-prompt'),
+    path('ai/tracking-plan/apply/', tv.TrackingAiApplyView.as_view(), name='ai-tracking-plan-apply'),
+    path('events/forget/', tv.ForgetVisitorView.as_view(), name='events-forget'),
+    path('events/', tv.EventIngestView.as_view(), name='events-ingest'),
+
+    # Contacts (R33): admin-only.
+    path('contacts/export/', cv.ContactsCsvView.as_view(), name='contacts-export'),
+    path('contacts/groups/<slug:key>/', cv.ContactGroupDetailView.as_view(), name='contacts-group'),
+    path('contacts/groups/', cv.ContactGroupsView.as_view(), name='contacts-groups'),
+    path('contacts/settings/', cv.ContactSettingsView.as_view(), name='contacts-settings'),
+    path('contacts/webhook-test/', cv.WebhookTestView.as_view(), name='contacts-webhook-test'),
+    path('contacts/audit/', cv.AuditLogView.as_view(), name='contacts-audit'),
+    path('contacts/<int:pk>/erase/', cv.ContactEraseView.as_view(), name='contact-erase'),
+    path('contacts/<int:pk>/export/', cv.ContactExportView.as_view(), name='contact-export'),
+    path('contacts/<int:pk>/merge/', cv.ContactMergeView.as_view(), name='contact-merge'),
+    path('contacts/<int:pk>/', cv.ContactDetailView.as_view(), name='contact-detail'),
+    path('contacts/', cv.ContactListView.as_view(), name='contacts'),
 
     path('', include(router.urls)),
 ]

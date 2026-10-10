@@ -115,7 +115,7 @@ function textDerivedKeys(ast, report) {
 // Site-wide rules: forms and tracking each have ONE entry point.
 const OWN = {
     forms: /lib\/forms\.(js|ts)$/,
-    tracking: /lib\/track\.(js|ts)$|components\/seo\/Analytics(Events)?\.(jsx|tsx)$/,
+    tracking: /lib\/(track|consent)\.(js|ts)$|components\/seo\/(Analytics(Events)?|ConsentedTags|VerifyHarness)\.(jsx|tsx)$/,
 };
 function siteWideRules(file, source, lines, report) {
     if (!OWN.forms.test(file)) {
@@ -159,6 +159,45 @@ function contractRules(file, source, lines, report) {
         if (/(local|session)Storage\.setItem\(\s*[^,]*(token|auth|csrf|jwt|session)/i.test(line) || /document\.cookie\s*=.*(token|auth)/i.test(line)) {
             report(i + 1, "auth token in browser storage — session cookie + CSRF only (R4)");
         }
+        // R32: visitor data is stored only by the consent-aware kit modules.
+        if (/\b(localStorage|sessionStorage)\.setItem\(|document\.cookie\s*=/.test(line) && !VISITOR_STORAGE_OK.test(file)) {
+            report(i + 1, "visitor data stored outside lib/consent.js / lib/intentProfile.js — storage needs consent (R32)");
+        }
+        // R33: a marketing opt-in is never pre-ticked.
+        if (/consent_marketing/.test(line) && /(default|checked)\s*[:=]\s*\{?\s*true/.test(line)) {
+            report(i + 1, "marketing opt-in pre-ticked — it must start unticked (R33)");
+        }
+    });
+}
+
+// Files that may store visitor state (consent, the intent profile) or admin
+// conveniences (edit mode, drafts) — everything else must not (R32).
+const VISITOR_STORAGE_OK = /lib\/(consent|intentProfile|forms|api)\.(js|ts)$|components\/(cms|admin)\/|components\/seo\/(AnalyticsEvents|ConsentedTags|VerifyHarness)\.(jsx|tsx)$/;
+
+// A form must say which form it is (data-cms-form), so starts, errors and
+// abandons are tracked against it (R31).
+function formRules(file, source, lines, report) {
+    if (!/submitForm\s*\(/.test(source) || OWN.forms.test(file)) return;
+    lines.forEach((line, i) => {
+        if (/<form\b/.test(line) && !/data-cms-form/.test(`${line}${lines[i + 1] || ""}${lines[i + 2] || ""}`)) {
+            report(i + 1, "<form> without data-cms-form=\"<name>\" — tracking can't attribute starts and abandons (R31)");
+        }
+    });
+}
+
+// A block must render {editButton} inside its root: admins get the block's
+// tools (R30), visitors a hidden marker that tells tracking which block a
+// click or view belongs to (R31).
+function editButtonRule(ast, source, report) {
+    visit(ast.program, (node) => {
+        if (!/Function/.test(node.type) || node.body?.type !== "BlockStatement") return;
+        const body = node.body.body;
+        const callsUseCms = body.some((stmt) => stmt.type === "VariableDeclaration" && stmt.declarations.some((d) => d.init?.type === "CallExpression" && d.init.callee?.name === "useCms"));
+        if (!callsUseCms) return;
+        const last = [...body].reverse().find((stmt) => stmt.type === "ReturnStatement");
+        if (!last?.argument || /ObjectExpression|CallExpression|Identifier/.test(last.argument.type)) return;
+        const text = source.slice(node.body.start, node.body.end);
+        if ((text.match(/\beditButton\b/g) || []).length < 2) report(node.loc.start.line);
     });
 }
 
@@ -235,6 +274,10 @@ for (const file of files) {
             problems++;
             console.log(`${relativePath}:${line}  ${message}`);
         });
+        formRules(file, source, lines, (line, message) => {
+            problems++;
+            console.log(`${relativePath}:${line}  ${message}`);
+        });
     }
     if (!/\.(jsx|tsx)$/.test(file)) continue;
     const usesCms = /import\s*\{[^}]*\buseCms\b[^}]*\}\s*from/.test(source);
@@ -249,6 +292,10 @@ for (const file of files) {
     listRules(ast, source, (line, message) => {
         problems++;
         console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);
+    });
+    editButtonRule(ast, source, (line) => {
+        problems++;
+        console.log(`${relative(process.cwd(), file)}:${line}  CMS block renders no {editButton} — put it first inside the block's root (admin tools R30, tracking marker R31)`);
     });
     hiddenGuard(ast, source, (line) => {
         problems++;

@@ -1,0 +1,31 @@
+# Copy to .github/workflows/tracking-checks.yml in the SITE's repository.
+# Runs the CMS tracking checks every night and whenever you start it by hand,
+# and also picks up runs queued from Site tools → Tracking → "Queue for runner".
+# Secrets (Settings → Secrets and variables → Actions):
+#   SITE_URL       https://www.your-domain.co.uk
+#   API_URL        https://api.your-domain.co.uk
+#   RUNNER_SECRET  the backend's REVALIDATE_SECRET
+name: Tracking checks
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily, 05:17 UTC
+  workflow_dispatch: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the checker
+        working-directory: frontend-kit/acceptance   # where the kit's acceptance folder lives in your repo
+        run: npm install && npx playwright install --with-deps chromium
+      - name: Check every conversion
+        working-directory: frontend-kit/acceptance
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          API_URL: ${{ secrets.API_URL }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+        run: node verify-tracking.mjs --schedule

@@ -730,3 +730,58 @@ def copy_structure_prompt():
 Section field reference:
 {json.dumps(SECTION_SCHEMA, indent=2)}
 {_checklist}"""
+
+
+# ------------------------------------------------------------------ tracking plan (R31)
+
+def tracking_plan_prompt(*, facts, library_plan, current=None):
+    """Refine the library's tracking plan for this business. The reply is a
+    whole plan; the server validates every reference against `facts` and keeps
+    locked items, so the model can only choose from what exists."""
+    import json as _json
+
+    from .tracking_vocab import EVENTS, META_STANDARD, TIKTOK_STANDARD
+    ctx = site_context()
+    compact = {
+        "business": {"name": ctx["brand"], "type": (facts.get("org") or {}).get("type"), "description": (facts.get("org") or {}).get("description", "")[:400],
+                     "audience": ctx["audience"], "location": ctx["location"], "currency": (facts.get("org") or {}).get("currency")},
+        "pages": [{"path": p["path"], "type": p["type"], "title": p.get("title", "")[:80]} for p in (facts.get("pages") or [])[:120]],
+        "forms": [{"name": f["name"], "pages": f["pages"], "fields": [{"name": x["name"], "type": x["type"], "options": [o["value"] for o in x.get("options") or []]}
+                                                                      for x in f["fields"]]} for f in facts.get("forms") or []],
+        "blocks": sorted((facts.get("blocks") or {}).keys())[:80],
+        "ctas": [{"label": c["label"], "target": c["target"], "block": c["block"]} for c in (facts.get("ctas") or [])[:40]],
+        "faqs": [q["question"] for q in (facts.get("faqs") or [])[:80]],
+        "channels_shown": facts.get("channels"), "has": facts.get("has"), "collections": [
+            {"key": c["key"], "label": c["label"], "entries": [e["path"] for e in c["entries"]][:30]} for c in facts.get("collections") or []],
+    }
+    locked = {k: [x["id"] for x in (current or {}).get(k) or [] if x.get("locked")] for k in ("intents", "segments", "stages", "conversions", "audiences")}
+    events = ", ".join(n for n in EVENTS if n != "conversion")
+    return f"""You are a conversion-tracking strategist. Refine the tracking plan for this website so its owner learns which offerings, customer types and buying stages lead to enquiries, and can retarget the right people.
+
+=== THE SITE (facts — the ONLY things you may reference) ===
+{_json.dumps(compact, indent=1, ensure_ascii=False)}
+
+=== STARTING PLAN (built by rules from the facts) ===
+{_json.dumps({k: library_plan.get(k) for k in ("intents", "segments", "stages", "conversions", "audiences")}, indent=1, ensure_ascii=False)}
+
+=== HOW TO IMPROVE IT ===
+- Intents = the real things this business offers (one per service/product page). Give each clear `label`s and good `faqKeywords` (single lowercase words or short phrases a visitor's question would contain).
+- Segments = customer types (from form options and "who we help" content). Stages = where the visitor is in their decision (e.g. switching provider, deadline, checking price, just starting, has concerns).
+- Conversions: keep "primary" for real leads only (form submissions, calls if a phone is shown). Everything else is "secondary". Add conversions this specific business needs; remove ones that don't fit.
+- Audiences: each needs a concrete `purpose` saying what to show those people and why.
+- Add a one-sentence `rationale` to every item you add or change.
+- Trigger events allowed: {events}. Trigger conditions allowed in `where`: form, field, option, intent, stage, segment, blocks, ctaTargets, path, pathPrefix, pageType, percent (25/50/75/90), method (phone/email/whatsapp).
+- Meta destinations allowed: {", ".join(META_STANDARD)}, or "custom". TikTok: {", ".join(TIKTOK_STANDARD)}, or null.
+- Ids: lowercase letters, digits and _ (start with a letter, max 37 characters). Keep existing ids for items you keep.
+- Locked items (keep exactly as they are): {_json.dumps(locked)}.
+
+=== REPLY FORMAT ===
+One JSON object with exactly these keys: "intents", "segments", "stages", "conversions", "audiences" — each a list in the same shape as the starting plan.
+{final_check(
+    RULE_JSON,
+    "Every page, form, field, option, block and CTA target you reference appears in THE SITE facts above, spelled exactly.",
+    "No personal data anywhere (no names, emails, phone numbers) and no money values or prices.",
+    "Primary conversions are real leads only; call/email/WhatsApp conversions only if that channel is shown on the site.",
+    "Every locked item is kept unchanged; every audience has a concrete purpose.",
+    "At most 25 primary conversions, 80 conversions and 80 audiences.",
+)}"""

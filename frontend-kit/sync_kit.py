@@ -27,7 +27,16 @@ CORE = [
     "app/admin/settings/page.jsx",
     "app/admin/sitemap/page.jsx",
     "app/admin/submissions/page.jsx",
+    "app/admin/tracking/page.jsx",
+    "app/admin/contacts/page.jsx",
     "components/admin/AdminShell.jsx",
+    "components/admin/contacts/ContactsPanel.jsx",
+    "components/admin/tracking/ChecksTab.jsx",
+    "components/admin/tracking/describe.js",
+    "components/admin/tracking/PlanEditor.jsx",
+    "components/admin/tracking/ToolsTab.jsx",
+    "components/admin/tracking/TrackingPanel.jsx",
+    "components/admin/tracking/ui.jsx",
     "components/admin/useApi.js",
     "components/cms/AdminBar.jsx",
     "components/cms/AdminProvider.jsx",
@@ -57,20 +66,30 @@ CORE = [
     "components/dynamic/SectionSlot.jsx",
     "components/seo/Analytics.jsx",
     "components/seo/AnalyticsEvents.jsx",
+    "components/seo/ConsentBanner.jsx",
+    "components/seo/ConsentedTags.jsx",
+    "components/seo/VerifyHarness.jsx",
     "components/seo/JsonLd.jsx",
     "components/seo/PageSeo.jsx",
     "components/seo/RawHtmlInjector.jsx",
     "lib/api.js",
     "lib/bgImage.js",
     "lib/cms.js",
+    "lib/consent.js",
     "lib/forms.js",
+    "lib/intentProfile.js",
     "lib/keywords.js",
     "lib/seoChecks.js",
     "middleware.js",
     "lib/seo.js",
+    "lib/siteScan.js",
     "lib/track.js",
+    "lib/trackCapture.js",
     "lib/visibility.js",
 ]
+# Gate scripts live in <frontend>/scripts and frontend-kit/scripts; they are
+# copied too, so the kit's gates never drift from the reference site's.
+SCRIPTS = ["check-inline.mjs", "check-sections.mjs"]
 ADAPT = [
     "components/cms/BlogPostEditor.jsx",
     "components/cms/DraftPreview.jsx",
@@ -107,9 +126,15 @@ def main(frontend):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
     (out_root / "lib/brand.js").write_text(BRAND)
+    scripts_out = out_root.parent / "scripts"
+    for name in SCRIPTS:
+        src = Path(frontend).resolve() / "scripts" / name
+        if not src.exists():
+            sys.exit(f"missing gate script in reference frontend: scripts/{name}")
+        (scripts_out / name).write_text(src.read_text())
     if leaks:
         sys.exit("brand string leaked into CORE files (use SITE_NAME from lib/brand):\n  " + "\n  ".join(leaks))
-    print(f"kit refreshed: {len(CORE)} core + {len(ADAPT)} adapt files -> {out_root}")
+    print(f"kit refreshed: {len(CORE)} core + {len(ADAPT)} adapt files + {len(SCRIPTS)} gate scripts -> {out_root.parent}")
 
 
 if __name__ == "__main__":

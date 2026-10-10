@@ -37,6 +37,11 @@
      - a collection entry not linked from its index page; entries under
        ENTRY_MIN_WORDS (default 600) words of main content; a FORM_PAGE with
        under 120 words besides the form
+   - tracking (R31–R33): pages tied to an offering without block markers;
+     FAQ toggles without aria-expanded/<summary>; dangling plan triggers and
+     an unapproved plan (warnings; failures with LAUNCH=1); a pre-ticked
+     marketing opt-in; tags set but no consent banner / "Cookie settings";
+     a privacy page that doesn't mention analytics cookies
    - responsive (R20), at RESPONSIVE_WIDTHS (default 390,1024): visible text
      smaller than 11px, or text pushed past the screen edge (after in-view
      animations have finished)
@@ -252,6 +257,7 @@ for (const width of (process.env.RESPONSIVE_WIDTHS || "390,1024").split(",").map
     await page.setViewportSize({ width, height: width < 800 ? 844 : 900 });
     for (const url of urls) {
         const path = new URL(url).pathname;
+        if (process.env.AUDIT_DEBUG) console.error(`[responsive ${width}] ${path}`);
         await page.goto(`${SITE}${path}`, { waitUntil: "load" });
         // Scroll through slowly so in-view animations run, then let them finish.
         await page.evaluate(async () => {
@@ -371,6 +377,55 @@ if (token) {
 }
 if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, `${pageWords.get(FORM_PAGE)} words besides the form — say what happens after someone submits it`);
 
+/* ---------- tracking, consent, contacts (R31–R33) ---------- */
+{
+    const config = await (await fetch(`${API}/tracking/config/`)).json().catch(() => ({}));
+    const a = publicSettings.analytics || {};
+    const hasTags = ["gtmId", "ga4Id", "googleAdsId", "metaPixelId", "tiktokPixelId", "linkedinPartnerId", "clarityId", "hotjarId"].some((k) => String(a[k] || "").trim());
+    // R31: every page tied to an offering carries block markers, so its clicks
+    // and views are attributed; FAQ pages use accessible toggles.
+    for (const path of Object.keys(config.pageIntents || {})) {
+        const html = await (await fetch(`${SITE}${path}`)).text().catch(() => "");
+        if (!/data-track-block=/.test(html)) fail(path, "no tracking block markers — blocks must render {editButton}, sections need the kit renderer (R31)");
+    }
+    for (const [path, type] of Object.entries(config.pageTypes || {})) {
+        if (type !== "faq") continue;
+        await page.goto(`${SITE}${path}`, { waitUntil: "load" });
+        const toggles = await page.evaluate(() => document.querySelectorAll("main [aria-expanded], main summary").length);
+        if (!toggles) fail(path, "FAQ answers have no aria-expanded / <summary> toggle — FAQ opens can't be tracked and screen readers can't tell (R31)");
+    }
+    if (token) {
+        const state = await (await fetch(`${API}/tracking/plan/`, { headers: { Authorization: `Token ${token}` } })).json().catch(() => ({}));
+        for (const d of state.report?.dangling || []) (LAUNCH ? fail : warn)("tracking", `trigger doesn't match the site: ${d}`);
+        if (state.plan?.status !== "approved") (LAUNCH ? fail : warn)("tracking", "the tracking plan isn't approved (Site tools → Tracking)");
+    }
+    // R33: a marketing opt-in is never pre-ticked.
+    await page.goto(`${SITE}${FORM_PAGE}`, { waitUntil: "load" });
+    if (await page.evaluate(() => [...document.querySelectorAll("input[data-cms-field='consent_marketing']")].some((i) => i.checked))) {
+        fail(FORM_PAGE, "the marketing opt-in is ticked before the visitor chooses (R33)");
+    }
+    // R32: with any tag set, a fresh visitor gets the banner and every page a way back to it.
+    if (hasTags) {
+        const ctx = await browser.newContext();
+        const v = await ctx.newPage();
+        await v.goto(`${SITE}/`, { waitUntil: "load" });
+        await v.waitForTimeout(1500);
+        const banner = await v.locator("[data-cms-consent-banner]").count();
+        if (config.region !== "us" && !banner) fail("/", "tracking tags are set but no consent banner appears for a new visitor (R32)");
+        if (!(await v.locator("[data-cms-consent-open]").count())) fail("/", "no “Cookie settings” control (data-cms-consent-open) — visitors can't change their choice (R32)");
+        await ctx.close();
+    }
+    // R32/R33: the privacy page explains analytics cookies and enquiry records.
+    const policy = urls.map((u) => new URL(u).pathname).find((p) => /privacy|legal|cookie/i.test(p));
+    if (policy) {
+        const text = (await (await fetch(`${SITE}${policy}`)).text()).replace(/<[^>]+>/g, " ").toLowerCase();
+        if (hasTags && !(/cookie/.test(text) && /analytic/.test(text))) fail(policy, "the privacy/cookie policy doesn't mention analytics cookies (R32)");
+        if (!/(keep|retain|store)[^.]{0,120}(month|year)/.test(text)) warn(policy, "the privacy policy doesn't say how long enquiry records are kept (R33)");
+    } else if (hasTags) {
+        fail("/", "no privacy/cookie policy page in the sitemap (R32)");
+    }
+}
+
 /* ---------- launch check ---------- */
 if (token) {
     const r = await fetch(`${API}/launch-check/`, { headers: { Authorization: `Token ${token}` } });
@@ -380,6 +435,11 @@ if (token) {
         }
     }
     if (created?.id) {
+        // The audit's own enquiry also made a contact (R33): erase it with the submission.
+        const found = await (await fetch(`${API}/contacts/?q=audit%40example.org`, { headers: { Authorization: `Token ${token}` } })).json().catch(() => ({}));
+        for (const c of found.results || []) {
+            await fetch(`${API}/contacts/${c.id}/erase/`, { method: "POST", headers: { Authorization: `Token ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ confirm: "ERASE" }) }).catch(() => {});
+        }
         await fetch(`${API}/forms/${created.form}/submissions/${created.id}/`, { method: "DELETE", headers: { Authorization: `Token ${token}` } }).catch(() => {});
     }
 } else {

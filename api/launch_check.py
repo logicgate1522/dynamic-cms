@@ -157,6 +157,9 @@ def run_launch_check():
             "Tracking is on but the Consent Mode default is “Not set”.",
             "Choose it in Settings → Tracking & analytics: “denied” with a cookie banner where the law requires opt-in (UK/EU).")
 
+    # 2c. Tracking plan, checks and connections (R31–R33).
+    tracking_items(site, add)
+
     # 3. Leads must reach someone: FormSubmit (Settings → Form notifications)
     #    is the standard; backend SMTP (FORM_NOTIFICATION_EMAIL) is optional.
     formsubmit = str((site.get("forms") or {}).get("notifyEmail") or "").strip()
@@ -238,3 +241,55 @@ def run_launch_check():
     blockers = [i for i in items if i["level"] == "blocker"]
     return {"ready": not blockers, "blockers": len(blockers),
             "warnings": len(items) - len(blockers), "items": items}
+
+
+def tracking_items(site, add):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .crypto import has_key
+    from .models import TrackingAlert, TrackingConnection, TrackingJob, VerificationRun
+    from .site_facts import get_facts
+    from .tracking_plan import get_plan, validate
+    plan = get_plan()
+    analytics = site.get("analytics") or {}
+    if not plan.get("conversions"):
+        add("tracking-plan", "warning", "No tracking plan yet",
+            "Nothing tells your analytics and ad tools which actions are leads, which offerings people want or who to retarget.",
+            "Site tools → Tracking → Build from library (or Ask AI), review, then Approve.")
+    elif plan.get("status") != "approved":
+        add("tracking-plan", "warning", "Tracking plan is a draft",
+            "Conversions aren't sent until the plan is approved.", "Site tools → Tracking → review the plan, then Approve.")
+    else:
+        facts = get_facts()
+        _, report = validate(plan, facts)
+        if report["dangling"]:
+            add("tracking-dangling", "warning", f"{len(report['dangling'])} tracking trigger(s) no longer match the site",
+                "; ".join(report["dangling"][:4]), "Site tools → Tracking: update or remove them, then Approve again.")
+        if (plan.get("facts") or {}).get("hash") not in (None, facts.get("hash")):
+            add("tracking-stale", "warning", "The site changed since the tracking plan was approved",
+                "New or removed pages, forms or sections may need conversions.", "Site tools → Tracking → Scan site, review, Approve.")
+        run = VerificationRun.objects.exclude(status__in=("pending", "running")).exclude(trigger="acceptance").first()
+        if not run:
+            add("tracking-checks", "warning", "Tracking has never been checked",
+                "Nobody has confirmed that the conversions actually fire.", "Site tools → Tracking → Checks → Run checks.")
+        elif run.status != "passed":
+            add("tracking-checks", "warning", "Tracking checks are failing",
+                ", ".join((run.summary.get("failing") or []) + (run.summary.get("unplaced") or []))[:300], "Site tools → Tracking → Checks.")
+    conns = list(TrackingConnection.objects.all())
+    if conns and not has_key():
+        add("tracking-key", "blocker", "Tool credentials can't be decrypted",
+            "Tools are connected but TRACKING_SECRET_KEY is not set in the backend environment.",
+            "Set TRACKING_SECRET_KEY (see .env.example) and reconnect the tools.")
+    for c in conns:
+        if c.status == "needs_reauth":
+            add(f"tracking-reauth-{c.tool}", "warning", f"{c.tool} connection needs renewing", c.last_error[:200],
+                "Site tools → Tracking → Tools → Reconnect.")
+    beat = TrackingJob.objects.filter(kind="heartbeat").first()
+    if conns and (not beat or timezone.now() - beat.created_at > timedelta(days=1)):
+        add("tracking-worker", "warning", "The tracking worker isn't running",
+            "Server-side events are sent once; failed sends aren't retried, tools aren't re-synced nightly and old contacts aren't purged.",
+            "Run `manage.py tracking_worker` (systemd/container) or `--once` from cron every minute. See LAUNCH_GUIDE.md.")
+    for alert in TrackingAlert.objects.filter(resolved_at__isnull=True, key__in=("quiet",)):
+        add("tracking-quiet", "warning", "A conversion has gone quiet", alert.message, "Site tools → Tracking → Run checks.")

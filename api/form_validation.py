@@ -32,6 +32,10 @@ def validate_submission(definition, payload):
 
         ftype = spec.get("type", "text")
         raw = payload.get(name)
+        # Marketing opt-in (R33): always optional, stored as true/false.
+        if ftype == "consent_marketing":
+            cleaned[name] = raw in (True, "true", "True", "on", "yes", "1", 1)
+            continue
         present = raw not in (None, "", [], {})
 
         if spec.get("required") and not present:

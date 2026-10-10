@@ -8,7 +8,9 @@
     "acceptance": "node acceptance.mjs",
     "audit": "node site-audit.mjs",
     "audit:launch": "LAUNCH=1 node site-audit.mjs",
-    "fresh-install": "node fresh-install.mjs"
+    "fresh-install": "node fresh-install.mjs",
+    "verify-tracking": "node verify-tracking.mjs",
+    "verify-tracking:schedule": "node verify-tracking.mjs --schedule"
   },
   "dependencies": {
     "axe-core": "^4.14.0",

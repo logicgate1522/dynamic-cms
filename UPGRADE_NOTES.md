@@ -1,3 +1,81 @@
+# Upgrade Notes — business-aware tracking, consent and contacts (R31–R33)
+
+Implements TRACKING_IMPLEMENTATION_PLAN.md. New rules **R31** (tracking plan
+from the business, automatic events, checks), **R32** (consent first) and
+**R33** (privacy-safe contacts), each in its five places.
+
+**Backend**
+- Models and migrations `0011_tracking` and `0012_tracking_jobs`:
+  - tracking: `TrackingScan`, `TrackingConnection`, `TrackingSyncItem`,
+    `EventOutbox`, `TrackingDaily`, `VerificationRun` + `VerificationResult`,
+    `TrackingAlert`, `TrackingJob`;
+  - contacts and audit: `Contact`, `ContactEvent`, `ContactGroup`,
+    `ErasureTombstone`, `ConsentLog`, `AdminAuditLog`;
+  - `FormSubmission` gains `event_id`, `profile`, `consent`, `is_test`,
+    location and `contact`.
+- Modules:
+  - `tracking_vocab` (event vocabulary + PII scrubber, served to the kit);
+  - `site_facts` (DB + rendered-site scan);
+  - `tracking_library` (base set, business packs, page-type rules, stage
+    detectors);
+  - `tracking_plan` (validation incl. dangling triggers and caps, runtime
+    config, lead matching, values, diff, test compilation);
+  - `tracking_leads`, `tracking_dispatch` + `tracking_adapters/` (Meta CAPI,
+    GA4 MP, TikTok, LinkedIn, Google Ads, GTM; Google service-account JWT
+    without client libraries);
+  - `tracking_sync`, `tracking_verify`, `contacts`, `crypto`, `geo`.
+- Endpoints: `tracking/*`, `ai/tracking-plan/*`, `events/`,
+  `events/forget/` and `contacts/*` (spec §6.2). The public settings
+  response no longer includes `analytics.plan` or `contacts`, and a settings
+  save never overwrites them.
+- `submitForm` envelope (`_cms`) popped before validation. Answers include
+  `event_id`, matched `conversions`, `summary`, `intent`, `segment`. A
+  same-email duplicate answers `duplicate: true`.
+- Launch check: tracking plan missing / draft / stale / dangling, checks
+  never run or failing, connections needing re-auth, missing
+  `TRACKING_SECRET_KEY` (blocker), worker not running, quiet conversions.
+- `consent_marketing` form field type: always optional, boolean.
+- New dependency: `cryptography`. New settings: `TRACKING_SECRET_KEY`,
+  `TRACKING_ALERT_EMAIL`/`WEBHOOK`, `TRACKING_INLINE_DELIVERY`,
+  `TRUST_GEO_HEADERS`, `GEOIP_DB_PATH`, throttles `events`/`verify`. CORS
+  allows `X-CMS-Verify`.
+- Commands: `manage.py tracking_worker [--once]`,
+  `manage.py tracking_rotate_key`.
+- Tests: `api/tests_tracking.py` (64).
+
+**Kit (CORE)**
+- New `lib/consent.js`, `lib/intentProfile.js`, `lib/trackCapture.js` and
+  `lib/siteScan.js`; `lib/track.js` rewritten.
+- New `components/seo/{ConsentBanner,ConsentedTags,VerifyHarness}.jsx`.
+- New admin screens: `app/admin/{tracking,contacts}` and
+  `components/admin/{tracking,contacts}/*`. Site tools gains Tracking and
+  Contacts tabs.
+- `useCms`'s `{editButton}` renders a hidden block marker for visitors, and
+  `E.Item` an item marker. CMS-page sections are wrapped in
+  `[data-track-block]`.
+- `<Analytics>` fetches `tracking/config/` itself. **Render it inside
+  `<AdminProvider>`** (layout change in the spec).
+- `AdminProvider` treats `?cms-verify` pages as a visitor.
+- check-inline: every block renders `{editButton}`; forms that use
+  `submitForm` have `data-cms-form`; no visitor storage outside the
+  consent/profile modules; opt-in never pre-ticked.
+- Acceptance:
+  - `tracking:`, `consent:` and `contacts:` checks;
+  - `verify-tracking.mjs` (headless checks) and a GitHub workflow template;
+  - site-audit tracking/consent/contacts checks.
+
+**Upgrading an existing site**
+1. Sync the kit.
+2. Move `<Analytics>` inside `<AdminProvider>`.
+3. Make sure every block renders `{editButton}` first inside its root, and
+   that every form has `data-cms-form`.
+4. Give FAQ toggles `aria-expanded`.
+5. Add `TRACKING_SECRET_KEY`, run migrations, start the worker.
+6. In Site tools → Tracking: Scan → Build → Approve → Run checks.
+7. Update the privacy page (LAUNCH_GUIDE.md §6).
+
+---
+
 # Upgrade Notes — launch guide, search verification, analytics warnings
 
 - **New `LAUNCH_GUIDE.md`** (generic, owner-facing). It covers:

@@ -103,6 +103,7 @@ CORS_ALLOW_HEADERS = [
     'origin',
     'user-agent',
     'x-csrftoken',
+    'x-cms-verify',   # tracking check results (run token, R31)
     'x-requested-with',
     'x-store-slug',
     'x-user-type',
@@ -288,6 +289,9 @@ REST_FRAMEWORK = {
         # Public, unauthenticated write endpoints (form submissions, inquiries)
         # get a much tighter rate on top of the anon default above.
         'form_submit': os.getenv('THROTTLE_RATE_FORM_SUBMIT', '5/minute'),
+        # Tracking beacons (R31) and verification results (token-gated).
+        'events': os.getenv('THROTTLE_RATE_EVENTS', '60/minute'),
+        'verify': os.getenv('THROTTLE_RATE_VERIFY', '240/minute'),
         # Admin login — brute-force resistance independent of form_submit.
         'login': os.getenv('THROTTLE_RATE_LOGIN', '10/minute'),
         # Public cached resolver endpoints (seo/resolve, redirects/resolve).
@@ -356,6 +360,24 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@example.com')
 # emailed to. Empty by default — notification is skipped, not an error,
 # so this backend still works with zero email config out of the box.
 FORM_NOTIFICATION_EMAIL = os.getenv('FORM_NOTIFICATION_EMAIL', '')
+
+# ==================== TRACKING (R31–R33) ====================
+# See TRACKING_IMPLEMENTATION_PLAN.md and LAUNCH_GUIDE.md.
+# Encrypts stored tool credentials (Meta token, Google service account…).
+# Generate with: ./venv/bin/python -c "from api.crypto import generate_key; print(generate_key())"
+TRACKING_SECRET_KEY = os.getenv('TRACKING_SECRET_KEY', '')
+TRACKING_SECRET_KEY_OLD = os.getenv('TRACKING_SECRET_KEY_OLD', '')
+# Where tracking alerts go (backend SMTP) and/or a JSON webhook (Slack, Teams…).
+TRACKING_ALERT_EMAIL = os.getenv('TRACKING_ALERT_EMAIL', '')
+TRACKING_ALERT_WEBHOOK = os.getenv('TRACKING_ALERT_WEBHOOK', '')
+# Send server-side event copies right after the request (short timeout) as
+# well as from `manage.py tracking_worker` (retries). Off = worker only.
+TRACKING_INLINE_DELIVERY = os.getenv('TRACKING_INLINE_DELIVERY', 'True') == 'True'
+TRACKING_DELIVERY_TIMEOUT = float(os.getenv('TRACKING_DELIVERY_TIMEOUT', '3'))
+# Approximate lead location: CDN headers, else an optional GeoLite2 file.
+TRUST_GEO_HEADERS = os.getenv('TRUST_GEO_HEADERS', 'True') == 'True'
+TRUST_FORWARDED_FOR = os.getenv('TRUST_FORWARDED_FOR', 'True') == 'True'
+GEOIP_DB_PATH = os.getenv('GEOIP_DB_PATH', '')
 
 # ==================== CACHE ====================
 

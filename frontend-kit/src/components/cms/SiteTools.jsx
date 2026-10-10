@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAdmin } from "@/components/cms/AdminProvider";
 import Drawer from "@/components/cms/Drawer";
@@ -11,6 +11,8 @@ import RedirectsPage from "@/app/admin/redirects/page";
 import SettingsPage from "@/app/admin/settings/page";
 import SitemapPage from "@/app/admin/sitemap/page";
 import SubmissionsPage from "@/app/admin/submissions/page";
+import ContactsPanel from "@/components/admin/contacts/ContactsPanel";
+import TrackingPanel from "@/components/admin/tracking/TrackingPanel";
 
 /* =========================================
    Site-wide tools in a floating dock, so an
@@ -18,8 +20,14 @@ import SubmissionsPage from "@/app/admin/submissions/page";
    The same panels are full pages under /admin.
 ========================================= */
 
+function Tracking({ sub, onPickStart }) {
+    return <TrackingPanel inDrawer initialTab={sub || "overview"} onPickStart={onPickStart} />;
+}
+
 const TOOLS = [
     ["settings", "Site settings", SettingsPage, "/admin/settings"],
+    ["tracking", "Tracking", Tracking, "/admin/tracking"],
+    ["contacts", "Contacts", ContactsPanel, "/admin/contacts"],
     ["images", "Images", ImagesPage, "/admin/images"],
     ["forms", "Form inbox", SubmissionsPage, "/admin/submissions"],
     ["blog", "Blog", BlogAdminPage, "/admin/blog"],
@@ -28,10 +36,19 @@ const TOOLS = [
 ];
 
 export default function SiteTools() {
-    const { panel, closePanel } = useAdmin();
+    const { panel, closePanel, openPanel } = useAdmin();
     const [tab, setTab] = useState(panel?.tab || "settings");
+    useEffect(() => {
+        if (panel?.tab) setTab(panel.tab);
+    }, [panel]);
+    // "Pick on page" closes the drawer, then reopens Tracking → Plan.
+    useEffect(() => {
+        const reopen = (e) => openPanel("tools", { tab: "tracking", sub: e.detail?.tab || "plan" });
+        window.addEventListener("cms:open-tracking", reopen);
+        return () => window.removeEventListener("cms:open-tracking", reopen);
+    }, [openPanel]);
     if (panel?.type !== "tools") return null;
-    const [, label, Body, href] = TOOLS.find(([key]) => key === tab) || TOOLS[0];
+    const [key, label, Body, href] = TOOLS.find(([k]) => k === tab) || TOOLS[0];
     return (
         <Drawer open width={900} title="Site tools" subtitle={label} onClose={closePanel}>
             <div className="mb-5 flex flex-wrap items-center gap-1">
@@ -42,7 +59,7 @@ export default function SiteTools() {
                 ))}
                 <Link href={href} onClick={closePanel} className="ml-auto text-[12px] font-semibold text-[var(--cms-accent)] hover:underline">Open full page →</Link>
             </div>
-            <Body />
+            {key === "tracking" ? <Body sub={panel?.sub} onPickStart={closePanel} /> : <Body />}
         </Drawer>
     );
 }

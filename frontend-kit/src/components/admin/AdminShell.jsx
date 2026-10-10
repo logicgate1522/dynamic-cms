@@ -12,6 +12,8 @@ const NAV = [
     { href: "/admin/pages", label: "Pages & builder" },
     { href: "/admin/blog", label: "Blog posts" },
     { href: "/admin/submissions", label: "Form submissions" },
+    { href: "/admin/contacts", label: "Contacts" },
+    { href: "/admin/tracking", label: "Tracking" },
     { href: "/admin/images", label: "Images" },
     { href: "/admin/seo", label: "SEO audit" },
     { href: "/admin/sitemap", label: "Sitemap" },

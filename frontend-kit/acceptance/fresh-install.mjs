@@ -108,8 +108,8 @@ export default async function RootLayout({ children }) {
                 <AdminProvider>
                     {children}
                     <AdminBar />
+                    <Analytics analytics={settings.analytics} />
                 </AdminProvider>
-                <Analytics analytics={settings.analytics} />
             </body>
         </html>
     );
@@ -117,8 +117,10 @@ export default async function RootLayout({ children }) {
 `);
 write("src/components/site/Pricing.jsx", `"use client";
 import { useCms } from "@/components/cms/useCms";
+import { submitForm } from "@/lib/forms";
 
 const defaults = {
+    emailLabel: "Your email",
     title: "Simple plans",
     plans: [
         { name: "Starter", price: "£49" },
@@ -135,6 +137,10 @@ export default function Pricing() {
         <section className="relative">
             {editButton}
             <h1><E.Text path="title" /></h1>
+            <form data-cms-form="contact" onSubmit={(e) => { e.preventDefault(); submitForm("contact", { email: e.currentTarget.email.value }); }}>
+                <input name="email" type="email" aria-label={data.emailLabel} />
+                <button type="submit"><E.Text path="buttonText" /></button>
+            </form>
             <ul>
                 {data.plans.map((plan, i) => (
                     <li key={i} className="relative">

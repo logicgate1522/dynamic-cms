@@ -381,12 +381,28 @@ class SiteSettingsView(APIView):
             return [AllowAny()]
         return [IsAdminUser()]
 
+    # Admin-only parts of the blob (R31/R33): never in the public response.
+    PRIVATE_KEYS = ("contacts",)
+    PRIVATE_ANALYTICS_KEYS = ("plan",)
+
     def get(self, request, *args, **kwargs):
         settings_row = SiteSettings.objects.filter(pk=1).first()
-        return Response(settings_row.data if settings_row else {})
+        data = settings_row.data if settings_row else {}
+        if not (request.user and request.user.is_staff):
+            data = {k: v for k, v in data.items() if k not in self.PRIVATE_KEYS}
+            if isinstance(data.get("analytics"), dict):
+                data["analytics"] = {k: v for k, v in data["analytics"].items() if k not in self.PRIVATE_ANALYTICS_KEYS}
+        return Response(data)
 
     def patch(self, request, *args, **kwargs):
         payload = normalize_site_settings(request.data)
+        # The tracking plan and contacts settings have their own validated
+        # endpoints (tracking/plan/, contacts/settings/); a settings save
+        # (possibly from a stale tab) must never overwrite them.
+        if isinstance(payload, dict):
+            payload = {k: v for k, v in payload.items() if k not in self.PRIVATE_KEYS}
+            if isinstance(payload.get("analytics"), dict):
+                payload["analytics"] = {k: v for k, v in payload["analytics"].items() if k not in self.PRIVATE_ANALYTICS_KEYS}
         errors = validate_site_settings(payload)
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -751,6 +767,11 @@ class FormSubmitView(APIView):
         # QueryDict (form-encoded / multipart) -> flat dict; JSON body is already a dict.
         payload = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
 
+        # The kit's tracking envelope (R31): profile, event id, consent, test
+        # flag. Never part of the submission's own fields.
+        from .tracking_leads import read_envelope
+        envelope = read_envelope(request, payload.pop("_cms", None))
+
         definition = {}
         row = ComponentData.objects.filter(name=f"form-{form_name}").first()
         if row is not None:
@@ -780,14 +801,20 @@ class FormSubmitView(APIView):
                 form_name=form_name, created_at__gte=timezone.now() - timedelta(seconds=60),
             )
             if any((s.data or {}).get("email") == email for s in recent):
-                return Response({"success": True}, status=status.HTTP_201_CREATED)
+                # Same enquiry twice: tell the kit not to count a second lead.
+                return Response({"success": True, "duplicate": True}, status=status.HTTP_201_CREATED)
 
-        FormSubmission.objects.create(
+        from .tracking_leads import after_submission
+        submission = FormSubmission.objects.create(
             form_name=form_name, data=payload,
             ip_hash=ip_hash, user_agent=ua, referer=referer,
+            event_id=envelope["event_id"], profile=envelope["profile"], consent=envelope["consent"],
+            is_test=envelope["is_test"], **envelope["geo"],
         )
-        self._notify(form_name, payload, definition)
-        return Response({"success": True}, status=status.HTTP_201_CREATED)
+        if not submission.is_test:
+            self._notify(form_name, payload, definition)
+        tracking = after_submission(submission, envelope, request)
+        return Response({"success": True, "event_id": submission.event_id, **tracking}, status=status.HTTP_201_CREATED)
 
     def _notify(self, form_name, payload, definition=None):
         """Best-effort email nudge. Never lets a notification failure fail the

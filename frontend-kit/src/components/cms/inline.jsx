@@ -253,7 +253,8 @@ export function createInline(stateRef) {
         const { data, editMode } = stateRef.current;
         const anchor = useRef(null);
         const tools = useFloating(anchor, { enabled: editMode });
-        if (!editMode) return null;
+        // Visitors: a hidden marker naming the item, for tracking (R31).
+        if (!editMode) return <span hidden data-track-item={`${path}.${index}`} />;
         const list = getPath(data, path);
         if (!Array.isArray(list)) return null;
         const write = (next) => stateRef.current.update(path, next);

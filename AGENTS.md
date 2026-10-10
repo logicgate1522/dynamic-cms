@@ -11,7 +11,7 @@ instructions the docs already answer.
 ## Job A — "Integrate this CMS into <frontend>"
 
 1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full, starting with "How to use
-   this file". Rules R1–R30 are mandatory; each has a rule card (Must / Never
+   this file". Rules R1–R33 are mandatory; each has a rule card (Must / Never
    / Proven by), a phase that builds it, an anti-pattern and a checklist line.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
@@ -53,6 +53,15 @@ instructions the docs already answer.
    - place edit tools in the page flow or inside a section, let the admin bar
      wrap, or leave a list without `E.Item` + `E.Add` (R30 — tools are
      floating tools in the admin layer: `components/cms/floating.jsx`)
+   - code conversions or events per site, leave a block without
+     `{editButton}` or a form without `data-cms-form`, put personal data in
+     an event, or ask the owner to set events up inside a tool (R31 — the
+     plan is built in Site tools → Tracking: Scan → Build/Ask AI → Approve →
+     Run checks)
+   - load a marketing tag before consent or store visitor data without it
+     (R32 — `lib/consent.js`, `ConsentBanner`, "Cookie settings")
+   - expose contacts outside admin endpoints, pre-tick a marketing opt-in or
+     add people who didn't opt in to ad lists (R33)
 
 ## Job B — Change the backend
 
@@ -86,6 +95,16 @@ instructions the docs already answer.
     the matching tag in `frontend-kit/src/lib/cms.js`.
   - Auth: session + CSRF (`api/auth_views.py`, `AdminLoginView` with
     `session: true`). Token login stays for scripts only.
+  - Tracking (R31–R33): vocabulary `api/tracking_vocab.py` (served to the
+    kit by `tracking/config/` — no copy in the frontend); site facts
+    `api/site_facts.py`; conversion library `api/tracking_library.py`; plan
+    validation/runtime/tests/diff `api/tracking_plan.py`; leads
+    `api/tracking_leads.py`; server copies `api/tracking_dispatch.py` +
+    `api/tracking_adapters/` (one module per tool, all HTTP through
+    `base.http_json` so tests mock one function); sync
+    `api/tracking_sync.py`; checks/alerts `api/tracking_verify.py`; contacts
+    `api/contacts.py`; credentials `api/crypto.py` (TRACKING_SECRET_KEY);
+    background work `manage.py tracking_worker`. Tests: `api/tests_tracking.py`.
   - Launch readiness: `api/launch_check.py` (`GET launch-check/`). Anything
     that silently hurts a live site belongs here as a blocker or warning,
     and any owner step it asks for is explained in `LAUNCH_GUIDE.md`.

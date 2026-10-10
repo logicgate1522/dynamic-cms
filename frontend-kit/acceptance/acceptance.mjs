@@ -137,6 +137,7 @@ let original = null;
 let originalSeo = null;
 let createdEntry = null;
 let originalSettings = null;   // forms + analytics, restored at the end
+let trackingPlan = null;       // the approved tracking plan (R31), read before the tracking checks
 const restoreSections = [];    // [{ hostPath, id, content }]
 const FORM_PAGE = process.env.FORM_PAGE || "/contact";
 
@@ -645,15 +646,20 @@ try {
 
     /* ---------- 9d. Forms: stored, emailed via FormSubmit, lead event (R24) ---------- */
     originalSettings = (await admin("settings/site/")).body || {};
+    trackingPlan = (await admin("tracking/plan/")).body?.plan || null;
     await adminWrite("settings/site/", "PATCH", { forms: { notifyEmail: "acceptance-test@example.org", subjectPrefix: "Acceptance" } });
     {
         const ctx = await browser.newContext();
         const v = await ctx.newPage();
         const emails = [];
         let formName = null;
+        let submitResponse = null;
         ctx.on("request", (r) => {
             const m = r.method() === "POST" && r.url().match(/\/forms\/([^/]+)\/submit\//);
             if (m) formName = m[1];
+        });
+        ctx.on("response", async (r) => {
+            if (r.request().method() === "POST" && /\/forms\/[^/]+\/submit\//.test(r.url())) submitResponse = await r.json().catch(() => null);
         });
         await ctx.route("https://formsubmit.co/**", async (route) => {
             emails.push({ url: route.request().url(), body: route.request().postDataJSON?.() || {} });
@@ -668,7 +674,9 @@ try {
             const tag = `Lead ${STAMP}`;
             // Fill every kind of field a definition-driven form can have.
             const soon = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
-            const VALUE = { email: "lead@example.org", tel: "07700 900123", date: soon, time: "10:30", "datetime-local": `${soon}T10:30`, number: "1", url: "https://example.org" };
+            // A fresh address each run: an erased person can't be re-created for 30 days (R33).
+            const leadEmail = `lead+${STAMP.toLowerCase()}@example.org`;
+            const VALUE = { email: leadEmail, tel: "07700 900123", date: soon, time: "10:30", "datetime-local": `${soon}T10:30`, number: "1", url: "https://example.org" };
             const inputs = form.locator("input:visible, textarea:visible");
             for (let i = 0; i < (await inputs.count()); i++) {
                 const el = inputs.nth(i);
@@ -695,10 +703,30 @@ try {
             check("the email carries the submitted fields", emailed && JSON.stringify(emails[0].body).includes(tag));
             const lead = await v.evaluate(() => (window.dataLayer || []).some((e) => e && e.event === "generate_lead"));
             check("generate_lead is pushed to the data layer", lead);
+            // R31: the server matched the plan's lead conversions; browser and
+            // server copies share one event id; no personal data in any event.
+            if (trackingPlan?.status === "approved" && (trackingPlan.conversions || []).some((c) => c.trigger?.event === "generate_lead")) {
+                check("tracking: the server matched the plan's lead conversions", (submitResponse?.conversions || []).length > 0, JSON.stringify(submitResponse?.conversions?.map((c) => c.id)));
+                const layerLead = await v.evaluate(() => (window.dataLayer || []).find((e) => e && e.event === "generate_lead"));
+                check("tracking: the browser lead and the server copy share one event id", !!layerLead && layerLead.event_id === submitResponse?.event_id, `${layerLead?.event_id} vs ${submitResponse?.event_id}`);
+                check("tracking: the enquiry summary reaches the notification email", !!submitResponse?.summary && JSON.stringify(emails[0]?.body || {}).includes(submitResponse.summary.slice(0, 20)));
+            }
+            const leaked = await v.evaluate(() => JSON.stringify((window.dataLayer || []).filter((e) => e && e.event)).match(/lead\+?[a-z0-9]*@example\.org|07700 ?900123/));
+            check("tracking: no personal data in any data-layer event", !leaked, leaked?.[0]);
             const list = formName ? (await admin(`forms/${formName}/submissions/`)).body : [];
             const stored = (list?.results || list || []).find((x) => JSON.stringify(x).includes(tag));
             check("the submission is also in the CMS inbox", !!stored);
-            if (stored) await adminWrite(`forms/${formName}/submissions/${stored.id}/`, "DELETE");
+            // R33: a real lead becomes a contact (admin-only); erase removes it everywhere.
+            const contacts = (await admin(`contacts/?q=${encodeURIComponent(leadEmail)}`)).body;
+            const contact = contacts?.results?.[0];
+            check("contacts: a real enquiry creates a contact", !!contact);
+            check("contacts: contacts are admin-only", (await fetch(`${API}/contacts/`)).status === 401 || (await fetch(`${API}/contacts/`)).status === 403);
+            if (contact) {
+                await adminWrite(`contacts/${contact.id}/erase/`, "POST", { confirm: "ERASE" });
+                check("contacts: erase removes the contact", !((await admin(`contacts/?q=${encodeURIComponent(leadEmail)}`)).body?.results || []).length);
+            } else if (stored) {
+                await adminWrite(`forms/${formName}/submissions/${stored.id}/`, "DELETE");
+            }
         }
         await ctx.close();
     }
@@ -730,8 +758,117 @@ try {
         await ctx.close();
     }
 
+    /* ---------- 9f. Tracking plan: automatic capture (R31) ---------- */
+    if (trackingPlan?.status !== "approved") {
+        check("tracking: the plan is approved (Site tools → Tracking)", false, trackingPlan?.status || "no plan");
+    } else {
+        // Marked as test traffic (a verification run token), so these clicks
+        // never count in the site's real numbers.
+        const run = (await adminWrite("tracking/verify/runs/", "POST", { mode: "in_browser", trigger: "acceptance" })).body || {};
+        const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+        if (run.token) await ctx.addInitScript((t) => { try { sessionStorage.setItem("cms_verify", t); } catch {} }, run.token);
+        const counted = async (id) => ((await admin("tracking/overview/")).body?.conversions || []).find((c) => c.id === id)?.tests7 || 0;
+        const v = await ctx.newPage();
+        await v.goto(`${SITE}${PAGE}`);
+        check("tracking: blocks carry their marker for visitors", (await v.locator("span[data-track-block]").count()) > 0);
+        const layer = (name) => v.evaluate((n) => (window.dataLayer || []).filter((e) => e && e.event === n), name);
+        // A section seen for 2s.
+        const blockName = await v.evaluate(() => {
+            const m = [...document.querySelectorAll("span[data-track-block]")].map((x) => x.parentElement).find((el) => el && el.getBoundingClientRect().top > window.innerHeight);
+            if (!m) return null;
+            m.scrollIntoView({ block: "center", behavior: "instant" });
+            return m.querySelector(":scope > span[data-track-block]").dataset.trackBlock;
+        });
+        if (blockName) {
+            const seen = await poll(async () => (await layer("section_view")).some((e) => e.block === blockName), { tries: 20, every: 300 });
+            check("tracking: a section seen for 2s fires section_view with its block", !!seen, blockName);
+        }
+        // A form started.
+        await v.goto(`${SITE}${FORM_PAGE}`);
+        const field = v.locator("form[data-cms-form] input:visible").first();
+        if (await field.count()) {
+            await field.click();
+            await field.type("a");
+            check("tracking: typing in a form fires form_start", !!(await poll(async () => (await layer("form_start")).length > 0)));
+        } else {
+            check(`tracking: a form with data-cms-form on ${FORM_PAGE}`, false);
+        }
+        // A CTA towards the form page.
+        const formPages = (await admin("tracking/facts/")).body?.ctaPages || [];
+        await v.goto(`${SITE}${PAGE}`);
+        const cta = formPages.length ? v.locator(formPages.map((p) => `main a[href="${p}"]:visible`).join(", ")).first() : null;
+        if (cta && (await cta.count())) {
+            await cta.click();
+            const clicked = await poll(async () => (await layer("cta_click")).length > 0, { tries: 15, every: 300 });
+            check("tracking: a click towards the form page fires cta_click", !!clicked);
+            const conv = (trackingPlan.conversions || []).find((c) => c.trigger?.event === "cta_click");
+            if (conv) {
+                const before = await counted(conv.id);
+                await v.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+                const sent = await poll(async () => (await counted(conv.id)) > before, { tries: 20, every: 500 });
+                check("tracking: the matched conversion reaches the backend (counted as a test)", !!sent, conv.id);
+            }
+        }
+        // A FAQ opened (any accordion on the FAQ-type page).
+        const faqPage = Object.entries((await publicJson("tracking/config/")).pageTypes || {}).find(([, t]) => t === "faq")?.[0];
+        if (faqPage) {
+            await v.goto(`${SITE}${faqPage}`);
+            const toggle = v.locator("main [aria-expanded='false']:visible, main summary:visible").first();
+            if (await toggle.count()) {
+                await toggle.click();
+                check("tracking: opening a FAQ fires faq_open", !!(await poll(async () => (await layer("faq_open")).length > 0, { tries: 15, every: 300 })));
+            } else {
+                check(`tracking: FAQ toggles on ${faqPage} use aria-expanded or <summary>`, false);
+            }
+        }
+        await ctx.close();
+    }
+
+    /* ---------- 9g. Consent first (R32) ---------- */
+    {
+        const config = await publicJson("tracking/config/");
+        await adminWrite("settings/site/", "PATCH", { analytics: { metaPixelId: "1234567890123456" } });
+        // Wait until the cached pages carry the new pixel (the webhook refreshes them).
+        await poll(async () => (await (await fetch(`${SITE}${PAGE}`)).text()).includes("1234567890123456"), { tries: 30, every: 1000 });
+        const ctx = await browser.newContext();
+        const fb = [];
+        await ctx.route(/connect\.facebook\.net|facebook\.com\/tr/, (route) => {
+            fb.push(route.request().url());
+            return route.fulfill({ status: 200, contentType: "application/javascript", body: "" });
+        });
+        const v = await ctx.newPage();
+        const banner = v.locator("[data-cms-consent-banner]");
+        // The settings change reaches the cached pages through the webhook;
+        // the banner opens right after the page hydrates.
+        const shown = await poll(async () => {
+            await v.goto(`${SITE}${PAGE}`);
+            return banner.first().waitFor({ timeout: 4000 }).then(() => true).catch(() => false);
+        }, { tries: 10, every: 1000 });
+        if (config.region === "uk_eu" || config.region === "other") {
+            check("consent: the banner shows when a tag is set", !!shown);
+            check("consent: no marketing tag before the visitor chooses", fb.length === 0, fb[0]);
+            check("consent: nothing stored on the device before consent", await v.evaluate(() => { try { return !localStorage.getItem("cms_profile"); } catch { return true; } }));
+            if (shown) {
+                await v.locator("[data-cms-consent='reject']").click();
+                await sleep(500);
+                check("consent: “Reject all” hides the banner and loads nothing", (await banner.count()) === 0 && fb.length === 0);
+                await v.locator("[data-cms-consent-open]").first().click();
+                check("consent: “Cookie settings” re-opens the banner", !!(await poll(async () => (await banner.count()) > 0)));
+                await v.locator("[data-cms-consent='accept']").click();
+                check("consent: accepting loads the marketing tag", !!(await poll(async () => fb.length > 0, { tries: 30, every: 400 })), `requests: ${fb.length}`);
+                check("consent: with consent the profile is kept", !!(await poll(async () => v.evaluate(() => { try { return !!localStorage.getItem("cms_profile"); } catch { return false; } }))));
+                await v.locator("[data-cms-consent-open]").first().click();
+                await v.locator("[data-cms-consent='reject']").click();
+                check("consent: withdrawing deletes the stored profile", !!(await poll(async () => v.evaluate(() => { try { return !localStorage.getItem("cms_profile"); } catch { return true; } }))));
+            }
+        } else {
+            check("consent: opt-out region loads tags without a banner", !shown);
+        }
+        await ctx.close();
+    }
+
     /* ---------- 10. Full-page admin still works ---------- */
-    for (const path of ["/admin", "/admin/pages", "/admin/seo", "/admin/images", "/admin/sitemap", "/admin/settings"]) {
+    for (const path of ["/admin", "/admin/pages", "/admin/seo", "/admin/images", "/admin/sitemap", "/admin/settings", "/admin/tracking", "/admin/contacts"]) {
         await page.goto(`${SITE}${path}`);
         await sleep(1200);
         const text = await page.locator("body").innerText();
@@ -762,7 +899,8 @@ try {
         if (originalSettings) {
             await adminWrite("settings/site/", "PATCH", {
                 forms: originalSettings.forms || { notifyEmail: "", subjectPrefix: "" },
-                analytics: { ...(originalSettings.analytics || {}), gtmId: originalSettings.analytics?.gtmId || "", dataLayer: originalSettings.analytics?.dataLayer || [] },
+                analytics: { ...(originalSettings.analytics || {}), gtmId: originalSettings.analytics?.gtmId || "", dataLayer: originalSettings.analytics?.dataLayer || [],
+                             metaPixelId: originalSettings.analytics?.metaPixelId || "" },
             });
             check("cleanup: form and tracking settings restored", true);
         }

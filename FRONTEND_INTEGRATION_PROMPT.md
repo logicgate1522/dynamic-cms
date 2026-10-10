@@ -10,7 +10,7 @@ this file wins.
 
 1. **Read all of it before writing code.** Every rule below exists because it
    was missed once and broke a real site.
-2. **There are 30 rules, R1–R30 (§0).** Each rule is stated five times, on
+2. **There are 33 rules, R1–R33 (§0).** Each rule is stated five times, on
    purpose. A test (`IntegrationSpecTests`) fails the CMS build if any copy is
    missing:
    - the **rule index** (§0.1): one line, its gate, its phase
@@ -89,6 +89,9 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R28 | Pages | What the business sells is its real list, each a complete, linked page | site-audit, acceptance | P5 |
 | R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit | P3, P4 |
 | R30 | Editing | Edit mode never changes, hides or crowds the page; every list is editable | `check:inline`, acceptance | P1, P3 |
+| R31 | Tracking plan | A tracking plan derived from the business; automatic events; every conversion checked | `check:inline`, acceptance, site-audit, launch-check | P0, P3, P7 |
+| R32 | Consent | Consent first: banner, Consent Mode, tags and visitor storage only with consent | `check:inline`, acceptance, site-audit | P1, P7 |
+| R33 | Contacts | Contacts are privacy-safe: unticked opt-in, retention, export/erase, admin-only | backend tests, `check:inline`, acceptance | P4, P7 |
 
 ### §0.2 Rule cards
 
@@ -494,6 +497,88 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   "“More” opens fully on screen with every action clickable", "touch: tapping
   a block shows its edit tools".
 
+
+#### R31 — Every site ships a tracking plan derived from its business
+- **Must:** the plan (`SiteSettings.analytics.plan`, edited in Site tools →
+  Tracking) is built from the site's real facts: the panel's **Scan site**
+  (every page as a visitor sees it) plus the database (forms, collections,
+  settings). **Build from library** (`api/tracking_library.py`: base set,
+  business packs, page-type rules, stage detectors — each only where it
+  applies: no phone shown → no call conversion) and/or **Ask AI**
+  (`ai/tracking-plan/prompt|apply`, references checked against the facts)
+  propose; the owner reviews the diff and **Approves**. It holds
+  **intents** (one per real offering), **segments** (customer types),
+  **stages** (switching, deadline, price, starting, concerns),
+  **conversions** (primary = real leads; secondary = signals) and
+  **audiences** (each with a purpose). The kit captures events with no site
+  code: every `useCms` block renders `{editButton}` first inside its root
+  (for visitors a hidden marker naming the block), CMS-page sections are
+  wrapped in `[data-track-block]`, every `<form>` has `data-cms-form`, and
+  `lib/trackCapture.js` records CTA clicks, section views, scroll depth,
+  engaged service views, FAQ opens, form start/error/abandon, outbound
+  links, downloads and contact clicks. `track()` sends each to every tool in
+  its own vocabulary (one Meta event per action with every matched
+  conversion id; GA4 `cv_<id>` per conversion), with the same event id as
+  the server copy; `submitForm()` sends the visitor's intent profile and the
+  server matches lead conversions. Every enabled conversion passes the
+  **Checks** (trigger → sent → received); connected tools are synced through
+  their APIs (`api/tracking_sync.py`).
+- **Never:** conversions, events or audiences written in code; triggers that
+  depend on text the owner can edit (bind to blocks, paths, form option
+  values); personal data in any event; telling the owner to set events up
+  inside Meta Events Manager, GTM, GA4 or Google Ads (only account creation
+  and the one-time Connect are theirs).
+- **Proven by:** `check:inline` (every block renders `{editButton}`; every
+  form with `submitForm` has `data-cms-form`; no tracking calls outside the
+  kit's tracking modules); acceptance "tracking: …" checks (CTA, section,
+  FAQ, form start/abandon, lead with server conversions and matching event
+  ids, no personal data); site-audit (every intent page carries the block
+  markers; no dangling trigger); launch-check (plan approved, not stale,
+  checks passing, worker running); backend `api/tests_tracking.py`.
+
+#### R32 — Consent first
+- **Must:** `<Analytics>` (inside `<AdminProvider>`) sets Google Consent Mode
+  v2 defaults from the plan's region (uk_eu → denied until the visitor
+  chooses; us → granted, Global Privacy Control honoured; other → Settings
+  → Consent default) before any tag; Meta, TikTok and LinkedIn load only
+  with marketing consent, Clarity and Hotjar only with analytics consent
+  (`components/seo/ConsentedTags.jsx`). When any tag is set, the kit's
+  `ConsentBanner` shows (editable text, Accept all and Reject all equally
+  prominent, Choose per category) and every page has a "Cookie settings"
+  control (`data-cms-consent-open` / `<CookieSettingsLink>`). Without
+  analytics consent nothing is written to the visitor's device except the
+  consent choice itself; the intent profile lives in page memory. Server
+  copies honour the same consent (hashed identifiers only with
+  `ad_user_data`). The privacy/cookie policy describes analytics cookies,
+  enquiry records and how long they're kept.
+- **Never:** a tag before consent in an opt-in region; a pre-ticked choice;
+  a "Reject" that is harder to find than "Accept"; `localStorage` /
+  `sessionStorage` / cookies written by site components.
+- **Proven by:** `check:inline` (no visitor storage outside the kit's
+  consent and profile modules); acceptance "consent: …" checks (denied → no
+  Meta/TikTok/LinkedIn requests and no `_fbp`; accepted → tags load;
+  withdrawn → stored profile gone); site-audit (banner and Cookie settings
+  present when tags are set; privacy page keywords).
+
+#### R33 — Contacts are privacy-safe
+- **Must:** every stored, non-test enquiry with an email or phone creates or
+  updates a **Contact** (Site tools → Contacts): what they wanted (form
+  answers + intent profile), customer type, stage, source, approximate
+  location (CDN headers / optional GeoLite2 — never the IP), pipeline
+  status, notes. Forms that offer marketing use the `consent_marketing`
+  field type, **unticked**; only opted-in contacts ever reach an ad-tool
+  audience (hashed). Non-clients are erased after the retention period;
+  "Export" gives a person everything held; "Erase" removes them everywhere
+  (including synced audiences) and blocks re-creation from in-flight events.
+  Contact endpoints are admin-only and never cached; exports, erasures and
+  connections are written to the audit log.
+- **Never:** contact data in a public response, an AI prompt or a tracking
+  event; merging contacts automatically on a shared phone number; adding
+  people who didn't opt in to marketing lists.
+- **Proven by:** backend tests (permissions, opt-in gate, purge, erase
+  cascade + tombstone, export content, audit log); `check:inline` (opt-in
+  never pre-ticked); acceptance "contacts: a test lead creates no contact; a
+  real lead does; erase removes it".
 ---
 
 ## §1 — Modes
@@ -517,19 +602,22 @@ handlers) to its equivalent and say so in the report. Kit files assume the
 Each phase ends green: build passes, no hydration warnings, public pages
 unchanged. Each phase names the rules it builds; tick them as you go.
 
-**P0 — Audit (no code changes). Rules: R12, R26, R27.** List the framework and
+**P0 — Audit (no code changes). Rules: R12, R26, R27, R31.** List the framework and
 version, router, styling, every route, every section component and its
 hard-coded copy, lists, images, links, forms and their submit code (R24),
 tracking snippets and IDs (R25), existing SEO/metadata, the fixed-header
 height (R15), and every phone number / email / address in the code (R21,
 R22). List every claim on the site (numbers, ratings, testimonials,
 credentials, price promises — R26), what the business actually offers (R28)
-and which contact channels the owner wants public (R27). Output one table: `file → what's hard-coded → useCms name → phase`, and
+and which contact channels the owner wants public (R27). Note what a lead
+looks like for this business, its offerings, customer types and the
+questions visitors ask — the tracking plan is built from them in P7 (R31).
+Output one table: `file → what's hard-coded → useCms name → phase`, and
 a list of the business details you'll need from the owner.
 
 **Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists. No file changed (`git status` clean).
 
-**P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25, R30.**
+**P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25, R30, R32.**
 1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
    that aren't in the manifest; if a path collides, stop and report it. The
    kit brings the API client (R4), prompt/paste UI (R5, R6), revalidate route
@@ -562,8 +650,9 @@ a list of the business details you'll need from the owner.
            <AdminProvider>
              {children}
              <AdminBar />
+             {/* Inside the provider: the cookie banner is editable (R32). */}
+             <Analytics analytics={settings.analytics} />
            </AdminProvider>
-           <Analytics analytics={settings.analytics} />
          </body>
        </html>
      );
@@ -588,7 +677,7 @@ once in the page. That emits JSON-LD and gives the admin bar its SEO button
 **Exit check P2:** every route file exports `generateMetadata` and renders `<PageSeo>` (grep both, compare counts with the route list); the SEO button opens on each route.
 
 **P3 — Convert every section (§3 recipe). Rules: R2, R3, R8, R9, R10, R11,
-R15, R18, R20, R23, R26, R27, R29, R30.** One component at a time. After each one,
+R15, R18, R20, R23, R26, R27, R29, R30, R31.** One component at a time. After each one,
 `npm run check:inline` passes for it, it renders identically (R9), it
 returns `null` when `hidden` (R23), its lists are index-keyed (R18), and it
 works at 390px, 768px, 1280px and 1920px (R20). Contact details come from
@@ -597,16 +686,21 @@ channels the owner publishes (R21, R27). Unconfirmed claims are removed and
 placeholder social proof ships hidden (R26). Every CTA uses the one primary
 action wording, H1s carry the keyword and footer titles are not headings
 (R29). Every list gets `E.Item` + `E.Add`, and carousels / overlay links
-stay editable with editing on (R30).
+stay editable with editing on (R30). Every block renders `{editButton}` as
+the first child of its root (the tracking marker for visitors); accordions
+use `aria-expanded` or `<details>`; primary buttons that aren't links to the
+form page get `data-track-cta` (R31).
 
 **Exit check P3:** `npm run check:inline` reports **0 problems** for the whole of `src`; `next build` passes; side-by-side screenshots of every page at 390px and 1280px match the originals (R9); with editing on, each converted block shows Hide and All fields on hover.
 
-**P4 — Forms (§5.4). Rules: R24, R29.** Every form submits with `submitForm()`
+**P4 — Forms (§5.4). Rules: R24, R29, R33.** Every form submits with `submitForm()`
 from `lib/forms.js`; the recipient is `forms.notifyEmail` (Settings → Form
 notifications). Delete all old submit code (fetch, `mailto:`, EmailJS,
 Formspree, a hard-coded FormSubmit URL). Make the contact/enquiry page a
 real page around the form: H1 first, what happens next, what to have ready,
-links to the main offerings (R29).
+links to the main offerings (R29). Every `<form>` has
+`data-cms-form="<name>"` (R31). A form that offers updates/marketing uses a
+`consent_marketing` field, unticked and never required (R33).
 
 **Exit check P4:** `grep -rn "fetch(.*submit\|formsubmit\|mailto:.*body" src --include=*.jsx` finds nothing outside `lib/forms.js`; each form submits once in the browser and the entry appears in Dashboard → Form inbox.
 
@@ -653,7 +747,7 @@ report covers them.
 
 **Exit check P6:** `/sitemap.xml` lists every public route and no noindex page; `/robots.txt` has a Sitemap line on the canonical origin; a CMS redirect returns its status.
 
-**P7 — Seed. Rules: R5, R21, R22, R24, R25, R26, R27.** A `scripts/seed-cms.mjs` that
+**P7 — Seed. Rules: R5, R21, R22, R24, R25, R26, R27, R31, R32, R33.** A `scripts/seed-cms.mjs` that
 fills the CMS:
 - site settings, **including the `ai` block (R5) and `collections` (§6.3)**
 - `seoDefaults.defaultOgImage`: a 1200×630 brand card (R21)
@@ -667,14 +761,22 @@ fills the CMS:
 - per-route `seo/<path>/` with real meta descriptions (120–160 chars) for
   every page and article (R21)
 - `sitemap.extraPaths`
+- the privacy/cookie text: analytics cookies, enquiry records, retention
+  (R32/R33; the owner confirms the wording)
+
+Then the tracking plan (R31), in the browser as an admin: Site tools →
+Tracking → **Scan site** → **Build from library** (and, if useful, **Ask
+AI**) → review → **Approve** → Checks → **Run checks** until every
+conversion passes (connected tools also show "received"). Set the plan's
+region for consent (R32) and Contacts retention (R33).
 
 It must be idempotent. Without `--force` it fills only what is still missing
 (at any depth) and never overwrites an admin's edit. It never writes invented
 business details (R22).
 
-**Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written.
+**Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written; `GET tracking/plan/` shows an approved plan with no dangling triggers and the latest check passed.
 
-**P8 — Verify (three passes). Rules: all, R1–R30.** One green run is not
+**P8 — Verify (three passes). Rules: all, R1–R33.** One green run is not
 proof: a fix for one gate can break another, and some rules have no
 automatic gate. Do all three passes, in order.
 
@@ -1024,6 +1126,21 @@ returns 403.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET/PATCH | `settings/site/` | public / admin | Site identity, SEO defaults, `forms` (R24), `analytics` (R25), `ai`, `collections`, `sitemap` (validated) |
+| GET | `tracking/config/` | public | Runtime tracking config for the kit: approved conversions, page → intent/type maps, intent/segment/stage keywords, form pages, region, vocabulary (R31) |
+| GET/PUT | `tracking/plan/` | admin | The plan + validation report (`errors`, `dangling`, `unverified`, `warnings`), facts summary, per-tool "use it for", sync status, latest check. PUT saves a **draft** (locked items survive) |
+| POST | `tracking/plan/approve/` · `tracking/plan/build/` | admin | Approve (refused while anything dangles; queues sync) · library proposal + diff (not saved) |
+| GET · POST | `tracking/facts/` · `tracking/scan/` | admin | Everything a plan may reference · store the rendered-site scan (`lib/siteScan.js`) |
+| GET | `tracking/overview/` | admin | Conversions (7-day counts, last seen), checks, anomalies, alerts |
+| POST · GET | `tracking/verify/runs/` (`<id>/`) | admin | Create a check run → `{id, token, tests}` · history / one run with results |
+| POST | `tracking/verify/runs/<id>/results/` | run token | Harness/runner results (`X-CMS-Verify`), `done: true` finalises |
+| GET | `tracking/verify/pending/` | runner secret | Next queued run for `verify-tracking.mjs` (`X-CMS-Runner` = REVALIDATE_SECRET; `?schedule=1` starts one) |
+| GET · POST/DELETE | `tracking/connections/` · `<tool>/` | admin | Connection status (secrets never returned) · connect (checked with the tool, stored encrypted) / disconnect (`?remote=1` archives what the CMS created) |
+| POST | `tracking/sync/` (`?preview=1`) · `tracking/sync/items/<id>/` | admin | Sync now / dry run · keep_theirs / restore_ours |
+| GET · POST | `tracking/gtm/` | admin | Container JSON download · push a workspace (`?publish=<path>` publishes) |
+| POST | `ai/tracking-plan/prompt/` · `ai/tracking-plan/apply/` | admin | Plan prompt (ends with FINAL CHECK) · paste reply → fitted proposal + diff + dropped items |
+| POST | `events/` · `events/forget/` | public (origin-checked, throttled) | Beacon for conversion-level events (text/plain JSON) · consent withdrawn: unlink a visitor id |
+| GET/PATCH · POST | `contacts/` · `contacts/<id>/` (`erase/`, `export/`, `merge/`) | admin | Contacts list/detail/status/notes · erase (confirm "ERASE"), access export, manual merge (R33) |
+| GET/POST/PATCH/DELETE | `contacts/groups/` · `contacts/settings/` · `contacts/export/` · `contacts/audit/` | admin | Groups (auto + custom rules, Meta sync) · retention/statuses/webhooks · CSV · audit log |
 | GET | `launch-check/` | admin | `{ready, blockers, warnings, items:[{id, level: blocker\|warning, label, detail, fix, where?}]}` (R22; owner steps for the warnings: `LAUNCH_GUIDE.md`) |
 | GET | `settings/site/schema/organization/` | public | Organization + WebSite JSON-LD |
 | GET | `seo/` · GET/PATCH `seo/<path>/` | public / admin | Per-page SEO blob (home = `seo/home/`) |
@@ -1110,8 +1227,15 @@ Blog posts mirror all of these under `blog/<slug>/…`.
     "consentDefault": "",                                             // "" | "granted" | "denied"
     "events": { "pageView": true, "lead": true, "contactClicks": true },
     "excludeAdmins": true,
-    "customHead": [], "customBodyStart": [], "customBodyEnd": []
+    "customHead": [], "customBodyStart": [], "customBodyEnd": [],
+    // R31 — admin-only (never in the public response; edited via tracking/plan/):
+    "plan": { "version", "status": "draft|approved", "region": "uk_eu|us|other", "currency",
+              "intents": [], "segments": [], "stages": [], "conversions": [], "audiences": [] }
   },
+  // R33 — admin-only (contacts/settings/): retention and pipeline.
+  "contacts": { "enabled": true, "retentionMonths": 24, "deleteSubmissionsOnErase": true,
+                "statuses": ["new", "contacted", "consultation_done", "client", "not_proceeding"],
+                "webhooks": [ { "url", "secret", "events": [] } ] },
   "schema": { "organizationType": "Organization", "enabled": true },
   // Injected into EVERY AI prompt. Seed it (P7) — prompts are generic without it.
   "ai": {
@@ -1510,12 +1634,23 @@ any of these, stop and undo it.
   neighbouring section covers, an admin bar that wraps or hides actions, menus
   that open off-screen, a list that can't be added to or removed from, or a
   carousel / overlay link that blocks editing.
+- **R31** Conversions or events coded per site; a generic "track everything"
+  plan; triggers bound to editable text; a block without `{editButton}`; a
+  form without `data-cms-form`; personal data in events; asking the owner to
+  configure events inside a tool; a plan nobody approved or checked.
+- **R32** Tags that load before consent; a pre-ticked or hard-to-find
+  "Reject"; visitor data in `localStorage`/`sessionStorage`/cookies written
+  by site code; no "Cookie settings" link; a privacy page that doesn't
+  mention analytics cookies or enquiry records.
+- **R33** Contact data in public responses or prompts; marketing lists with
+  people who didn't opt in; a pre-ticked opt-in; no retention or erase;
+  automatic merges on shared phone numbers.
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R30, no exceptions. Read the whole file first.
+exactly — every rule R1–R33, no exceptions. Read the whole file first.
 Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
@@ -1565,6 +1700,9 @@ gate that proves it; a "(review)" line is yours to verify by hand — say how.
 - [ ] **R28** One complete page per real offering, each ≥600 words, linked from its index, home and footer, with its guide; retired URLs 301. (site-audit collections, acceptance)
 - [ ] **R29** One primary CTA wording site-wide; contact page has real content; keyword H1 first; no footer headings; pricing explained when it varies. (site-audit headings/contact page, review)
 - [ ] **R30** Editing on moves nothing; tools float, never covered, inside the screen; the bar is one line at every width; every list has item tools and "+ Add". (`check:inline`, acceptance edit-mode checks)
+- [ ] **R31** The plan was scanned, built from the business, approved, and every conversion passes Checks; blocks render `{editButton}`, forms have `data-cms-form`. (`check:inline`, acceptance "tracking: …", site-audit, launch-check)
+- [ ] **R32** Consent Mode defaults first; non-Google tags only after consent; banner + "Cookie settings"; no visitor storage without consent; the privacy page covers analytics and enquiry records. (`check:inline`, acceptance "consent: …", site-audit)
+- [ ] **R33** Contacts are admin-only, opt-in is unticked, only opted-in people reach ad lists, retention + export + erase work. (backend tests, `check:inline`, acceptance "contacts: …")
 
 **Also checked by the gates**
 - [ ] Exactly one `<h1>` in each page's HTML. (acceptance, site-audit)

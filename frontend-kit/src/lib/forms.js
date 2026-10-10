@@ -1,5 +1,7 @@
 import { API } from "@/lib/api";
-import { track } from "@/lib/track";
+import { getConsent } from "@/lib/consent";
+import { profileSnapshot, recordFormOptions } from "@/lib/intentProfile";
+import { newEventId, track, trackingPlan } from "@/lib/track";
 
 /* =========================================
    Form submissions — the ONLY way the site submits a form.
@@ -11,11 +13,19 @@ import { track } from "@/lib/track";
       definition (home/form-<name>/), drops bots (honeypot) and stores the
       submission in the inbox (Dashboard → Form inbox). Server errors come
       back as { errors: { field: message } } — always show them.
-   2. If it was stored as a real lead (honeypot empty):
+      The request also carries `_cms` (R31): an event id, the consent state
+      and the visitor's intent profile; the backend matches the plan's
+      conversions and answers with them plus a one-line summary.
+   2. If it was stored as a real lead (honeypot empty, not a duplicate):
       - an email goes to the address in Site tools → Settings → Form
-        notifications, through FormSubmit.co (sendFormEmail below)
-      - track("generate_lead", { form_name }) fires (GTM / GA4 / Meta / …).
+        notifications, through FormSubmit.co (sendFormEmail below), with the
+        summary ("Interest: Website redesign · Small business · via Google Ads")
+      - track("generate_lead") fires with the server's conversions and the
+        same event id as the server-side copies (de-duplication)
+      - window "cms:form-result" tells the capture layer it was sent
    The email and the event never block or fail the visitor's submission.
+   Verification runs (?cms-verify) are stored as tests: no email, no contact.
+   Give every <form> data-cms-form="<name>" so starts/abandons are tracked.
 
    Never fetch the forms submit endpoint or formsubmit.co from a component —
    check-inline.mjs fails on it.
@@ -65,27 +75,59 @@ export async function sendFormEmail(formName, fields, { to, subjectPrefix, test 
     }
 }
 
+function verifyToken() {
+    try {
+        return window.sessionStorage.getItem("cms_verify") || "";
+    } catch {
+        return "";
+    }
+}
+
+function result(detail) {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cms:form-result", { detail }));
+    return detail;
+}
+
 export async function submitForm(formName, payload, { honeypotField = "website" } = {}) {
+    const consent = getConsent();
+    const eventId = newEventId();
+    const verify = typeof window !== "undefined" ? verifyToken() : "";
+    const envelope = {
+        event_id: eventId,
+        consent: { analytics: consent.analytics, marketing: consent.marketing, ad_user_data: consent.ad_user_data, ad_personalization: consent.ad_personalization },
+        profile: profileSnapshot({ marketing: consent.marketing }),
+        page: typeof window !== "undefined" ? window.location.pathname : "",
+        ga4_loaded: typeof window !== "undefined" && Boolean(window.google_tag_data || window.google_tag_manager),
+        ...(verify ? { verify } : {}),
+    };
     let res;
     try {
         res = await fetch(`${API}/forms/${formName}/submit/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ ...payload, _cms: envelope }),
         });
     } catch {
-        return { ok: false, status: 0, errors: {}, message: "network" };
+        track("form_error", { form_name: formName, field: "network" });
+        return result({ form: formName, ok: false, status: 0, errors: {}, message: "network" });
     }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-        return { ok: false, status: res.status, errors: body.errors && typeof body.errors === "object" ? body.errors : {}, message: body.detail || "" };
+        const errors = body.errors && typeof body.errors === "object" ? body.errors : {};
+        for (const field of Object.keys(errors).slice(0, 5)) track("form_error", { form_name: formName, field });
+        return result({ form: formName, ok: false, status: res.status, errors, message: body.detail || "" });
     }
 
     const isBot = Boolean(String(payload[honeypotField] || "").trim());
-    if (!isBot) {
+    if (!isBot && !body.duplicate) {
         const { [honeypotField]: _trap, ...fields } = payload;
-        sendFormEmail(formName, fields).catch(() => {});
-        track("generate_lead", { form_name: formName });
+        if (!verify) sendFormEmail(formName, body.summary ? { ...fields, interest: body.summary } : fields).catch(() => {});
+        recordFormOptions(formName, fields, trackingPlan());
+        track("generate_lead", {
+            form_name: formName, event_id: body.event_id || eventId, intent: body.intent || undefined, segment: body.segment || undefined,
+            _conversions: Array.isArray(body.conversions) ? body.conversions : [],
+        });
     }
-    return { ok: true, status: res.status, errors: {}, message: "" };
+    return result({ form: formName, ok: true, status: res.status, errors: {}, message: "", duplicate: Boolean(body.duplicate),
+                    conversions: body.conversions || [], summary: body.summary || "" });
 }

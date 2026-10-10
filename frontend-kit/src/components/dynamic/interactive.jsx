@@ -24,7 +24,7 @@ export function Faq({ heading, eyebrow, items }) {
                         const isOpen = open === i;
                         const panelId = `${baseId}-panel-${i}`;
                         return (
-                            <div key={i} className="relative overflow-hidden rounded-[18px] bg-white shadow-[0_8px_24px_rgba(18,58,92,0.06)]">
+                            <div key={i} data-track-faq={i} className="relative overflow-hidden rounded-[18px] bg-white shadow-[0_8px_24px_rgba(18,58,92,0.06)]">
                                 <ItemTools index={i}/>
                                 <h3>
                                     <button
@@ -84,7 +84,7 @@ export function Newsletter({ heading, description, form_name }) {
             <div className="mx-auto w-full max-w-[760px] px-5 text-center sm:px-6">
                 <h2 className="font-serif text-[30px] font-bold sm:text-[38px]"><T path="heading" value={heading} /></h2>
                 {description ? <p className="mt-3 text-[15px] leading-7 text-[#D7E2EE]"><T path="description" value={description} /></p> : null}
-                <form onSubmit={onSubmit} className="mx-auto mt-8 flex max-w-[520px] flex-col gap-3 sm:flex-row" noValidate>
+                <form onSubmit={onSubmit} data-cms-form={formName} className="mx-auto mt-8 flex max-w-[520px] flex-col gap-3 sm:flex-row" noValidate>
                     <label className="sr-only" htmlFor="newsletter-email">Email address</label>
                     <input
                         id="newsletter-email"

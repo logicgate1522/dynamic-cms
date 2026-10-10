@@ -115,7 +115,8 @@ def _host_tags(host):
 def tags_for(instance):
     from . import models as m
     if isinstance(instance, m.ComponentData):
-        return [f"cms:home:{instance.name}"]
+        # Forms feed the tracking config (form pages, options → intents).
+        return [f"cms:home:{instance.name}"] + (["cms:tracking"] if instance.name.startswith("form-") else [])
     if isinstance(instance, m.SiteSettings):
         return ["cms", "cms:settings"]
     if isinstance(instance, m.PageSEO):
@@ -148,9 +149,15 @@ def _on_change(sender, instance, **kwargs):
         bump_cache_version("seo")
     if isinstance(instance, m.Redirect):
         bump_cache_version("redirects")
+    if isinstance(instance, m.ComponentData) and instance.name.startswith("form-"):
+        bump_cache_version("tracking")  # forms feed the tracking plan's facts
     tags = tags_for(instance)
     if tags:
         notify(*tags)
+    # Content changed: re-check tracking triggers against the site (R31, debounced).
+    if isinstance(instance, (m.ComponentData, m.ContentPage, m.DynamicSection, m.BlogPost)):
+        from .tracking_verify import after_publish
+        transaction.on_commit(after_publish)
 
 
 def connect():

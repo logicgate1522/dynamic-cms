@@ -37,7 +37,10 @@ import { HIDDEN_KEY, isHidden, stripHidden } from "@/lib/visibility";
    options.hideable         false for blocks that hold shared labels rather
                             than a visible section (no "Hide" toggle)
 
-   Returns { data, hidden, E, editButton, … }. A block an admin hid renders
+   Returns { data, hidden, E, editButton, … }. Render {editButton} as the
+   FIRST child of the block's root element: admins get the block's tools,
+   visitors a hidden marker that tells tracking which block this is (R31).
+   A block an admin hid renders
    nothing for visitors — every component MUST end with:
        if (hidden) return null;
        return ( …the block… );
@@ -191,8 +194,11 @@ export function useCms(name, defaults, options = {}) {
     }, [isAdmin, register, name, label, defaults, data, fields, afterSave, excludeFromKeywordAudit,
         blockHidden, saveState, saveError, update, replace, persist]);
 
+    // Visitors get a hidden, zero-size marker instead: its parent is this
+    // block, so tracking knows which block every click/view belongs to (R31).
     const editButton = editMode ? (
         <AllFieldsButton
+            name={name}
             label={label}
             saveState={saveState}
             position={options.buttonPosition}
@@ -200,7 +206,9 @@ export function useCms(name, defaults, options = {}) {
             onToggleHidden={hideable ? () => setHidden(!blockHidden) : null}
             onClick={() => openPanel("section", { name })}
         />
-    ) : null;
+    ) : (
+        <span hidden data-track-block={name} />
+    );
 
     return { data: visible, hidden, setHidden, E, editButton, update, replace, saveState, editMode };
 }
@@ -217,13 +225,13 @@ const STATE_DOT = {
 // in the admin layer: never covered by a neighbouring section, never moving
 // the layout (R30). The in-page anchor also carries the "hidden" marker that
 // dims the block (cms.css). `position` is accepted for compatibility.
-function AllFieldsButton({ label, saveState, onClick, hidden, onToggleHidden }) {
+function AllFieldsButton({ name, label, saveState, onClick, hidden, onToggleHidden }) {
     const anchor = useRef(null);
     const pinned = hidden || ["dirty", "saving", "error"].includes(saveState);
     const tools = useFloating(anchor, { pinned });
     return (
         <>
-            <span ref={anchor} className="cms-ui" hidden>
+            <span ref={anchor} className="cms-ui" hidden data-track-block={name}>
                 {/* Dims the block (cms.css) while it is hidden from visitors. */}
                 {hidden ? <span data-cms-hidden="block" hidden /> : null}
             </span>

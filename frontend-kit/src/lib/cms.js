@@ -69,6 +69,12 @@ export async function getContents(names) {
     return Object.fromEntries(entries);
 }
 
+// Tracking plan as the kit needs it (R31): conversions, page → intent,
+// vocabulary. Public and cached; refreshed by the "cms:tracking" webhook tag.
+export function getTrackingConfig() {
+    return cmsFetch("tracking/config/", { revalidate: REVALIDATE.settings, tags: ["cms:settings", "cms:tracking", "cms:pages"] });
+}
+
 export function getSiteSettings() {
     return cmsFetch("settings/site/", { revalidate: REVALIDATE.settings, tags: ["cms:settings"] });
 }

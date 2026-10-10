@@ -46,7 +46,19 @@ class StaffExemptUserRateThrottle(UserRateThrottle):
         return super().allow_request(request, view)
 
 
+# Scopes added after a deployment's settings were written still get a limit.
+FALLBACK_RATES = {"events": "60/minute", "verify": "240/minute"}
+
+
 class SiteAwareScopedRateThrottle(ScopedRateThrottle):
+    def get_rate(self):
+        try:
+            return super().get_rate()
+        except Exception:
+            if self.scope in FALLBACK_RATES:
+                return FALLBACK_RATES[self.scope]
+            raise
+
     def allow_request(self, request, view):
         scope = getattr(view, self.scope_attr, None)
         if scope not in ALWAYS_LIMITED_SCOPES and (is_staff(request) or is_site_server(request)):

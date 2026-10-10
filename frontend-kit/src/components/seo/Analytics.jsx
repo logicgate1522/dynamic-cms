@@ -1,7 +1,10 @@
 import Script from "next/script";
 
 import AnalyticsEvents from "@/components/seo/AnalyticsEvents";
+import ConsentBanner from "@/components/seo/ConsentBanner";
+import ConsentedTags from "@/components/seo/ConsentedTags";
 import RawHtmlInjector from "@/components/seo/RawHtmlInjector";
+import { getTrackingConfig } from "@/lib/cms";
 
 /* =========================================
    Tracking tags from Site tools → Settings → Tracking & analytics
@@ -9,12 +12,16 @@ import RawHtmlInjector from "@/components/seo/RawHtmlInjector";
 
    One bootstrap script runs first, in this order:
      1. window.dataLayer + gtag() exist
-     2. Google consent-mode default (if set): granted | denied
+     2. Google Consent Mode default (R32): from the plan's region
+        (uk_eu → denied until the visitor chooses; us → granted; other →
+        Settings → Consent default), then the stored choice
      3. the data-layer variables an admin defined ({ key: value } pairs)
      4. GTM, GA4 and Google Ads
-   then Meta Pixel, TikTok, LinkedIn, Clarity, Hotjar and any custom code.
-   Events (page views on in-site navigation, leads, phone/email clicks) go
-   through lib/track.js — see <AnalyticsEvents>.
+   Meta Pixel, TikTok and LinkedIn load only with marketing consent, Clarity
+   and Hotjar only with analytics consent (<ConsentedTags>). The consent
+   banner shows when any tag is set and the visitor hasn't chosen.
+   Events go through lib/track.js — see <AnalyticsEvents>. Render this INSIDE
+   <AdminProvider> so the banner's text is editable in place.
 ========================================= */
 
 const PATTERNS = {
@@ -36,7 +43,8 @@ function id(analytics, key) {
 // JSON safe to inline in a <script> (no "</script>" breakouts).
 const inline = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
 
-export default function Analytics({ analytics = {} }) {
+export default async function Analytics({ analytics = {} }) {
+    const tracking = await getTrackingConfig();
     const gtm = id(analytics, "gtmId");
     const ga4 = id(analytics, "ga4Id");
     const ads = id(analytics, "googleAdsId");
@@ -51,14 +59,19 @@ export default function Analytics({ analytics = {} }) {
             .filter((row) => row && /^[A-Za-z_][A-Za-z0-9_.]{0,63}$/.test(row.key || ""))
             .map((row) => [row.key, row.value])
     );
-    const consent = analytics.consentDefault === "granted" || analytics.consentDefault === "denied" ? analytics.consentDefault : null;
+    const region = tracking?.region || (analytics.consentDefault === "granted" ? "other" : "uk_eu");
+    const consentDefault = region === "us" || (region === "other" && analytics.consentDefault === "granted") ? "granted" : "denied";
     const google = gtm || ga4 || ads;
+    const hasTags = Boolean(google || pixel || tiktok || linkedin || clarity || hotjar || (analytics.customHead || []).length);
+    const consentVersion = String(analytics.consentVersion || "1");
 
+    // The stored choice (cms_consent cookie) is applied before any tag runs,
+    // so a returning visitor's consent is in place for the first hit.
+    const storedChoice = `try{var m=document.cookie.match(/(?:^|; )cms_consent=([^;]*)/);if(m){var c=JSON.parse(decodeURIComponent(m[1]));if(c.v===${inline(consentVersion)}){var a=c.analytics?'granted':'denied',k=c.marketing?'granted':'denied';gtag('consent','update',{analytics_storage:a,ad_storage:k,ad_user_data:k,ad_personalization:k});}}}catch(e){}`;
     const bootstrap = [
         "window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){dataLayer.push(arguments);};",
-        consent
-            ? `gtag('consent','default',${inline({ ad_storage: consent, ad_user_data: consent, ad_personalization: consent, analytics_storage: consent, wait_for_update: 500 })});`
-            : "",
+        `gtag('consent','default',${inline({ ad_storage: consentDefault, ad_user_data: consentDefault, ad_personalization: consentDefault, analytics_storage: consentDefault, wait_for_update: 500 })});`,
+        storedChoice,
         Object.keys(variables).length ? `dataLayer.push(${inline(variables)});` : "",
         gtm
             ? `window.__cmsGtm=true;(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer',${inline(gtm)});`
@@ -75,37 +88,15 @@ export default function Analytics({ analytics = {} }) {
             ) : null}
             {ga4 || ads ? <Script src={`https://www.googletagmanager.com/gtag/js?id=${ga4 || ads}`} strategy="afterInteractive" /> : null}
 
-            {pixel ? (
-                <Script id="meta-pixel" strategy="afterInteractive">
-                    {`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init',${inline(pixel)});fbq('track','PageView');`}
-                </Script>
-            ) : null}
+            <ConsentedTags pixel={pixel} tiktok={tiktok} linkedin={linkedin} clarity={clarity} hotjar={hotjar} />
 
-            {tiktok ? (
-                <Script id="tiktok-pixel" strategy="afterInteractive">
-                    {`!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e,n){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]=n||{};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)};ttq.load(${inline(tiktok)});ttq.page();}(window,document,'ttq');`}
-                </Script>
-            ) : null}
-
-            {clarity ? (
-                <Script id="clarity" strategy="afterInteractive">
-                    {`(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script",${inline(clarity)});`}
-                </Script>
-            ) : null}
-
-            {hotjar ? (
-                <Script id="hotjar" strategy="lazyOnload">
-                    {`(function(h,o,t,j,a,r){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};h._hjSettings={hjid:${Number(hotjar)},hjsv:6};a=o.getElementsByTagName('head')[0];r=o.createElement('script');r.async=1;r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;a.appendChild(r);})(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');`}
-                </Script>
-            ) : null}
-
-            {linkedin ? (
-                <Script id="linkedin-insight" strategy="lazyOnload">
-                    {`_linkedin_partner_id=${inline(linkedin)};window._linkedin_data_partner_ids=window._linkedin_data_partner_ids||[];window._linkedin_data_partner_ids.push(_linkedin_partner_id);(function(l){if(!l){window.lintrk=function(a,b){window.lintrk.q.push([a,b])};window.lintrk.q=[]}var s=document.getElementsByTagName("script")[0];var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src="https://snap.licdn.com/li.lms-analytics/insight.min.js";s.parentNode.insertBefore(b,s);})(window.lintrk);`}
-                </Script>
-            ) : null}
-
-            <AnalyticsEvents analytics={{ events: analytics.events, excludeAdmins: analytics.excludeAdmins, googleAdsId: ads, googleAdsLeadLabel: analytics.googleAdsLeadLabel, linkedinLeadConversionId: analytics.linkedinLeadConversionId }} />
+            <AnalyticsEvents
+                analytics={{ events: analytics.events, excludeAdmins: analytics.excludeAdmins, googleAdsId: ads, ga4Id: ga4,
+                    googleAdsLeadLabel: analytics.googleAdsLeadLabel, linkedinLeadConversionId: analytics.linkedinLeadConversionId }}
+                tracking={tracking && tracking.vocab ? tracking : null}
+                consent={{ region, consentDefault: analytics.consentDefault, version: consentVersion, hasTags }}
+            />
+            {hasTags ? <ConsentBanner consent={{ region, consentDefault: analytics.consentDefault, version: consentVersion, hasTags }} /> : null}
 
             <RawHtmlInjector snippets={analytics.customHead} target="head" />
             <RawHtmlInjector snippets={analytics.customBodyStart} target="body" position="start" />

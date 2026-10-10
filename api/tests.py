@@ -947,6 +947,9 @@ class PermissionAuditTests(APITestCase):
         "admin-login": "credential exchange, throttled (login scope)",
         "form-submit": "public form endpoint, throttled (form_submit) + honeypot",
         "auth-logout": "ends the caller's own session; a no-op when anonymous",
+        "events-ingest": "tracking beacon (R31): throttled (events), origin-checked, size-capped, allowlisted names",
+        "events-forget": "consent withdrawn: unlinks a visitor id; throttled + origin-checked",
+        "tracking-verify-results": "verification results: authorised by a signed, short-lived run token",
     }
 
     def _permission_instances(self, view_cls, method):

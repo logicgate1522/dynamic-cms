@@ -146,7 +146,7 @@ export default function SectionSlot({ base, host, section, index, total, sibling
 
     return (
         <SectionEditContext.Provider value={{ E, editMode, uploadSlot }}>
-            {!editMode && isHidden(content) ? null : <div data-cms-hidden={editMode && isHidden(content) ? "section" : undefined} className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
+            {!editMode && isHidden(content) ? null : <div data-cms-hidden={editMode && isHidden(content) ? "section" : undefined} data-track-block={`section-${section.id}`} data-track-type={section.section_type} className={`group/slot relative ${editMode ? "outline-dashed outline-1 outline-transparent hover:outline-[var(--cms-accent)]/60" : ""}`}>
                 {editMode ? (
                     <>
                         <span ref={toolsAnchor} hidden />

@@ -37,6 +37,17 @@ backend.
   (blank or AI-written; AI replies are fitted to the template server-side)
 - **Drafts → Publish** for content blocks *and* dynamic-page sections
   (`drafts/`, `drafts/publish/`, `drafts/discard/`)
+- **Business-aware tracking (R31–R33):** a tracking plan built from the
+  site itself (scan + conversion library + optional AI): intents, customer
+  types, buying stages, conversions and audiences, approved by the owner.
+  Events are captured automatically and sent to GA4, GTM, Meta, TikTok,
+  LinkedIn and Google Ads in each tool's format, from the browser and the
+  server (de-duplicated). Conversions, dimensions and audiences are created
+  in the tools through their APIs. Every conversion is checked (trigger →
+  sent → received), on demand, after publishing and nightly. Consent comes
+  first (banner, Consent Mode, nothing stored without consent), and a
+  privacy-safe **Contacts** list (pipeline, groups, retention, export and
+  erase) grows from enquiries. See `TRACKING_IMPLEMENTATION_PLAN.md`.
 - **AI assist without an API key:** the backend writes copy/paste prompts for
   any chat model (new page, edit page, one block, whole page, SEO audit,
   keyword research), injecting the site's voice (`SiteSettings.ai`) and SEO
@@ -193,7 +204,7 @@ is referenced (`?force=1` overrides).
 
 ## Frontend integration
 
-- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R30, a
+- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R33, a
   phase-by-phase procedure, the exact section-conversion recipe, the full
   backend contract and an SEO reference.
 - **`frontend-kit/`**: the Next.js App Router kit to copy in.

@@ -1,5 +1,3 @@
-import { Fragment } from "react";
-
 import { SECTION_REGISTRY } from "@/components/dynamic/registry";
 import { Fallback } from "@/components/dynamic/sections";
 import { isHidden, stripHidden } from "@/lib/visibility";
@@ -23,12 +21,13 @@ export default function DynamicPageRenderer({ sections = [] }) {
             // Optional "anchor" gives the section an id for in-page links (/legal#privacy).
             const anchor = typeof content.anchor === "string" && /^[\w-]+$/.test(content.anchor) ? content.anchor : null;
 
-            return anchor ? (
-                <div key={section.id} id={anchor} className="scroll-mt-24">
+            // data-track-block: tracking knows which section a click or view
+            // belongs to (R31). The wrapper adds no box styles of its own.
+            return (
+                <div key={section.id} id={anchor || undefined} className={anchor ? "scroll-mt-24" : undefined}
+                     data-track-block={`section-${section.id}`} data-track-type={section.section_type}>
                     {rendered}
                 </div>
-            ) : (
-                <Fragment key={section.id}>{rendered}</Fragment>
             );
         });
 }

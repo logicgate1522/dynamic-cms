@@ -46,6 +46,13 @@ export function AdminProvider({ children }) {
     const [collection, setCollection] = useState({ collection: null, role: null });
 
     const refreshSession = useCallback(async () => {
+        // A tracking verification run (?cms-verify) must see the site exactly
+        // as a visitor does, even inside an admin's browser (R31).
+        if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("cms-verify")) {
+            setIsAdmin(false);
+            setChecked(true);
+            return;
+        }
         const session = await getSession();
         setIsAdmin(Boolean(session.authenticated));
         setUser(session.user || null);
