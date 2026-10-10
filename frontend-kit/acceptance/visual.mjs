@@ -32,6 +32,17 @@ const WIDTHS = [390, 1280];
 const out = join(DIR, BASELINE ? "baseline" : "current");
 mkdirSync(out, { recursive: true });
 mkdirSync(join(DIR, "diff"), { recursive: true });
+// Bumped when the capture changes in a way that changes what a screenshot
+// shows (2: in-view content is revealed to the bottom of the page). A baseline
+// from an older capture can't be compared fairly.
+const CAPTURE = 2;
+if (!BASELINE && existsSync(join(DIR, "baseline", "index.json"))) {
+    const meta = existsSync(join(DIR, "baseline", "capture.json")) ? JSON.parse(readFileSync(join(DIR, "baseline", "capture.json"), "utf8")) : {};
+    if ((meta.capture || 1) < CAPTURE) {
+        console.log(`FAIL  visual: the baseline was taken with capture v${meta.capture || 1} (now v${CAPTURE}: scroll-revealed content is captured) — retake it on the P0 state of the site and say so in the report`);
+        process.exit(1);
+    }
+}
 if (!BASELINE && !existsSync(join(DIR, "baseline", "index.json"))) {
     console.log(`FAIL  visual: no baseline — take it in P0 before changing the site: node visual.mjs --baseline --dir ${DIR}`);
     process.exit(1);
@@ -57,10 +68,17 @@ for (const width of WIDTHS) {
     for (const path of paths) {
         await page.goto(`${SITE}${path}`, { waitUntil: "load" });
         await page.evaluate(async () => {
-            for (let y = 0; y < document.body.scrollHeight; y += 400) {
+            // Reveal every in-view (scroll-triggered) element: small steps, a
+            // pause at each so observers fire, and a stop at the very bottom
+            // (the page may grow while scrolling). Without this, the last
+            // cards on long phone pages could be captured still invisible.
+            const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+            for (let y = 0; y < document.documentElement.scrollHeight; y += 300) {
                 window.scrollTo(0, y);
-                await new Promise((r) => setTimeout(r, 90));
+                await pause(120);
             }
+            window.scrollTo(0, document.documentElement.scrollHeight);
+            await pause(600);
             window.scrollTo(0, 0);
             document.querySelectorAll("[data-cms-consent-banner], [data-visual-ignore], video, iframe").forEach((el) => { el.style.visibility = "hidden"; });
         });
@@ -73,6 +91,7 @@ for (const width of WIDTHS) {
 }
 await browser.close();
 writeFileSync(join(out, "index.json"), JSON.stringify(shots, null, 1));
+if (BASELINE) writeFileSync(join(out, "capture.json"), JSON.stringify({ capture: CAPTURE, at: new Date().toISOString() }));
 
 if (BASELINE) {
     console.log(`PASS  visual: baseline of ${Object.keys(shots).length} screenshots saved in ${out}`);

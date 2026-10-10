@@ -3,14 +3,15 @@
    run-gates.mjs — THE definition of done for a dynamic-cms integration.
 
    Runs every gate against the RUNNING PRODUCTION BUILD, maps every result to
-   the rules R1–R33 (rules-map.json), and enforces the three passes of P8:
+   the rules R1–R34 (rules-map.json), and enforces the three passes of P8:
 
      node run-gates.mjs --frontend <path> --pass 1     fix until this is green
      (rm -rf .next && next build && next start — change NOTHING else)
      node run-gates.mjs --frontend <path> --pass 2     clean re-verification
      node run-gates.mjs --frontend <path> --pass 3 --report <path>/CMS_REPORT.md
 
-   Env: SITE_URL, API_URL, CMS_USER, CMS_PASSWORD, FORM_PAGE (default
+   Needs <frontend>/.gates/seo-baseline.json from P0 (R34) and the visual
+   baseline. Env: SITE_URL, API_URL, CMS_USER, CMS_PASSWORD, FORM_PAGE (default
    /contact), CMS_DYNAMIC_PAGE (a CMS page), RUNNER_SECRET (the backend's
    REVALIDATE_SECRET, for the headless tracking checks), [LAUNCH=1].
 
@@ -53,6 +54,9 @@ function fail(msg) {
 }
 if (![1, 2, 3].includes(PASS)) fail("--pass must be 1, 2 or 3");
 if (!existsSync(join(FRONTEND, "src"))) fail(`--frontend ${FRONTEND} has no src/ folder`);
+// Without the admin login the audit can't see the plan, categories, inbox or
+// launch check — and those rules would go unproven.
+if (!process.env.CMS_USER || !process.env.CMS_PASSWORD) fail("set CMS_USER and CMS_PASSWORD (a staff user): the gates check the tracking plan, categories, inbox and launch check");
 
 /* ------------------------------------------------------------ fingerprints */
 
@@ -137,6 +141,26 @@ async function buildGate() {
     return { name: "production-build", ok, buildId: local, checks: [{ ok, name: "the running server is this build" }] };
 }
 
+// R34: the SEO audit has a "before". P0 records it by running site-audit
+// against the site as it was (AUDIT_JSON=<frontend>/.gates/seo-baseline.json);
+// the report compares it with the final audit.
+const SEO_BASELINE = join(GATES_DIR, "seo-baseline.json");
+function seoBaselineGate() {
+    let ok = false;
+    let detail = `no ${SEO_BASELINE} — in P0, before changing anything: AUDIT_JSON=${SEO_BASELINE} node site-audit.mjs`;
+    if (existsSync(SEO_BASELINE)) {
+        try {
+            const b = JSON.parse(readFileSync(SEO_BASELINE, "utf8"));
+            ok = Number.isInteger(b.fail) && Array.isArray(b.results) && b.pages > 0;
+            detail = ok ? `${b.pages} pages, ${b.fail} failure(s), ${b.warn} warning(s) on ${String(b.at).slice(0, 10)}` : "seo-baseline.json is not a site-audit result";
+        } catch {
+            detail = "seo-baseline.json is not valid JSON";
+        }
+    }
+    console.log(`▶ seo-baseline … ${ok ? "green" : "RED"}\n    ${ok ? "PASS" : "FAIL"}  the SEO audit has a baseline  — ${detail}`);
+    return { name: "seo-baseline", ok, checks: [{ ok, name: "the SEO audit has a baseline" }] };
+}
+
 function reportGate(fingerprint) {
     const problems = [];
     if (!REPORT || !existsSync(REPORT)) problems.push(`--report <path to CMS_REPORT.md> is required in pass 3 (not found: ${REPORT || "none"})`);
@@ -150,6 +174,16 @@ function reportGate(fingerprint) {
         if (!text.includes(fingerprint)) problems.push(`the report doesn't quote the pass-2 fingerprint ${fingerprint}`);
         for (const h of ["Defaults taken", "Needs from the owner"]) if (!new RegExp(`^#+\\s*${h}`, "mi").test(text)) problems.push(`no "${h}" section`);
         if (!/§11[^\n]*(none|no anti-pattern|not found|clean)/i.test(text)) problems.push(`no line confirming the §11 anti-pattern sweep ("§11: none found — …")`);
+        // R34: before/after SEO audit, with the numbers from the baseline and pass 2.
+        const seo = text.split(/^#+\s*SEO audit\s*$/mi)[1]?.split(/^#+\s/m)[0] || "";
+        const baseline = existsSync(SEO_BASELINE) ? JSON.parse(readFileSync(SEO_BASELINE, "utf8")) : null;
+        const after = existsSync(join(GATES_DIR, "pass-2-site-audit.json")) ? JSON.parse(readFileSync(join(GATES_DIR, "pass-2-site-audit.json"), "utf8")) : null;
+        if (!seo) problems.push(`no "### SEO audit" section (before/after, what was fixed, internal links)`);
+        else {
+            if (baseline && !new RegExp(`before:[^\\n]*\\b${baseline.fail} failure`, "i").test(seo)) problems.push(`SEO audit: no "before: ${baseline.fail} failures …" line (from .gates/seo-baseline.json)`);
+            if (after && !new RegExp(`after:[^\\n]*\\b${after.fail} failure`, "i").test(seo)) problems.push(`SEO audit: no "after: ${after.fail} failures …" line (from .gates/pass-2-site-audit.json)`);
+            if (!/internal links?:/i.test(seo)) problems.push(`SEO audit: no "internal links: …" line (pages, links, what was added)`);
+        }
     }
     const ok = problems.length === 0;
     console.log(`▶ report … ${ok ? "green" : "RED"}`);
@@ -189,7 +223,8 @@ if (PASS < 3) {
             ? run("verify-tracking", "node", ["verify-tracking.mjs", "--schedule"], { env: nodeEnv })
             : (console.log("▶ verify-tracking … RED\n    FAIL  set RUNNER_SECRET (the backend's REVALIDATE_SECRET)"), { name: "verify-tracking", ok: false, checks: [] }));
     }
-    if (want("site-audit")) gates.push(run("site-audit", "node", ["site-audit.mjs"], { env: nodeEnv }));
+    if (want("seo-baseline")) gates.push(seoBaselineGate());
+    if (want("site-audit")) gates.push(run("site-audit", "node", ["site-audit.mjs"], { env: { ...nodeEnv, AUDIT_JSON: join(GATES_DIR, `pass-${PASS}-site-audit.json`) } }));
 } else {
     const p2 = prev;
     for (const g of p2.gates) if (!gates.find((x) => x.name === g.name)) gates.push({ ...g, fromPass: 2 });

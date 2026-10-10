@@ -103,4 +103,5 @@ const summary = body.run?.summary || {};
 console.log(`\nRun #${run.id}: ${body.status || res.status} — ${summary.passed ?? "?"}/${summary.conversions ?? "?"} passed`);
 if (summary.failing?.length) console.log(`Failing: ${summary.failing.join(", ")}`);
 if (summary.unplaced?.length) console.log(`Couldn't place: ${summary.unplaced.join(", ")}`);
+if (summary.missing?.length) console.log(`Not proven: ${summary.missing.join("; ")}`);
 process.exit(body.status === "passed" ? 0 : 1);

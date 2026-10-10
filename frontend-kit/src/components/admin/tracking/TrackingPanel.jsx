@@ -142,6 +142,9 @@ export default function TrackingPanel({ initialTab = "overview", inDrawer = fals
             {s?.report?.dangling?.length ? (
                 <p className="mb-3 rounded-lg bg-[#FFFAEB] px-3 py-2 text-[12px] text-[#B54708]">Doesn't match the site: {s.report.dangling.slice(0, 5).join(" · ")}</p>
             ) : null}
+            {s?.report?.gaps?.length ? (
+                <p className="mb-3 rounded-lg bg-[#FFFAEB] px-3 py-2 text-[12px] text-[#B54708]" data-cms-plan-gaps>Not covered yet ({s.report.gaps.length}): {s.report.gaps.slice(0, 5).join(" · ")}{s.report.gaps.length > 5 ? " …" : ""}. “Build from library” fills these in.</p>
+            ) : null}
             {!s?.facts?.scanned ? <p className="mb-3 rounded-lg bg-[#EFF8FF] px-3 py-2 text-[12px] text-[#175CD3]">Tip: click “Scan site” first so the plan can see your sections, buttons, FAQs and forms.</p> : null}
 
             {proposal ? <ProposalView proposal={proposal} plan={plan} onUse={useProposal} onCancel={() => setProposal(null)} /> : null}

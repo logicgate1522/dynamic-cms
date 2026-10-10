@@ -17,14 +17,15 @@ this file wins.
 >    `--pass 3 --report CMS_REPORT.md`. Pass 2 refuses to run if any file
 >    changed after pass 1; pass 3 refuses if any file changed after pass 2.
 >    Any change, however small, sends you back to pass 1.
-> 3. **Take the visual baseline before you change anything** (P0):
->    `node frontend-kit/acceptance/visual.mjs --baseline --dir <frontend>/.gates/visual`.
->    Without it R9 can't be proven, and run-gates stays red.
+> 3. **Take both baselines before you change anything** (P0): the visual
+>    baseline `node frontend-kit/acceptance/visual.mjs --baseline --dir <frontend>/.gates/visual`
+>    (R9) and the SEO baseline `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node frontend-kit/acceptance/site-audit.mjs`
+>    (R34: the "before" of the SEO audit). Without them run-gates stays red.
 > 4. **Never weaken a gate.** Never edit a kit CORE file (only ADAPT files
 >    and the `cms.css` theme block), never edit `rules-map.json`, a gate
 >    script or a check to make it pass, never skip or comment out a check,
 >    never delete content to dodge a check. Fix the cause.
-> 5. **Every rule R1–R33 is checked by a machine** (`rules-map.json` maps
+> 5. **Every rule R1–R34 is checked by a machine** (`rules-map.json` maps
 >    each rule to the gate lines that prove it). Your report ticks every rule
 >    with its evidence and quotes the pass-2 fingerprint; pass 3 checks this.
 >
@@ -35,7 +36,7 @@ this file wins.
 
 1. **Read all of it before writing code.** Every rule below exists because it
    was missed once and broke a real site.
-2. **There are 33 rules, R1–R33 (§0).** Each rule is stated five times, on
+2. **There are 34 rules, R1–R34 (§0).** Each rule is stated five times, on
    purpose. A test (`IntegrationSpecTests`) fails the CMS build if any copy is
    missing:
    - the **rule index** (§0.1): one line, its gate, its phase
@@ -59,7 +60,7 @@ this file wins.
 
 **Definition of done (no exceptions).** `run-gates.mjs` runs every gate
 below against the running **production build** (`rm -rf .next && next build
-&& next start`, never `next dev`), maps every result to R1–R33, and is green
+&& next start`, never `next dev`), maps every result to R1–R34, and is green
 only when every gate passed AND every rule has its evidence in the same run:
 
 ```
@@ -81,8 +82,9 @@ node run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT
 | acceptance | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, consent, contacts, auth |
 | tracking-edge | every tracking, consent and contacts edge case |
 | verify-tracking | every plan conversion triggered and checked in a real browser |
-| site-audit | 0 failures: SEO on every page, links, contacts, claims, placeholders, forms, responsive, consent, privacy page |
-| report (pass 3) | `CMS_REPORT.md` ticks every rule with evidence and quotes the pass-2 fingerprint |
+| seo-baseline | the P0 SEO audit of the site as it was exists (`.gates/seo-baseline.json`) — R34 |
+| site-audit | 0 failures: SEO on every page, internal linking (orphans, depth, contextual links, anchors, redirects — analysed by the backend's `api/link_audit.py`), contacts, claims, placeholders, forms, responsive, consent, privacy page |
+| report (pass 3) | `CMS_REPORT.md` ticks every rule with evidence, quotes the pass-2 fingerprint, and has the "SEO audit" before/after section |
 
 Until run-gates prints `ALL GATES GREEN — 3 of 3 passes`, the work is not
 finished. Do not report success early, and never weaken a gate to make it
@@ -129,12 +131,13 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R25 | Tracking | Tracking and search verification configured in Site tools; events via `track()` | `check:inline`, acceptance, site-audit | P1, P7 |
 | R26 | Truth | Every claim is true: no invented stats, ratings, reviews, credentials or price promises | launch-check, site-audit | P0, P3, P7 |
 | R27 | Identity | Brand and contact details come from one place, and only what the owner publishes | `check:inline`, site-audit | P0, P3, P7 |
-| R28 | Pages | What the business sells is its real list, each a complete, linked page | site-audit, acceptance | P5 |
+| R28 | Pages | What the business sells is its real list, each a complete, linked page; articles filed under the site's own categories | site-audit, acceptance, launch-check | P5, P7 |
 | R29 | Structure | One primary action, an honest pricing story, keyword-led headings | site-audit | P3, P4 |
 | R30 | Editing | Edit mode never changes, hides or crowds the page; every list is editable | `check:inline`, acceptance | P1, P3 |
-| R31 | Tracking plan | A tracking plan derived from the business; automatic events; every conversion checked | `check:inline`, acceptance, site-audit, launch-check | P0, P3, P7 |
+| R31 | Tracking plan | A complete tracking plan derived from the business; automatic events; every conversion checked | `check:inline`, acceptance, site-audit, launch-check | P0, P3, P7 |
 | R32 | Consent | Consent first: banner, Consent Mode, tags and visitor storage only with consent | `check:inline`, acceptance, site-audit | P1, P7 |
 | R33 | Contacts | Contacts are privacy-safe: unticked opt-in, retention, export/erase, admin-only | backend tests, `check:inline`, acceptance | P4, P7 |
+| R34 | SEO audit | The site is SEO-audited before and after, and every page is properly linked: no orphans, ≤3 clicks, contextual links with descriptive anchors | seo-baseline, site-audit, launch-check, report | P0, P5, P7 |
 
 ### §0.2 Rule cards
 
@@ -225,7 +228,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   animation, provider, font and wrapper. Keep good existing metadata as the
   `pageMetadata` fallback.
 - **Never:** reworded, shortened or "cleaned up" defaults; dropped styling.
-- **Proven by:** run-gates `visual`: every sitemap page at 390px and 1280px matches the baseline taken in P0 (`visual.mjs --baseline`), ≤0.5% pixels differing.
+- **Proven by:** run-gates `visual`: every sitemap page at 390px and 1280px matches the baseline taken in P0 (`visual.mjs --baseline`), ≤0.5% pixels differing. The capture scrolls the whole page so scroll-revealed content is in the screenshot; a baseline from an older capture version (`baseline/capture.json`) is refused.
 
 #### R10 — Plain text only
 - **Must:** CMS and AI text renders as text; paragraphs come from blank-line
@@ -483,11 +486,21 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   guide (hero `secondary_*`). Service and FAQPage JSON-LD come
   automatically (§9). Retiring an offering: unpublish or delete its page,
   add a 301 to the nearest page, and remove every link, card, FAQ and article
-  that sells it.
+  that sells it. **Article categories** are the site's real topics, derived
+  in P7 from what the articles and offerings actually cover, and live in ONE
+  place: the blog collection's `fields.category.options` in Settings (the
+  article editor and "＋ New" offer exactly that list; `ARTICLE_CATEGORIES`
+  in `lib/blog.js` is only a fallback). Every published article uses one of
+  them.
 - **Never:** a page for something the owner doesn't offer; thin entry pages;
-  cards that aren't links; a renamed or removed URL without a 301.
+  cards that aren't links; a renamed or removed URL without a 301; articles
+  with no category list, the kit's placeholder categories ("News", "Guides",
+  "Updates"), invented topics the site doesn't cover, or an article filed
+  under a category that isn't in the list.
 - **Proven by:** site-audit (every published entry linked from its index;
-  at least `ENTRY_MIN_WORDS`, default 600, words); acceptance (template fit).
+  at least `ENTRY_MIN_WORDS`, default 600, words; `PASS categories: articles
+  use the site's own category list` from the launch-check item
+  `article-categories`, which fails at any level); acceptance (template fit).
 
 #### R29 — One primary action, an honest pricing story, keyword-led structure
 - **Must:** one primary call to action, chosen with the owner and worded
@@ -565,8 +578,15 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   the server copy; `submitForm()` sends the visitor's intent profile and the
   server matches lead conversions. Every enabled conversion passes the
   **Checks** (trigger → sent → received); connected tools are synced through
-  their APIs (`api/tracking_sync.py`).
-- **Never:** conversions, events or audiences written in code; triggers that
+  their APIs (`api/tracking_sync.py`). The approved plan is **complete**
+  (`tracking_plan.completeness`, shown as `report.gaps`): every lead form
+  has a primary `generate_lead` conversion, every offering page an intent,
+  every booking/contact page (`ctaPages`) a `cta_click` conversion, and
+  every option of a "who are you" form field (business type, industry,
+  size…) a segment. A full Checks run passes only if it tested at least one
+  lead conversion per lead form (zero tests is a fail).
+- **Never:** a valid but thin plan (an empty or partial plan "passes" nothing);
+  conversions, events or audiences written in code; triggers that
   depend on text the owner can edit (bind to blocks, paths, form option
   values); personal data in any event; telling the owner to set events up
   inside Meta Events Manager, GTM, GA4 or Google Ads (only account creation
@@ -576,8 +596,10 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   kit's tracking modules); acceptance "tracking: …" checks (CTA, section,
   FAQ, form start/abandon, lead with server conversions and matching event
   ids, no personal data); site-audit (every intent page carries the block
-  markers; no dangling trigger); launch-check (plan approved, not stale,
-  checks passing, worker running); backend `api/tests_tracking.py`; `tracking-edge.mjs` (edge cases).
+  markers; no dangling trigger; no plan gap — `PASS tracking: the approved
+  plan covers every lead form, offering page, booking page and segment`);
+  verify-tracking (a full run that tested every lead form); launch-check
+  (plan approved, complete, not stale, checks passing, worker running); backend `api/tests_tracking.py`; `tracking-edge.mjs` (edge cases).
 
 #### R32 — Consent first
 - **Must:** `<Analytics>` (inside `<AdminProvider>`) sets Google Consent Mode
@@ -622,6 +644,49 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   cascade + tombstone, export content, audit log); `check:inline` (opt-in
   never pre-ticked); acceptance "contacts: a test lead creates no contact; a
   real lead does; erase removes it"; `tracking-edge.mjs` (edge cases).
+
+#### R34 — Audited before and after; every page properly linked
+- **Must:** in P0, before any change, record the **SEO baseline**:
+  `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node site-audit.mjs`
+  against the site as it was. Every failure in it is fixed by P8, and
+  `CMS_REPORT.md` has a `### SEO audit` section: `before: N failures …`,
+  `after: M failures …` (M is pass 2's, so 0), what was fixed, and
+  `internal links: …`. **Keywords:** every indexable page except legal
+  pages has its own primary keyword (SEO → Essentials), and no two pages
+  share one. **Internal linking** follows one architecture
+  (§10 "Internal linking"): home → indexes → entries; every page has at
+  least one link from another page's content (menus and footers don't
+  count as context), is reachable within **3 clicks** of the home page,
+  and is in the sitemap; every **offering page** is linked from the content
+  of at least **2** pages (its index card and the home page or a related
+  guide) and links at least one related article; every **article** is
+  linked from content (index, related articles) and links the offering it
+  supports; anchor text names the target's topic — never "read more",
+  "click here", "learn more" or empty (a card whose visible text is
+  generic gets an `aria-label` that names the page); links point at the
+  final URL, never a redirect; internal links are never `rel=nofollow`.
+  Body copy links inline with `[anchor words](/path)` in a section's
+  `content` (the kit renders it; AI prompts list the pages and the missing
+  links). **Site tools → SEO → Internal links** (`lib/siteScan.js` +
+  `api/link_audit.py`) shows the graph's problems and **suggested links**
+  (copy that already mentions another page's topic); the improvement loop
+  is: Scan → fix every "Must fix" → add the suggestions that help the
+  reader → Scan again.
+- **Never:** an orphan or buried page; an offering or article reachable
+  only through menus; "read more"/"click here" anchors; one anchor text for
+  two different pages; links to redirected URLs; a page or link hidden to
+  dodge the audit; skipping or retaking the SEO baseline; a report without
+  the before/after numbers; a page without a primary keyword, or two pages
+  chasing the same one.
+- **Proven by:** `seo-baseline` gate (`.gates/seo-baseline.json` exists);
+  site-audit (the backend link audit of the production build: orphan,
+  unreachable, too deep, offering/article contextual links, generic/empty
+  anchors, redirected links, nofollow, missing or shared primary keywords —
+  `PASS links: every page is linked in
+  context, within 3 clicks, with descriptive anchors`); launch-check
+  `internal-links`; report gate (`### SEO audit` with the baseline's and
+  pass 2's failure counts and an `internal links:` line); backend tests
+  (`api/tests_links.py`).
 ---
 
 ## §1 — Modes
@@ -645,7 +710,7 @@ handlers) to its equivalent and say so in the report. Kit files assume the
 Each phase ends green: build passes, no hydration warnings, public pages
 unchanged. Each phase names the rules it builds; tick them as you go.
 
-**P0 — Audit (no code changes). Rules: R12, R26, R27, R31.** List the framework and
+**P0 — Audit (no code changes). Rules: R12, R26, R27, R31, R34.** List the framework and
 version, router, styling, every route, every section component and its
 hard-coded copy, lists, images, links, forms and their submit code (R24),
 tracking snippets and IDs (R25), existing SEO/metadata, the fixed-header
@@ -663,7 +728,16 @@ a list of the business details you'll need from the owner.
 --baseline --dir <frontend>/.gates/visual`. It is what R9 is measured
 against in every later pass. Never retake it after you start changing code.
 
-**Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists; `<frontend>/.gates/visual/baseline/index.json` exists. No file changed (`git status` clean, `.gates/` aside).
+**Then record the SEO baseline** (R34) the same way, on the same untouched
+build: `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node
+frontend-kit/acceptance/site-audit.mjs` (it runs without the CMS; with
+`CMS_USER`/`CMS_PASSWORD` and a running backend it also audits the link
+graph). It exits non-zero — that's expected; it is the "before". Turn every
+failure in it into a line of your plan (which phase fixes it), and list the
+site's link structure: which pages link to which in their content, orphans,
+pages only reachable through menus, generic anchors.
+
+**Exit check P0:** the audit table covers every file under `src/app` and `src/components` (count them); the owner-details list exists; `<frontend>/.gates/visual/baseline/index.json` and `<frontend>/.gates/seo-baseline.json` exist; every baseline failure has a phase that fixes it. No file changed (`git status` clean, `.gates/` aside).
 
 **P1 — Install the kit. Rules: R1, R4, R5, R6, R7, R8, R15, R17, R19, R25, R30, R32.**
 1. Copy `frontend-kit/src/**` into `src/` (R1). Do not overwrite site files
@@ -752,7 +826,7 @@ links to the main offerings (R29). Every `<form>` has
 
 **Exit check P4:** `grep -rn "fetch(.*submit\|formsubmit\|mailto:.*body" src --include=*.jsx` finds nothing outside `lib/forms.js`; each form submits once in the browser and the entry appears in Dashboard → Form inbox.
 
-**P5 — Collections, CMS pages and blog. Rules: R13, R14, R23, R28.** First decide
+**P5 — Collections, CMS pages and blog. Rules: R13, R14, R23, R28, R34.** First decide
 the collections (R13). A page type IS a collection when there is an index page
 listing entries AND (two or more detail pages share one section structure, OR
 it is a blog/news/projects-style list that will grow). For each one:
@@ -765,7 +839,12 @@ it is a blog/news/projects-style list that will grow). For each one:
      body types (`rich_text`, `image_text`, `faq`, `cta`) only for long-form
      articles
    - `fields` = whatever the listing cards show that isn't a section
-     (excerpt, category with its exact options, cover image)
+     (excerpt, category with its exact options, cover image). Blog
+     categories (R28): the site's own topics, taken from what its existing
+     articles and offerings cover (e.g. one per service area plus the
+     general topics the articles share), never the kit's "News / Guides /
+     Updates" and never a topic no article or offering covers. This list is
+     the only source: the editor reads it.
    - `listingNote` = where admins must link a new entry from, when the index
      page doesn't list entries automatically
 3. Make the index page list entries from the CMS when the site's design
@@ -776,6 +855,13 @@ it is a blog/news/projects-style list that will grow). For each one:
    each on the full template (≥600 words, keyword H1, link to its guide),
    linked from the index cards, home, footer and contact page. Retired
    offerings get a 301 and lose every link.
+6. Internal linking (R34, §10 "Internal linking"): index cards are links
+   whose accessible name is the entry's title; every offering links its
+   related guide (hero `secondary_*` or an inline `[anchor](/path)` in its
+   copy) and every article links the offering it supports, inline, with the
+   offering's name as the anchor; article pages show related articles;
+   breadcrumbs on every page below the home page. No page ends up reachable
+   only through the header or footer.
 
 Then the catch-all route for CMS pages, using
 `components/dynamic/DynamicContentPage.jsx` (ADAPT), which wraps the
@@ -795,9 +881,11 @@ report covers them.
 
 **Exit check P6:** `/sitemap.xml` lists every public route and no noindex page; `/robots.txt` has a Sitemap line on the canonical origin; a CMS redirect returns its status.
 
-**P7 — Seed. Rules: R5, R21, R22, R24, R25, R26, R27, R31, R32, R33.** A `scripts/seed-cms.mjs` that
+**P7 — Seed. Rules: R5, R21, R22, R24, R25, R26, R27, R28, R31, R32, R33, R34.** A `scripts/seed-cms.mjs` that
 fills the CMS:
-- site settings, **including the `ai` block (R5) and `collections` (§6.3)**
+- site settings, **including the `ai` block (R5) and `collections` (§6.3)**,
+  with the blog's `fields.category.options` set to the site's real topics
+  and every seeded article filed under one of them (R28)
 - `seoDefaults.defaultOgImage`: a 1200×630 brand card (R21)
 - `SiteSettings.contact` with ONLY the channels the owner publishes (R21,
   R27) — possibly none, if the owner wants the form to be the only route
@@ -814,17 +902,28 @@ fills the CMS:
 
 Then the tracking plan (R31), in the browser as an admin: Site tools →
 Tracking → **Scan site** → **Build from library** (and, if useful, **Ask
-AI**) → review → **Approve** → Checks → **Run checks** until every
-conversion passes (connected tools also show "received"). Set the plan's
+AI**) → review until the panel shows no "Not covered yet" line (every lead
+form, offering page, booking page and segment option is covered) →
+**Approve** → Checks → **Run checks** until every conversion passes and every
+lead form was tested (connected tools also show "received"). Set the plan's
 region for consent (R32) and Contacts retention (R33).
+
+Then the SEO audit and internal links (R34), on the production build:
+Site tools → SEO → **Internal links** → **Scan site**; fix every "Must fix"
+at its cause (add the missing content link, rename the generic anchor,
+point the link at the final URL); add each suggested link that helps the
+reader (inline `[anchor](/path)` in a text block, or Ask AI on that page —
+its prompt lists the missing links); scan again until "Must fix" is 0. Then
+`node site-audit.mjs` until it reports 0 failures, and compare with
+`.gates/seo-baseline.json`: every baseline failure is gone.
 
 It must be idempotent. Without `--force` it fills only what is still missing
 (at any depth) and never overwrites an admin's edit. It never writes invented
 business details (R22).
 
-**Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written; `GET tracking/plan/` shows an approved plan with no dangling triggers and the latest check passed.
+**Exit check P7:** run the seed **twice**; the second run changes nothing (idempotent); `GET settings/site/` shows `ai`, `collections`, `contact`, `seoDefaults.defaultOgImage` and the moved `analytics` IDs; no invented business detail was written; `GET tracking/plan/` shows an approved plan with no dangling triggers and `report.gaps` empty, and the latest check passed; `GET launch-check/` has no `article-categories` item; `GET seo/links/` shows `summary.fail` = 0.
 
-**P8 — Verify (three passes). Rules: all, R1–R33.** One green run is not
+**P8 — Verify (three passes). Rules: all, R1–R34.** One green run is not
 proof: a fix for one gate can break another. `run-gates.mjs` enforces the
 order; you cannot skip a pass.
 
@@ -845,7 +944,10 @@ order; you cannot skip a pass.
    in §13): walk §13 line by line and tick each rule with its evidence, using
    `.gates/pass-2-rules.md` (the gate lines that proved it); read §11 top to
    bottom and confirm that none of the anti-patterns exist (search for each
-   one); list "Defaults taken" and "Needs from the owner"; quote the pass-2
+   one); list "Defaults taken" and "Needs from the owner"; write the
+   "SEO audit" section (before: the baseline's failure count, after: pass
+   2's site-audit failure count from `.gates/pass-2-site-audit.json`, what
+   was fixed, internal links: pages, links, links added); quote the pass-2
    fingerprint. Then `--pass 3 --report <frontend>/CMS_REPORT.md`. Any gap
    sends you back to Pass 1 (or to the report).
 
@@ -1198,6 +1300,7 @@ returns 403.
 | GET | `seo/` · GET/PATCH `seo/<path>/` | public / admin | Per-page SEO blob (home = `seo/home/`) |
 | GET | `seo/resolve/` · `seo/resolve/<path>/` | public | Fully resolved metadata + JSON-LD (root = home) |
 | GET/POST | `seo/analyze/<path>/` · GET `seo/analyze/` | admin | SEO audits |
+| GET · POST | `seo/links/` · `seo/links/analyze/` | admin | Internal-link audit (R34) of the last stored site scan (`tracking/scan/` stores each page's internal links, H1 and main text) · analyse a posted scan without storing it (site-audit) → `{summary, pages, issues: [{id, level: fail\|warn, path, text, fix}], suggestions: [{from, to, anchor, reason}]}` |
 | POST | `seo/validate-schema/` | admin | Validate pasted JSON-LD |
 | GET | `seo/<path>/history/` · POST `…/revert/<id>/` | admin | SEO history |
 
@@ -1317,7 +1420,7 @@ Blog posts mirror all of these under `blog/<slug>/…`.
       "allowAdd": ["rich_text", "image_text", "faq", "cta"],
       "fields": {
         "excerpt": { "label": "Excerpt", "type": "textarea" },          // model field on BlogPost
-        "category": { "label": "Category", "options": ["News", "Guides"] },   // stored in content.category
+        "category": { "label": "Category", "options": ["<the site's own topics>"] },   // stored in content.category; the ONE category list (R28)
         "coverImage": { "label": "Cover image", "type": "image", "category": "blog" }
       }
     }
@@ -1538,6 +1641,54 @@ blocks; keyword in title/H1/first paragraph/URL/alt **without stuffing**;
 `dateModified` freshness; E-E-A-T (author `Person` + `sameAs`, citations,
 about/contact pages).
 
+### Internal linking (R34)
+
+The architecture every site gets:
+- **Hub and spoke.** Home → collection indexes (services, blog…) →
+  entries. Index cards are real links whose accessible name is the entry's
+  title. The home page links every offering (or its index) from content.
+- **Context, not menus.** Header, footer and nav links make a page
+  reachable, but search engines weigh links in the content. Every page
+  other than home and legal pages has at least one link from another
+  page's content; every offering page has at least two (index card + home
+  or a guide).
+- **Offering ↔ article.** Each article links the offering it supports,
+  inline, with the offering's name as the anchor; each offering links its
+  related guide. Articles show related articles (same category) at the end.
+- **Depth ≤ 3** clicks from the home page; no orphans; every linked page is
+  in the sitemap.
+- **Anchors** name the target's topic (its keyword or title), one anchor
+  text per target. "Read more" / "Learn more" buttons on cards carry an
+  `aria-label` with the title. No empty links, no internal `rel=nofollow`,
+  no links to redirected URLs (update them when you add a redirect).
+- **In copy:** a section's `content` may contain `[anchor words](/path)`
+  (internal paths only); `EditableParagraphs` renders it as a link and
+  `ai/normalize` keeps it there (and strips it everywhere else). Every AI
+  prompt lists the pages the copy may link to and, after a scan, the links
+  that page is missing (`prompts.link_block`).
+- **Audit and improve:** Site tools → SEO → Internal links (Scan site →
+  Must fix / Improve / Suggested links); the same analyser
+  (`api/link_audit.py`) runs in site-audit against the production build,
+  so what passes in the admin passes the gate.
+
+### SEO audit, before and after (R34)
+
+1. **P0 baseline:** `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node
+   site-audit.mjs` on the untouched site.
+2. **Plan:** every baseline failure gets a phase that fixes it (titles and
+   descriptions in P7's `seo/<path>/` seed, headings in P3, schema and
+   canonicals in P2, links in P5/P7).
+3. **Per page:** its own primary keyword (no two pages share one), the SEO
+   panel (Ask AI first; 18 checks green), the
+   whole-page assist (keyword coverage), and `seo/analyze/<path>/` against
+   the live page.
+4. **Site-wide:** `site-audit.mjs` (0 failures), Site tools → SEO (every
+   page's score; fix the worst first), Internal links (0 "Must fix"),
+   launch check (no `page-seo`, `internal-links`, `placeholders` items).
+5. **Report:** `### SEO audit` in `CMS_REPORT.md` — `before: N failures`,
+   `after: 0 failures`, the main fixes, `internal links: P pages, L links,
+   K added`. The report gate checks the numbers against the files.
+
 ### URL design
 
 Lowercase, hyphenated, shallow, stable, no dates unless semantically needed,
@@ -1603,7 +1754,7 @@ unclosed/invalid JSON-LD, marking up invisible content.
 - [ ] OG title/description/image(1200×630)/image:alt all present; Twitter card valid
 - [ ] JSON-LD `@graph` emitted, valid (`seo/validate-schema/` + Rich Results Test), `@type` matches page
 - [ ] BreadcrumbList matches URL depth; breadcrumb UI parity
-- [ ] internal links present; link text descriptive
+- [ ] linked from at least one other page's content, ≤3 clicks from home, descriptive anchors, no links to redirects (R34; Site tools → SEO → Internal links)
 - [ ] hreflang reciprocal + `x-default` (if multilingual)
 - [ ] `rel=prev/next` on paginated routes
 - [ ] no mixed content; no CLS; LCP image has `priority`
@@ -1679,7 +1830,9 @@ any of these, stop and undo it.
   didn't approve, the notification address on a page, or a leftover old
   brand name/logo.
 - **R28** Pages for things the owner doesn't offer, thin entry pages, cards
-  that don't link, or a removed URL without a 301.
+  that don't link, a removed URL without a 301, or article categories that
+  are missing, the kit's placeholders, invented, or kept in code instead of
+  the blog collection.
 - **R29** Competing CTA wordings, a contact page that is only a form, slogan-only
   H1s, headings in the footer, or a redesign that leaves the site's look.
 - **R30** Edit buttons in the page flow (editing shifts the layout), tools a
@@ -1689,7 +1842,9 @@ any of these, stop and undo it.
 - **R31** Conversions or events coded per site; a generic "track everything"
   plan; triggers bound to editable text; a block without `{editButton}`; a
   form without `data-cms-form`; personal data in events; asking the owner to
-  configure events inside a tool; a plan nobody approved or checked.
+  configure events inside a tool; a plan nobody approved or checked; a
+  valid but thin plan (a lead form, offering page, booking page or segment
+  option it doesn't cover); a Checks run that tested no lead form.
 - **R32** Tags that load before consent; a pre-ticked or hard-to-find
   "Reject"; visitor data in `localStorage`/`sessionStorage`/cookies written
   by site code; no "Cookie settings" link; a privacy page that doesn't
@@ -1697,17 +1852,24 @@ any of these, stop and undo it.
 - **R33** Contact data in public responses or prompts; marketing lists with
   people who didn't opt in; a pre-ticked opt-in; no retention or erase;
   automatic merges on shared phone numbers.
+- **R34** No SEO baseline (or one retaken after changes); orphan pages,
+  pages only reachable through menus or more than 3 clicks deep; "read
+  more"/"click here" anchors; offering pages without contextual links in,
+  articles that don't link the offering they support; links to redirected
+  URLs; pages without their own primary keyword; a report without
+  before/after numbers.
 
 ## §12 — Fill-in prompt
 
 ```
 Integrate this frontend with dynamic-cms. Follow FRONTEND_INTEGRATION_PROMPT.md
-exactly — every rule R1–R33, no exceptions. Read the whole file first.
+exactly — every rule R1–R34, no exceptions. Read the whole file first.
 Kit: dynamic-cms/frontend-kit.
 Backend: <NEXT_PUBLIC_API_URL>   Site: <NEXT_PUBLIC_SITE_URL>
 Do: <Autonomous mode | Input router for: <files>>
-Take the visual baseline in P0 before changing anything
-(visual.mjs --baseline). Finish only when
+Take the visual baseline (visual.mjs --baseline) and the SEO baseline
+(AUDIT_JSON=.gates/seo-baseline.json site-audit.mjs) in P0 before changing
+anything. Finish only when
 frontend-kit/acceptance/run-gates.mjs prints
 "ALL GATES GREEN — 3 of 3 passes" (--pass 1 until green, fresh build,
 --pass 2, write CMS_REPORT.md, --pass 3 --report). Never weaken a gate.
@@ -1730,11 +1892,17 @@ must be true and carry evidence. Each line names the gate that proves it.
 Pass 2 fingerprint: <the fingerprint pass 2 printed>
 
 ### Rules
-- [x] **R1** <the rule> — evidence: kit-verbatim green (72 files); check-sections green
+- [x] **R1** <the rule> — evidence: kit-verbatim green (74 files); check-sections green
 - [x] **R2** … — evidence: <gate line(s) from .gates/pass-2-rules.md>
-… one line for EVERY rule R1–R33 …
+… one line for EVERY rule R1–R34 …
 
 §11: none found — searched for <how you searched for each anti-pattern>
+
+### SEO audit
+- before: <N> failures, <W> warnings (.gates/seo-baseline.json, <date>)
+- after: <M> failures, <W2> warnings (.gates/pass-2-site-audit.json)
+- fixed: <the main classes of fix>
+- internal links: <P> pages, <L> links, <K> added; 0 must-fix
 
 ### Defaults taken
 - …
@@ -1771,12 +1939,13 @@ Pass 2 fingerprint: <the fingerprint pass 2 printed>
 - [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking, and verification codes in Settings → Search engine verification; `<Analytics>` and the layout metadata render them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…", site-audit verification check)
 - [ ] **R26** Every claim on the site is confirmed by the owner; none invented; placeholder social proof hidden; industry facts current. (launch-check "claims", site-audit `[claims]`)
 - [ ] **R27** Brand and contact details come from settings only; only owner-approved channels appear; the notification address is never shown. (`check:inline`, site-audit contact checks)
-- [ ] **R28** One complete page per real offering, each ≥600 words, linked from its index, home and footer, with its guide; retired URLs 301. (site-audit collections, acceptance)
+- [ ] **R28** One complete page per real offering, each ≥600 words, linked from its index, home and footer, with its guide; retired URLs 301; article categories are the site's own topics in the blog collection and every article uses one. (site-audit collections + categories, acceptance, launch-check)
 - [ ] **R29** One primary CTA wording site-wide; contact page has real content; keyword H1 first; no footer headings; pricing explained when it varies. (site-audit headings/contact page, review)
 - [ ] **R30** Editing on moves nothing; tools float, never covered, inside the screen; the bar is one line at every width; every list has item tools and "+ Add". (`check:inline`, acceptance edit-mode checks)
-- [ ] **R31** The plan was scanned, built from the business, approved, and every conversion passes Checks; blocks render `{editButton}`, forms have `data-cms-form`. (`check:inline`, acceptance "tracking: …", site-audit, launch-check)
+- [ ] **R31** The plan was scanned, built from the business, complete (no `report.gaps`), approved, and every conversion passes Checks with every lead form tested; blocks render `{editButton}`, forms have `data-cms-form`. (`check:inline`, acceptance "tracking: …", site-audit, verify-tracking, launch-check)
 - [ ] **R32** Consent Mode defaults first; non-Google tags only after consent; banner + "Cookie settings"; no visitor storage without consent; the privacy page covers analytics and enquiry records. (`check:inline`, acceptance "consent: …", site-audit)
 - [ ] **R33** Contacts are admin-only, opt-in is unticked, only opted-in people reach ad lists, retention + export + erase work. (backend tests, `check:inline`, acceptance "contacts: …")
+- [ ] **R34** The SEO baseline was taken in P0; every baseline failure is fixed; every page has its own primary keyword; no orphan, buried or menu-only page; offerings and articles link each other in context; anchors are descriptive; the report has before/after numbers. (seo-baseline, site-audit "links: …", launch-check, report)
 
 **Also checked by the gates**
 - [ ] Exactly one `<h1>` in each page's HTML. (acceptance, site-audit)
@@ -1800,14 +1969,16 @@ Pass 2 fingerprint: <the fingerprint pass 2 printed>
 1. Did `run-gates.mjs` print **`ALL GATES GREEN — 3 of 3 passes`** in this
    session, on the code you are handing over? If not, you are not done:
    say exactly which pass and gate is red, and keep working.
-2. Was the visual baseline taken in P0, before any change, and never retaken?
+2. Were the visual baseline and the SEO baseline taken in P0, before any
+   change, and never retaken?
 3. Did pass 2 run on a fresh build with no file changed after pass 1, and
    pass 3 with no file changed after pass 2?
 4. Is every kit CORE file untouched (only ADAPT files and the `cms.css`
    theme block differ), and is every gate, check and `rules-map.json` exactly
    as shipped?
-5. Does `CMS_REPORT.md` tick every rule R1–R33 with evidence, quote the
-   pass-2 fingerprint, confirm the §11 sweep, and list "Defaults taken" and
-   "Needs from the owner" — with no invented business detail?
+5. Does `CMS_REPORT.md` tick every rule R1–R34 with evidence, quote the
+   pass-2 fingerprint, confirm the §11 sweep, give the SEO audit's
+   before/after numbers, and list "Defaults taken" and "Needs from the
+   owner" — with no invented business detail?
 If any answer is no, go back to the pass it points to. Do not mention this
 checklist in your report; just make every answer yes.

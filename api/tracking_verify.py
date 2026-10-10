@@ -127,11 +127,28 @@ def finalise(run):
         "failing": failing, "unplaced": unplaced, "untested": untested,
         "blocked": sorted({r.conversion_id for r in results if r.status == "blocked"}),
     }
-    run.status = "failed" if failing or unplaced else "passed"
+    # A full run proves something only if it tested every lead form: zero
+    # tests, or a lead form none of whose lead conversions fired, is a fail.
+    missing = []
+    if not run.scope:
+        if not tests:
+            missing.append("no conversions were tested")
+        else:
+            from .site_facts import get_facts
+            from .tracking_library import lead_forms
+            from .tracking_plan import get_plan
+            convs = {c.get("id"): c for c in get_plan().get("conversions") or []}
+            proven = {cid for cid in tests if cid not in failing and any(r.status == "ok" for r in by_conv.get(cid, []))}
+            for form in lead_forms(get_facts()):
+                if not any((convs.get(cid, {}).get("trigger") or {}).get("event") == "generate_lead"
+                           and ((convs[cid]["trigger"].get("where") or {}).get("form") in (None, "", form["name"])) for cid in proven):
+                    missing.append(f"lead form “{form['name']}”: no lead conversion was tested")
+    run.summary["missing"] = missing
+    run.status = "failed" if failing or unplaced or missing else "passed"
     run.finished_at = timezone.now()
     run.save(update_fields=["summary", "status", "finished_at"])
-    if failing or unplaced:
-        names = ", ".join((failing + unplaced)[:6])
+    if failing or unplaced or missing:
+        names = ", ".join((failing + unplaced + missing)[:6])
         open_alert("checks", "warning", f"Tracking checks failing for: {names}. Open Site tools → Tracking → Checks.")
     else:
         resolve_alert("checks")

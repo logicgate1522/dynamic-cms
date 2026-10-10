@@ -158,7 +158,7 @@ function RunDetail({ run }) {
     const tests = Object.fromEntries((run.tests || []).map((t) => [t.conversion, t]));
     const ids = [...new Set([...Object.keys(tests), ...Object.keys(by)])];
     return (
-        <Section title={`Run #${run.id}`} description={run.summary?.failing?.length ? `Failing: ${run.summary.failing.join(", ")}` : run.status === "passed" ? "Everything checked passed." : ""}>
+        <Section title={`Run #${run.id}`} description={[run.summary?.failing?.length ? `Failing: ${run.summary.failing.join(", ")}` : "", run.summary?.missing?.length ? `Not proven: ${run.summary.missing.join("; ")}` : "", run.status === "passed" ? "Everything checked passed." : ""].filter(Boolean).join(" — ")}>
             <div className="overflow-x-auto rounded-xl border border-[#E2E8F0]">
                 <table className="w-full text-left text-[12px]">
                     <thead className="bg-[#F8FAFC] text-[#64748B]"><tr><th className="p-2">Conversion</th><th className="p-2">Step</th><th className="p-2">Tool</th><th className="p-2">Result</th></tr></thead>

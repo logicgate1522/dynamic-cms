@@ -3,6 +3,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from . import link_views
 from .collection_views import (
     CollectionEntriesView,
     CollectionEntryApplyView,
@@ -121,6 +122,8 @@ urlpatterns = [
     path('seo/resolve/', SEOResolveView.as_view(), name='seo-resolve-home'),
     path('seo/resolve/<path:path>/', SEOResolveView.as_view(), name='seo-resolve'),
     path('seo/validate-schema/', SchemaValidateView.as_view(), name='seo-validate-schema'),
+    path('seo/links/', link_views.LinkAuditView.as_view(), name='seo-links'),
+    path('seo/links/analyze/', link_views.LinkAnalyzeView.as_view(), name='seo-links-analyze'),
     path('seo/analyze/', SEOAuditRollupView.as_view(), name='seo-audit-rollup'),
     path('seo/analyze/<path:path>/', SEOAuditView.as_view(), name='seo-audit'),
     path('seo/<path:path>/history/', PageSEOHistoryView.as_view(), name='seo-history'),

@@ -30,6 +30,7 @@ CORE = [
     "app/admin/tracking/page.jsx",
     "app/admin/contacts/page.jsx",
     "components/admin/AdminShell.jsx",
+    "components/admin/InternalLinks.jsx",
     "components/admin/contacts/ContactsPanel.jsx",
     "components/admin/tracking/ChecksTab.jsx",
     "components/admin/tracking/describe.js",
@@ -40,6 +41,7 @@ CORE = [
     "components/admin/useApi.js",
     "components/cms/AdminBar.jsx",
     "components/cms/AdminProvider.jsx",
+    "components/cms/BlogPostEditor.jsx",
     "components/cms/ai.jsx",
     "components/cms/CmsDataProvider.jsx",
     "components/cms/CmsSection.jsx",
@@ -91,7 +93,6 @@ CORE = [
 # copied too, so the kit's gates never drift from the reference site's.
 SCRIPTS = ["check-inline.mjs", "check-sections.mjs"]
 ADAPT = [
-    "components/cms/BlogPostEditor.jsx",
     "components/cms/DraftPreview.jsx",
     "components/dynamic/DynamicContentPage.jsx",
     "lib/blog.js",

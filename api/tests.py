@@ -2057,6 +2057,109 @@ class IntegrationSpecTests(APITestCase):
             self.assertNotIn("review", row.split("|")[-2].lower(), f"R{n} is proven only by review — give it a gate")
         self.assertNotIn("(review", sections["§13"])
 
+    @staticmethod
+    def _fits_template(literal, template):
+        """Is `literal` part of `template` with each ${…} filled in? A hole
+        stands for a value (a path, a number): any text without spaces. At
+        least 6 of the template's own characters must match."""
+        import re
+        pattern = []
+        for i, part in enumerate(re.split(r"\$\{[^}]*\}", template)):
+            if i:
+                pattern.append(None)
+            pattern.extend(part)
+        n = len(pattern)
+
+        def skip_holes(states):
+            out = dict(states)
+            for j, fixed in states.items():
+                k = j
+                while k < n and pattern[k] is None:
+                    k += 1
+                    out[k] = max(out.get(k, -1), fixed)
+            return out
+
+        states = skip_holes({j: 0 for j in range(n + 1)})  # the match may start anywhere
+        for ch in literal:
+            nxt = {}
+            for j, fixed in states.items():
+                if j < n and pattern[j] is None and not ch.isspace():
+                    nxt[j] = max(nxt.get(j, -1), fixed)            # the hole takes it
+                    if j + 1 <= n:
+                        nxt[j + 1] = max(nxt.get(j + 1, -1), fixed)  # …and may end here
+                elif j < n and pattern[j] == ch:
+                    nxt[j + 1] = max(nxt.get(j + 1, -1), fixed + 1)
+            states = skip_holes(nxt)
+            if not states:
+                return False
+        return max(states.values()) >= 6
+
+    def test_every_evidence_line_exists_in_its_gate(self):
+        """A rules-map {gate, check} must name a PASS line its gate script can
+        actually print — a renamed or deleted check can't silently stop
+        proving a rule."""
+        import json
+        import re
+        root, _, _, _ = self._spec()
+        acceptance = root / "frontend-kit" / "acceptance"
+        mapping = json.loads((acceptance / "rules-map.json").read_text())
+        mapping.pop("_about", None)
+        scripts = {"acceptance": "acceptance.mjs", "tracking-edge": "tracking-edge.mjs", "site-audit": "site-audit.mjs",
+                   "verify-tracking": "verify-tracking.mjs"}
+        for rule, items in mapping.items():
+            for item in items:
+                if not item.get("check"):
+                    continue
+                self.assertIn(item["gate"], scripts, f"{rule}: a check on {item['gate']} can't be traced to a script")
+                source = (acceptance / scripts[item["gate"]]).read_text()
+                literal = re.sub(r"\\(.)", r"\1", item["check"]).lstrip("^").rstrip("$")
+                found = literal in source
+                # Names built from templates (`… at ${width}px on ${path}`):
+                # the check must read as part of some filled-in template.
+                # A hole may also be filled by a quoted string from the same
+                # script (a label passed to a helper).
+                values = [q for q in re.findall(r'"([^"\n]{4,})"', source) if q in literal]
+                variants = [literal] + [literal.replace(q, "§") for q in values]
+                for template in ([] if found else re.findall(r"`([^`]*\$\{[^`]*)`", source)):
+                    if any(self._fits_template(v, template) for v in variants):
+                        found = True
+                        break
+                self.assertTrue(found, f"{rule}: {item['gate']} never prints “{literal}”")
+
+    def test_categories_plan_completeness_and_seo_audit_are_gated(self):
+        """R28 categories, R31 plan completeness and R34 (SEO before/after,
+        internal links) each have their backend half, their gate line and
+        their spec text."""
+        root, spec, sections, _ = self._spec()
+        acceptance = root / "frontend-kit" / "acceptance"
+        audit = (acceptance / "site-audit.mjs").read_text()
+        runner = (acceptance / "run-gates.mjs").read_text()
+        zero = sections["§0"]
+        # R28: one category list, from Settings, checked by the launch check.
+        from .site_collections import category_issues  # noqa: F401
+        self.assertIn('item.id === "article-categories"', audit)
+        r28 = zero[zero.index("#### R28"):zero.index("#### R29")]
+        for phrase in ("fields.category.options", "placeholder", "ARTICLE_CATEGORIES"):
+            self.assertIn(phrase, r28)
+        # R31: a valid but thin plan is not done.
+        from .tracking_plan import completeness  # noqa: F401
+        self.assertIn("state.report?.gaps", audit)
+        r31 = zero[zero.index("#### R31"):zero.index("#### R32")]
+        for phrase in ("completeness", "report.gaps", "every lead form"):
+            self.assertIn(phrase, r31)
+        self.assertIn("CMS_USER", runner.split("fingerprints")[0], "run-gates must refuse to run without the admin login")
+        # R34: SEO baseline in P0, before/after in the report, one link analyser.
+        from .link_audit import analyze  # noqa: F401
+        self.assertIn("seo-baseline.json", sections["§2"][:sections["§2"].index("**P1 — ")])
+        self.assertIn("seo-baseline", runner)
+        self.assertIn("SEO audit", runner)
+        for phrase in ("seo/links/analyze/", "AUDIT_JSON"):
+            self.assertIn(phrase, audit)
+        for phrase in ("### SEO audit", "- before:", "- after:", "- internal links:"):
+            self.assertIn(phrase, sections["§13"])
+        self.assertIn("### Internal linking (R34)", sections["§10"])
+        self.assertIn("SEO baseline", spec[:3000], "the SEO baseline must be in READ THIS FIRST")
+
     def test_the_definition_of_done_is_unmissable(self):
         root, spec, sections, rules = self._spec()
         done = "ALL GATES GREEN — 3 of 3 passes"
@@ -2088,7 +2191,8 @@ class IntegrationSpecTests(APITestCase):
         guide = (root / "LAUNCH_GUIDE.md").read_text()
         for topic in ("Public site URL", "Form notifications", "FormSubmit", "Search Console", "sitemap.xml",
                       "Search engine verification", "Bing", "Tag Manager", "GA4", "generate_lead",
-                      "Consent default", "cookie banner", "launch check"):
+                      "Consent default", "cookie banner", "launch check", "Internal links", "Must fix",
+                      "Article categories", "Build from library"):
             self.assertIn(topic, guide, f"LAUNCH_GUIDE.md must cover {topic}")
         self.assertIn("LAUNCH_GUIDE.md", spec)
         for doc in ("AGENTS.md", "README.md"):

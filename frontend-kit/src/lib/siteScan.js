@@ -9,6 +9,10 @@
    header/footer navigation, FAQ questions ([aria-expanded] / <summary>),
    forms (form[data-cms-form] with field names, types and options),
    tel/mailto/WhatsApp links, downloads, outbound links and word counts.
+   For the internal-link audit (R34, backend api/link_audit.py) it also keeps
+   every internal link (target, accessible text, area: main/header/footer/
+   nav, rel), the H1 and the main text. Site tools → SEO → Internal links
+   runs the same scan.
 ========================================= */
 
 const MAX_PAGES = 150;
@@ -92,11 +96,24 @@ function parsePage(html, url) {
             faqs.push({ question: q, block: blockFor(el), item: itemFor(el), topic: el.closest("[data-track-faq-topic]")?.dataset.trackFaqTopic || "" });
         }
     }
+    // Internal links for the link audit: where each sits and what it says.
+    const internal = [];
+    for (const a of links) {
+        const to = norm(a.getAttribute("href"), url);
+        if (!to || /^(mailto:|tel:|javascript:)/i.test(a.getAttribute("href"))) continue;
+        const area = a.closest("header") ? "header" : a.closest("footer") ? "footer" : a.closest("nav, [data-track-nav]") ? "nav" : "main";
+        const label = a.getAttribute("aria-label") || text(a) || [...a.querySelectorAll("img[alt]")].map((i) => i.alt).join(" ");
+        internal.push({ to, text: label.slice(0, 120), area, rel: a.getAttribute("rel") || "" });
+    }
+    const body = (doc.querySelector("main") || doc.body).cloneNode(true);
+    // Copy only: text that is already a link can't become one.
+    body.querySelectorAll("header, footer, nav, form, script, style, noscript, [hidden], a").forEach((n) => n.remove());
     const forms = [...doc.querySelectorAll("form[data-cms-form]")].map((f) => ({ name: f.dataset.cmsForm, fields: fields(f) }));
     const ctaCandidates = links.filter((a) => !a.closest("header, footer")).map((a) => ({ el: a, target: norm(a.getAttribute("href"), url) }))
         .filter((x) => x.target && x.target !== path).map((x) => ({ label: text(x.el).slice(0, 60), target: x.target, block: blockFor(x.el), explicit: x.el.hasAttribute("data-track-cta") }));
     return {
         path, title: text(doc.querySelector("title")).slice(0, 200), words: text(main).split(" ").length,
+        h1: text(doc.querySelector("h1")).slice(0, 200), text: text(body).slice(0, 6000), links: internal.slice(0, 300),
         blocks, nav: nav.slice(0, 60), faqs: faqs.slice(0, 200), forms, ctaCandidates,
         tel: links.some((a) => a.getAttribute("href").startsWith("tel:")),
         mailto: links.some((a) => a.getAttribute("href").startsWith("mailto:")),

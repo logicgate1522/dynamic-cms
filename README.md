@@ -13,7 +13,11 @@ backend.
   **`seo/resolve/<path>/`** endpoint that returns fully-resolved metadata +
   a composed JSON-LD `@graph` (so `generateMetadata()` is a thin mapping)
 - **SEO audit engine** (`seo/analyze/`) — technical/content/metadata/schema
-  checks + a site-wide roll-up
+  checks + a site-wide roll-up; measured before (P0 baseline) and after (R34)
+- **Internal-link audit** (`seo/links/`, R34) — the rendered link graph:
+  orphans, click depth, contextual links into offerings and articles,
+  generic anchors, links to redirects, plus suggested links that the AI
+  prompts use; inline `[anchor](/path)` links in body copy
 - **Server-side structured-data builders** (Organization/LocalBusiness, WebSite,
   Breadcrumb, Article, FAQ, Product, Service, Person, Event, HowTo, Video) +
   a JSON-LD validator
@@ -204,7 +208,7 @@ is referenced (`?force=1` overrides).
 
 ## Frontend integration
 
-- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R33, a
+- **`FRONTEND_INTEGRATION_PROMPT.md`**: the strict spec, with rules R1–R34, a
   phase-by-phase procedure, the exact section-conversion recipe, the full
   backend contract and an SEO reference.
 - **`frontend-kit/`**: the Next.js App Router kit to copy in.
@@ -217,7 +221,7 @@ is referenced (`?force=1` overrides).
   section editing, page creation, admin pages, sign out).
   `site-audit.mjs` checks every page (SEO, consistency, forms, responsive,
   launch readiness). **`run-gates.mjs` runs them all** (plus kit-verbatim,
-  visual, tracking-edge and verify-tracking), maps every result to R1–R33
+  visual, tracking-edge and verify-tracking), maps every result to R1–R34
   and enforces three passes; an integration is done only when it prints
   `ALL GATES GREEN — 3 of 3 passes`. Run from `frontend-kit/acceptance`
   after `npm run setup`.
@@ -280,7 +284,7 @@ login → PATCH → persistence round trip) — not just asserted.
    axe-core, pixelmatch, chromium).
 4. Give your coding agent the frontend repo and this directory and say:
    "Integrate this frontend with dynamic-cms. Follow AGENTS.md." `AGENTS.md`
-   sends it to `FRONTEND_INTEGRATION_PROMPT.md` (rules R1–R33, phases P0–P8)
+   sends it to `FRONTEND_INTEGRATION_PROMPT.md` (rules R1–R34, phases P0–P8)
    and `frontend-kit/` (the kit, installed verbatim). It takes the visual
    baseline in P0, before changing anything.
 5. It is done only when

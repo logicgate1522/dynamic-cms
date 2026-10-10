@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { Card, Notice, PageTitle } from "@/components/admin/AdminShell";
+import InternalLinks from "@/components/admin/InternalLinks";
 import { useApi } from "@/components/admin/useApi";
 import { buttonStyles } from "@/components/cms/Drawer";
 
@@ -74,6 +75,8 @@ export default function SeoAuditPage() {
                     </tbody>
                 </table>
             </Card>
+
+            <InternalLinks />
         </>
     );
 }

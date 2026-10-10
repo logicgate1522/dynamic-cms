@@ -338,3 +338,42 @@ def collection_for_path(path):
         if clean.startswith(cfg["pathPrefix"] + "/") and clean.count("/") == cfg["pathPrefix"].count("/") + 1:
             return cfg, "entry"
     return None, None
+
+
+# The kit's stand-in categories (lib/blog.js and the spec's §6.3 example).
+# A live site files articles under its own topics, never these.
+PLACEHOLDER_CATEGORIES = ({"news", "guides", "updates"}, {"news", "guides"})
+
+
+def category_issues():
+    """Article categories are the blog collection's
+    fields.category.options — the one list the editor offers (R28). Returns
+    [{id, level, text}]: articles with no category list, the kit's placeholder
+    list, or published articles filed under a category that isn't in it."""
+    from .models import BlogPost
+    issues = []
+    blogs = [c for c in all_collections().values() if c["hostKind"] == "blog"]
+    posts = list(BlogPost.objects.all())
+    if not posts:
+        return issues
+    if not blogs:
+        return [{"id": "no-collection", "level": "blocker",
+                 "text": "articles exist but no blog collection is configured (Settings → collections, hostKind “blog”)"}]
+    for cfg in blogs:
+        spec = cfg["fields"].get("category")
+        options = [str(o).strip() for o in (spec.get("options") or [])] if isinstance(spec, dict) else []
+        options = [o for o in options if o]
+        if not options:
+            issues.append({"id": "missing", "level": "blocker",
+                           "text": f"the {cfg['label'].lower()} collection has no category list (fields.category.options)"})
+            continue
+        if {o.lower() for o in options} in PLACEHOLDER_CATEGORIES:
+            issues.append({"id": "placeholder", "level": "blocker",
+                           "text": f"the categories are the kit's placeholders ({', '.join(options)}) — use the site's own topics"})
+        for post in posts:
+            category = str((post.content or {}).get("category") or "").strip() if isinstance(post.content, dict) else ""
+            if post.status == "published" and category not in options:
+                issues.append({"id": "unlisted", "level": "warning",
+                               "text": f"/{entry_path(cfg, post.slug)} is filed under “{category or 'nothing'}”, which isn't in the category list"})
+    return issues
+

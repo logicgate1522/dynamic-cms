@@ -273,7 +273,8 @@ def get_facts():
     return finalise(facts)
 
 
-SCAN_LIMITS = {"pages": 200, "blocks": 80, "ctas": 60, "nav": 60, "faqs": 200, "forms": 10, "fields": 40}
+SCAN_LIMITS = {"pages": 200, "blocks": 80, "ctas": 60, "nav": 60, "faqs": 200, "forms": 10, "fields": 40, "links": 300, "text": 6000}
+LINK_AREAS = ("main", "header", "footer", "nav")
 
 
 def clean_scan(payload):
@@ -307,5 +308,11 @@ def clean_scan(payload):
                       for f in (page.get("forms") or [])[:SCAN_LIMITS["forms"]] if isinstance(f, dict)],
             "downloads": bool(page.get("downloads")), "outbound": bool(page.get("outbound")), "search": bool(page.get("search")),
             "tel": bool(page.get("tel")), "mailto": bool(page.get("mailto")), "whatsapp": bool(page.get("whatsapp")),
+            # Internal links, H1 and main text: the link audit (R34, api/link_audit.py).
+            "h1": s(page.get("h1"), 200), "text": s(page.get("text"), SCAN_LIMITS["text"]),
+            **({"links": [{"to": norm_path(s(l.get("to"), 300)), "text": s(l.get("text"), 120),
+                           "area": l.get("area") if l.get("area") in LINK_AREAS else "main", "rel": s(l.get("rel"), 60)}
+                          for l in page["links"][:SCAN_LIMITS["links"]] if isinstance(l, dict) and l.get("to")]}
+               if isinstance(page.get("links"), list) else {}),
         })
     return {"pages": pages}

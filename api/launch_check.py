@@ -205,6 +205,15 @@ def run_launch_check():
             "Keep only numbers, ratings, credentials, prices and reviews the business can prove; hide or reword the rest.",
             where=claims)
 
+    # 5c. Article categories: the site's own list, used by every article (R28).
+    from .site_collections import category_issues
+    cats = category_issues()
+    if cats:
+        add("article-categories", "blocker" if any(c["level"] == "blocker" for c in cats) else "warning",
+            f"Article categories need fixing ({len(cats)})", "; ".join(c["text"] for c in cats[:6]) + (" …" if len(cats) > 6 else ""),
+            "Set the categories to the site's real topics in Settings → collections → the blog's fields.category.options, "
+            "then give each article one of them.", where=[{"where": c["id"], "text": c["text"]} for c in cats])
+
     # 6. Sharing.
     if not seo_defaults.get("defaultOgImage"):
         add("og-default", "warning", "No default social image",
@@ -238,6 +247,20 @@ def run_launch_check():
         add("page-seo", "warning", f"{len(weak)} page(s) have weak SEO fields",
             "; ".join(f"{w['where']}: {w['text']}" for w in weak[:6]), "Open SEO → Ask AI on each page.", where=weak)
 
+    # 8. Internal links (R34), from the last site scan.
+    from .link_audit import latest as latest_links
+    links = latest_links()
+    if links is None:
+        add("internal-links-unscanned", "warning", "Internal links have never been checked",
+            "Without a scan nobody knows which pages are orphaned, buried or linked with “read more”.",
+            "Site tools → SEO → Internal links → Scan site.")
+    elif links["summary"]["fail"]:
+        bad = [i for i in links["issues"] if i["level"] == "fail"]
+        add("internal-links", "warning", f"{len(bad)} internal-link problem(s)",
+            "; ".join(f"{i['path']}: {i['text']}" for i in bad[:6]) + (" …" if len(bad) > 6 else ""),
+            "Site tools → SEO → Internal links: fix each one (the suggestions list ready-made links), then scan again.",
+            where=[{"where": i["path"], "text": i["text"]} for i in bad])
+
     blockers = [i for i in items if i["level"] == "blocker"]
     return {"ready": not blockers, "blockers": len(blockers),
             "warnings": len(items) - len(blockers), "items": items}
@@ -264,6 +287,10 @@ def tracking_items(site, add):
     else:
         facts = get_facts()
         _, report = validate(plan, facts)
+        if report["gaps"]:
+            add("tracking-incomplete", "warning", f"The tracking plan misses {len(report['gaps'])} thing(s) the site has",
+                "; ".join(report["gaps"][:4]) + (" …" if len(report["gaps"]) > 4 else ""),
+                "Site tools → Tracking → Build from library (or add them by hand), then Approve.")
         if report["dangling"]:
             add("tracking-dangling", "warning", f"{len(report['dangling'])} tracking trigger(s) no longer match the site",
                 "; ".join(report["dangling"][:4]), "Site tools → Tracking: update or remove them, then Approve again.")

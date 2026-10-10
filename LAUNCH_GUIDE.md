@@ -122,6 +122,11 @@ where they are in the decision (stage).
 8. **Keep it current:** when you add a service or change a form, the
    dashboard says "the site changed since the plan was approved" — Scan,
    review, Approve. A conversion that stops firing raises an alert.
+9. **"The tracking plan misses N thing(s) the site has":** a form, service
+   page, booking page or customer type the plan doesn't cover. Tracking →
+   **Build from library** adds them (or add them by hand), then **Approve**.
+   "Not proven" in Checks means a lead form was never tested: Run checks
+   again until every form shows a passing lead.
 
 **Optional:** Microsoft Clarity or Hotjar IDs for recordings and heatmaps
 (loaded only with consent).
@@ -173,7 +178,32 @@ Contacted → Consultation done → Client / Not proceeding).
 - If you have legal record-keeping duties, keep client records in your
   practice software too; this list is for enquiries, not a system of record.
 
-## 8. The tracking worker (your developer)
+## 8. Search: content, categories and internal links
+
+Search engines find and rank pages through the links between them.
+
+1. **Internal links:** Site tools → **SEO** → **Internal links** → **Scan
+   site**. Fix everything marked **Must fix**: a page nobody links to, a
+   page more than 3 clicks from the home page, a service page that only the
+   menu links to, an article that doesn't link the service it's about, a
+   "Read more" link that doesn't say where it goes, a link to an old
+   (redirected) address. **Suggested links** are places where your text
+   already mentions another page: in that text block write
+   `[the words](/the-page)` and they become a link. Ask AI on a page also
+   suggests them. Scan again after big changes.
+2. **Article categories** ("Article categories need fixing" in the launch
+   check): the categories are your own topics, kept in one list (Settings →
+   collections → the blog's category options). Every published article
+   uses one of them; "News / Guides / Updates" are only the kit's
+   stand-ins.
+3. **Keywords:** each page needs its own primary keyword, the words people
+   search for its topic (SEO in the CMS bar → Essentials; Ask AI proposes
+   one). Two pages with the same keyword compete with each other.
+4. **Page SEO:** Site tools → SEO lists every page's score, worst first.
+   Open a page, click SEO in the CMS bar → Ask AI, paste the reply, fix the
+   remaining red checks.
+
+## 9. The tracking worker (your developer)
 
 `./venv/bin/python manage.py tracking_worker` (as a service), or
 `tracking_worker --once` from cron every minute. It retries server-side
@@ -181,7 +211,7 @@ events, syncs the tools nightly, sends contact webhooks, raises alerts and
 erases expired contacts. Without it the site still works; the launch check
 says what you're missing.
 
-## 9. Final check
+## 10. Final check
 
 1. Run the launch check on the dashboard, or ask your developer to run
    `LAUNCH=1 node site-audit.mjs`. Aim for no blockers, and a known reason

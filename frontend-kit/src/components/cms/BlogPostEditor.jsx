@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Drawer, { buttonStyles } from "@/components/cms/Drawer";
 import { ObjectFields } from "@/components/cms/FieldEditor";
@@ -13,7 +13,7 @@ const SECTION_TEMPLATE = { id: "", eyebrow: "", heading: "", text: [""], bullets
 const CONTENT_TEMPLATE = {
     coverImage: "",
     coverImageAlt: "",
-    category: ARTICLE_CATEGORIES[0],
+    category: "",
     readTime: "",
     date: "",
     goodToKnow: "",
@@ -39,7 +39,6 @@ const HINTS = {
     meta_description: { label: "Meta description (optional)", type: "textarea" },
     og_image: { label: "Social share image (1200×630)", type: "image", category: "seo" },
     coverImage: { label: "Cover image", category: "blog" },
-    category: { type: "select", options: ARTICLE_CATEGORIES },
     readTime: { label: "Read time (blank = calculated)" },
     date: { label: "Display date (blank = publish date)" },
     goodToKnow: { label: "\"Good to know\" callout", type: "textarea" },
@@ -67,9 +66,40 @@ function initialState(post) {
     return { meta, content };
 }
 
+// The article categories: the blog collection's fields.category.options in
+// Site settings (the one list, checked by the launch check). ARTICLE_CATEGORIES
+// in lib/blog.js is only the fallback when no collection lists them.
+function useArticleCategories() {
+    const [categories, setCategories] = useState(null);
+    useEffect(() => {
+        let live = true;
+        apiRequest("collections/")
+            .then((cols) => {
+                const blog = (Array.isArray(cols) ? cols : []).find((c) => c.hostKind === "blog");
+                const options = (blog?.fields?.category?.options || []).map(String).filter(Boolean);
+                if (live) setCategories(options.length ? options : ARTICLE_CATEGORIES);
+            })
+            .catch(() => live && setCategories(ARTICLE_CATEGORIES));
+        return () => {
+            live = false;
+        };
+    }, []);
+    return categories;
+}
+
 // Create or edit a BlogPost. `post` = null creates a new one.
 export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
     const [state, setState] = useState(() => initialState(post));
+    const categories = useArticleCategories();
+    const hints = useMemo(() => {
+        const options = categories || [];
+        const current = state.content.category;
+        // Keep an older article's category selectable so opening it changes nothing.
+        return { ...HINTS, category: { type: "select", options: current && !options.includes(current) ? [current, ...options] : options } };
+    }, [categories, state.content.category]);
+    useEffect(() => {
+        if (categories?.length) setState((s) => (s.content.category ? s : { ...s, content: { ...s.content, category: categories[0] } }));
+    }, [categories]);
     const [slug, setSlug] = useState(post?.slug || "");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
@@ -158,7 +188,7 @@ export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
                 <ObjectFields
                     value={state.meta}
                     template={POST_TEMPLATE}
-                    hints={HINTS}
+                    hints={hints}
                     onChange={(meta) => setState((s) => ({ ...s, meta }))}
                 />
 
@@ -172,7 +202,7 @@ export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
                     <ObjectFields
                         value={state.content}
                         template={CONTENT_TEMPLATE}
-                        hints={HINTS}
+                        hints={hints}
                         onChange={(content) => setState((s) => ({ ...s, content }))}
                     />
                 )}

@@ -75,14 +75,15 @@ SEO_PRINCIPLES = """SEO RULES — apply to every word you write:
 4. Copy is concrete: real details, numbers, steps, deadlines, prices or examples where they exist. No filler, no lorem ipsum, no interchangeable "we provide quality service" sentences.
 5. Use secondary keywords and variations once each where they read naturally. Never force them.
 6. Every page has one clear next step (a CTA) that matches the search intent.
-7. Mention related services, locations or topics naturally so internal links can point to them.
+7. Link related pages (R34): inside "content" fields write internal links as [anchor words](/path) — only to pages listed under INTERNAL LINKS, 1–3 per long block where they genuinely help the reader, with anchor words that name the target page's topic (never "click here", "read more", "learn more" or a bare URL). Fill an empty "*_href" field with the most relevant page from that list. Never link to a page not listed.
 8. Never invent facts you were not given: no fake statistics, awards, accreditations, prices, reviews or legal claims. If a detail is unknown, write around it.
 """
 
 JSON_ONLY = (
     "Return ONLY valid JSON — no markdown code fences, no commentary before or after, no comments "
     "inside the JSON. Every text value is plain text: no HTML, no markdown, paragraphs separated by a "
-    "blank line. Keep every URL, path and image reference a plain string exactly as given "
+    "blank line (the one exception: internal links written [anchor words](/path) inside \"content\" fields). "
+    "Keep every URL, path and image reference a plain string exactly as given "
     '(never markdown-linkified as "[https://x.jpg](https://x.jpg)").'
 )
 
@@ -112,8 +113,30 @@ RULE_FACTS = ("Nothing is invented: no statistics or client counts, ratings, rev
               "awards, accreditations or memberships, prices or 'fixed fee' promises, phone numbers, emails, addresses "
               "or legal claims you were not given.")
 RULE_KEYWORD = "The primary keyword (or a natural variation) appears where it reads naturally — never stuffed or repeated mechanically."
-RULE_PLAIN = "Text is plain: no HTML, no markdown, paragraphs separated by a blank line."
+RULE_PLAIN = ("Text is plain: no HTML, no markdown, paragraphs separated by a blank line — except internal links "
+              "written [anchor words](/path) inside \"content\" fields, to listed pages only.")
+RULE_LINKS = ("Internal links point only to pages listed under INTERNAL LINKS, sit inside \"content\" fields or \"*_href\" "
+              "fields, and every anchor names the target's topic (no \"click here\" / \"read more\").")
 RULE_VOICE = "The copy matches the brand voice and spelling conventions stated above."
+
+
+def link_block(path=None):
+    """INTERNAL LINKS for a prompt (R34): the pages this copy may link to and,
+    from the last site scan (api/link_audit.py), the links this page is
+    missing. Empty when the site has never been scanned."""
+    from .link_audit import suggestions_for
+    from .site_facts import norm_path
+    picks, pages = suggestions_for(path or "/")
+    here = norm_path(path) if path else None
+    pages = [(p, t) for p, t in pages if p != here][:40]
+    if not pages:
+        return ""
+    lines = ["INTERNAL LINKS — pages you may link to (path — title):"]
+    lines += [f"- {p} — {t}" for p, t in pages]
+    if picks:
+        lines.append("Links this page is missing (its copy already mentions these topics — link them, with these or better anchor words):")
+        lines += [f'- [{s["anchor"]}]({s["to"]})' for s in picks]
+    return "\n".join(lines) + "\n\n"
 
 
 # --------------------------------------------------------------- context
@@ -276,7 +299,7 @@ def page_prompt(section_types=None, context=None):
 
 {_brief_block(context.get("brief"), site)}
 
-{SEO_PRINCIPLES}
+{link_block(context.get("path"))}{SEO_PRINCIPLES}
 OUTPUT FORMAT — {output} {JSON_ONLY}
 
 {{
@@ -401,7 +424,7 @@ def collection_entry_prompt(cfg, *, title="", topic="", brief=None, reference=No
         "seo.title is 50–60 characters and seo.description is 120–160 characters, both containing the primary keyword.",
         RULE_KEYWORD + " The first section's heading (the H1) contains it.",
         "Lists have the same number of items as the style reference's matching section (or at least 3 when there is no reference).",
-        RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+        RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_LINKS, RULE_VOICE,
     )
 
     return f"""{opening}
@@ -413,7 +436,7 @@ def collection_entry_prompt(cfg, *, title="", topic="", brief=None, reference=No
 STRUCTURE — {structure_rule}
 {_template_lines(cfg)}
 
-{reference_text}{fields_text + chr(10) + chr(10) if fields_text else ""}{SEO_PRINCIPLES}
+{reference_text}{fields_text + chr(10) + chr(10) if fields_text else ""}{link_block(f"{cfg['pathPrefix']}/{slug}" if slug else cfg['indexPath'])}{SEO_PRINCIPLES}
 {images_text}
 OUTPUT FORMAT — {JSON_ONLY}
 {shape}
@@ -454,7 +477,7 @@ def section_prompt(*, content, section_type="", label="", path="", page_type="",
         + (f"Primary keyword to work in naturally: {keyword}\n\n" if keyword else "")
         + (f"CHANGE REQUESTED: {instruction}\n\n" if instruction else "")
         + strategy_text + "\n\n"
-        + SEO_PRINCIPLES + "\n" + ARRAY_RULE + "\n\n"
+        + link_block(path) + SEO_PRINCIPLES + "\n" + ARRAY_RULE + "\n\n"
         "OUTPUT FORMAT — return ONLY this block's content object: the exact same keys and nesting as "
         "CURRENT CONTENT (keep fields you did not change), NOT wrapped in another key, NOT the whole page. "
         + JSON_ONLY
@@ -462,7 +485,7 @@ def section_prompt(*, content, section_type="", label="", path="", page_type="",
             RULE_JSON,
             "The reply has the SAME keys and nesting as CURRENT CONTENT — no new top-level keys, no wrapper key, every unchanged field kept.",
             RULE_ARRAYS, RULE_KEYWORD if keyword else "The copy stays on this block's topic.",
-            RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+            RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_LINKS, RULE_VOICE,
         )
     )
 
@@ -502,7 +525,7 @@ def page_assist_prompt(*, path, sections, seo=None):
         'Each block maps DIRECTLY to its content object, with every field it had (unchanged fields kept) — never {"label": …, "content": …}.',
         ("Every block listed as NOT mentioning the keyword now mentions it (or the reply explains in one line why that block cannot)." if keyword and missing else RULE_KEYWORD),
         "Thin or empty lists the block's purpose needs were filled with real, specific entries.",
-        RULE_ARRAYS, RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
+        RULE_ARRAYS, RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_LINKS, RULE_VOICE,
     )
     prompt = f"""You are auditing and improving every editable block on the {describe_page_kind(path, site=site)} at {_where(path)}.
 {f'Primary keyword: "{keyword}".' if keyword else ""}{f" Secondary keywords: {secondary}." if secondary else ""}{f' SEO title: "{seo.get("seoTitle")}".' if seo.get("seoTitle") else ""}
@@ -520,7 +543,7 @@ Check every block for TWO separate problems:
 
 Fix only what each block needs. Change copy, not structure — except adding entries to a thin list.
 
-{SEO_PRINCIPLES}
+{link_block(path)}{SEO_PRINCIPLES}
 {ARRAY_RULE}
 
 OUTPUT FORMAT — a JSON object containing ONLY the blocks you changed, keyed by block id, each mapped DIRECTLY to that block's full content object (same keys and nesting as its "content" above — not wrapped in {{"label","content"}}). Omit blocks you left alone. If nothing needs changing, return {{}}. {JSON_ONLY}

@@ -108,16 +108,39 @@ def _lead_forms(facts):
     return [f for f in facts["forms"] if any(x["type"] in ("email", "tel") or x["name"] in ("email", "phone") for x in f["fields"])]
 
 
-def _intents(facts):
-    """One intent per real offering: entries of a service-like collection,
-    else the pages under a 'services' path, else none."""
-    intents = []
+def lead_forms(facts):
+    """Forms that collect a way to reach the person (email or phone)."""
+    return _lead_forms(facts)
+
+
+def offering_pages(facts):
+    """The pages of the things the business offers: entries of a service-like
+    collection, else the pages under a 'services'-style path. [(collection, {path, title})]"""
     service_cols = [c for c in facts["collections"]
                     if c["hostKind"] != "blog" and (SERVICE_COLLECTION_RE.search(c["key"] + c["label"] + c.get("pageType", "")) or c.get("pageType") == "service")]
     entries = [(c, e) for c in service_cols for e in c["entries"]]
     if not entries:
         entries = [(None, {"path": p["path"], "title": p["title"]}) for p in facts["pages"]
                    if re.match(r"^/(services|products|solutions|treatments|what-we-do)/[^/]+$", p["path"])]
+    return entries
+
+
+SKIP_OPTIONS = ("other", "none", "prefer not to say", "")
+
+
+def segment_fields(facts):
+    """Lead-form choice fields that say who the person is (business type,
+    industry, size…): each option is a segment. [(form, field)]"""
+    return [(form, field) for form in _lead_forms(facts) for field in form["fields"]
+            if field["type"] in ("select", "radio") and field["options"]
+            and SEGMENT_FIELD_RE.search(field["name"] + " " + field.get("label", "")) and not INTENT_FIELD_RE.search(field["name"])]
+
+
+def _intents(facts):
+    """One intent per real offering: entries of a service-like collection,
+    else the pages under a 'services' path, else none."""
+    intents = []
+    entries = offering_pages(facts)
     lead_forms = _lead_forms(facts)
     used = set()
     for col, entry in entries:
@@ -144,22 +167,23 @@ def _intents(facts):
 
 def _segments(facts):
     segments, used = [], set()
-    for form in _lead_forms(facts):
-        for field in form["fields"]:
-            if field["type"] in ("select", "radio") and field["options"] and SEGMENT_FIELD_RE.search(field["name"] + " " + field.get("label", "")) \
-                    and not INTENT_FIELD_RE.search(field["name"]):
-                for opt in field["options"]:
-                    if opt["value"].strip().lower() in ("other", "none", "prefer not to say", ""):
-                        continue
-                    sid = slug_id(opt["value"])
-                    if sid in used:
-                        continue
-                    used.add(sid)
-                    segments.append({"id": sid, "label": opt["label"][:60],
-                                     "match": {"formOptions": [{"form": form["name"], "field": field["name"], "option": opt["value"]}],
-                                               "blocks": [], "faqKeywords": words(opt["label"])[:4]},
-                                     "rationale": f"Your form asks “{field.get('label') or field['name']}”, so leads can be grouped by it.",
-                                     "createdBy": "library"})
+    for form, field in segment_fields(facts):
+        for opt in field["options"]:
+            if opt["value"].strip().lower() in SKIP_OPTIONS:
+                continue
+            sid = slug_id(opt["value"])
+            fo = {"form": form["name"], "field": field["name"], "option": opt["value"]}
+            if sid in used:
+                same = next((x for x in segments if x["id"] == sid), None)
+                if same and fo not in same["match"]["formOptions"]:
+                    same["match"]["formOptions"].append(fo)
+                continue
+            used.add(sid)
+            segments.append({"id": sid, "label": opt["label"][:60],
+                             "match": {"formOptions": [{"form": form["name"], "field": field["name"], "option": opt["value"]}],
+                                       "blocks": [], "faqKeywords": words(opt["label"])[:4]},
+                             "rationale": f"Your form asks “{field.get('label') or field['name']}”, so leads can be grouped by it.",
+                             "createdBy": "library"})
     for sb in facts.get("segmentBlocks") or []:
         for label in sb.get("items") or []:
             sid = slug_id(label)

@@ -6,7 +6,7 @@
 
      SITE_URL=http://localhost:3000 API_URL=http://localhost:8000 \
      CMS_USER=… CMS_PASSWORD=… [FORM_PAGE=/contact] [LAUNCH=1] \
-     node site-audit.mjs
+     [AUDIT_JSON=<frontend>/.gates/seo-baseline.json] node site-audit.mjs
 
    Fails on:
    - any sitemap URL that isn't 200, or is noindex
@@ -22,6 +22,14 @@
      missing from the home page <head>
    - broken internal links; robots.txt without a Sitemap line, or one whose
      origin differs from the canonicals
+   - internal linking (R34, analysed by the backend's api/link_audit.py):
+     orphan or unreachable pages, pages more than 3 clicks from home,
+     offering pages linked from fewer than 2 pages' content, articles nobody
+     links to from content, articles that don't link an offering and
+     offerings that don't link an article, "read more"-style or empty
+     anchors, links to redirected URLs, internal rel=nofollow; a page
+     (legal pages aside) without its own primary keyword, or two pages
+     sharing one
    - contact details that disagree: more than one phone number or email
      across tel:/mailto: links and the Organization JSON-LD
    - the form on FORM_PAGE: empty submit must be blocked client-side, a valid
@@ -37,7 +45,11 @@
      - a collection entry not linked from its index page; entries under
        ENTRY_MIN_WORDS (default 600) words of main content; a FORM_PAGE with
        under 120 words besides the form
-   - tracking (R31–R33): pages tied to an offering without block markers;
+   - article categories (R28): no list, the kit's placeholder list, or a
+     published article outside it (launch-check item article-categories);
+   - tracking (R31–R33): a plan that doesn't cover every lead form, offering
+     page, booking/contact page and form segment option; pages tied to an
+     offering without block markers;
      FAQ toggles without aria-expanded/<summary>; dangling plan triggers and
      an unapproved plan (warnings; failures with LAUNCH=1); a pre-ticked
      marketing opt-in; tags set but no consent banner / "Cookie settings";
@@ -66,6 +78,7 @@ const ENTRY_MIN_WORDS = Number(process.env.ENTRY_MIN_WORDS || 600);
 const PLACEHOLDER = /\[(?:insert|registered|company|your|add|todo)[^\]]*\]|\b0{4}\s?0{6}\b|@example\.(?:com|org|co\.uk)\b|lorem ipsum|\bTBD\b|\bNew section\b|Write the first paragraph|Describe the offer in one|\bEyebrow\b/gi;
 
 const results = [];
+const proven = []; // checks that need the admin login; printed as PASS lines for run-gates (rules-map.json)
 const fail = (where, what) => results.push({ level: "FAIL", where, what });
 const warn = (where, what) => results.push({ level: "WARN", where, what });
 const launch = (where, what) => (LAUNCH ? fail : warn)(where, `[launch] ${what}`);
@@ -89,6 +102,8 @@ const phones = new Map(); // normalised number -> pages
 const emails = new Map();
 const pageWords = new Map();
 const pageLinks = new Map();
+const linkPages = []; // R34: the rendered link graph, analysed by the backend
+let linkReport = null; // the backend's analysis (summary, issues, suggestions), kept in AUDIT_JSON
 const publicSettings = await (await fetch(`${API}/settings/site/`)).json().catch(() => ({}));
 const allowedPhone = String(publicSettings.contact?.phone || "").replace(/\(0\)/g, "").replace(/[^\d]/g, "").replace(/^44/, "0");
 const allowedEmail = String(publicSettings.contact?.email || "").toLowerCase().trim();
@@ -144,6 +159,23 @@ for (const url of urls) {
             }),
             noAlt: [...document.querySelectorAll("img")].filter((i) => !i.hasAttribute("alt")).length,
             hrefs: [...document.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+            // R34: every internal link with its area, accessible text and rel,
+            // for the backend link audit (api/link_audit.py).
+            linkGraph: [...document.querySelectorAll("a[href]")].flatMap((a) => {
+                let u;
+                try { u = new URL(a.getAttribute("href"), location.href); } catch { return []; }
+                if (u.origin !== location.origin || /^(mailto|tel|javascript):/i.test(a.getAttribute("href"))) return [];
+                if (a.closest("[data-cms-layer], [data-cms-adminbar], [hidden], [aria-hidden='true']")) return [];
+                const area = a.closest("header") ? "header" : a.closest("footer") ? "footer" : a.closest("nav, [data-track-nav]") ? "nav" : "main";
+                const text = (a.getAttribute("aria-label") || a.textContent || [...a.querySelectorAll("img[alt]")].map((i) => i.alt).join(" ")).replace(/\s+/g, " ").trim();
+                return [{ to: u.pathname.replace(/\/+$/, "") || "/", text: text.slice(0, 120), area, rel: a.getAttribute("rel") || "" }];
+            }),
+            mainText: (() => {
+                const main = (document.querySelector("main") || document.body).cloneNode(true);
+                // Copy only: text that is already a link can't become one.
+                main.querySelectorAll("header, footer, nav, form, script, style, noscript, [hidden], a").forEach((n) => n.remove());
+                return (main.textContent || "").replace(/\s+/g, " ").trim().slice(0, 6000);
+            })(),
             tel: [...document.querySelectorAll('a[href^="tel:"]')].map((a) => a.getAttribute("href").slice(4)),
             mail: [...document.querySelectorAll('a[href^="mailto:"]')].map((a) => a.getAttribute("href").slice(7).split("?")[0]),
             text: document.body.innerText,
@@ -233,6 +265,7 @@ for (const url of urls) {
         if (m.h1Text && titleWords.size && !shared.length) fail(path, `H1 “${m.h1Text.slice(0, 60)}” shares no keyword with the title “${m.title}” — name the topic in the H1, keep slogans in the eyebrow/subtitle (R29)`);
     }
     pageWords.set(path, m.mainWords);
+    linkPages.push({ path, title: m.title, h1: m.h1Text, text: m.mainText, links: m.linkGraph });
     pageLinks.set(path, new Set(m.hrefs.map((h) => (h || "").replace(SITE, "").split("#")[0].split("?")[0])));
     const placeholders = [...new Set(m.text.match(PLACEHOLDER) || [])];
     if (placeholders.length) launch(path, `placeholder text on the page: ${placeholders.slice(0, 5).join(" | ")}`);
@@ -398,6 +431,13 @@ if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, 
         const state = await (await fetch(`${API}/tracking/plan/`, { headers: { Authorization: `Token ${token}` } })).json().catch(() => ({}));
         for (const d of state.report?.dangling || []) (LAUNCH ? fail : warn)("tracking", `trigger doesn't match the site: ${d}`);
         if (state.plan?.status !== "approved") (LAUNCH ? fail : warn)("tracking", "the tracking plan isn't approved (Site tools → Tracking)");
+        // R31: the plan covers what the site has (tracking_plan.completeness):
+        // every lead form, offering page, booking/contact page and "who are
+        // you" option. A valid but thin plan is not done.
+        for (const g of state.report?.gaps || []) fail("tracking", `plan incomplete: ${g} (R31)`);
+        if (state.plan?.status === "approved" && Array.isArray(state.report?.gaps) && !state.report.gaps.length) {
+            proven.push("tracking: the approved plan covers every lead form, offering page, booking page and segment");
+        }
     }
     // R33: a marketing opt-in is never pre-ticked.
     await page.goto(`${SITE}${FORM_PAGE}`, { waitUntil: "load" });
@@ -426,13 +466,34 @@ if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, 
     }
 }
 
+/* ---------- internal links (R34) ---------- */
+// The backend's link audit (api/link_audit.py) analyses the production
+// build's link graph — the same analyser as Site tools → SEO → Internal links.
+if (token) {
+    const r = await fetch(`${API}/seo/links/analyze/`, {
+        method: "POST", headers: { Authorization: `Token ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pages: linkPages }),
+    });
+    if (!r.ok) fail("links", `seo/links/analyze/ → HTTP ${r.status}`);
+    else {
+        const a = await r.json();
+        linkReport = a;
+        for (const i of a.issues) (i.level === "fail" ? fail : warn)(i.path, `[${i.kind || "links"}] ${i.text} — ${i.fix} (R34)`);
+        if (!a.summary.fail) proven.push(`links: every page is linked in context, within 3 clicks, with descriptive anchors (${a.summary.pages} pages, ${a.summary.links} links, ${a.summary.suggestions} suggestions)`);
+        if (a.suggestions.length) warn("links", `${a.suggestions.length} suggested link(s), e.g. ${a.suggestions.slice(0, 3).map((x) => `${x.from}: [${x.anchor}](${x.to})`).join(" · ")}`);
+    }
+}
+
 /* ---------- launch check ---------- */
 if (token) {
     const r = await fetch(`${API}/launch-check/`, { headers: { Authorization: `Token ${token}` } });
     if (r.ok) {
         for (const item of (await r.json()).items) {
-            (item.level === "blocker" ? launch : warn)("launch-check", `${item.label}${item.detail ? ` — ${item.detail.slice(0, 160)}` : ""}`);
+            const line = `${item.label}${item.detail ? ` — ${item.detail.slice(0, 160)}` : ""}`;
+            // Article categories are the site's own (R28): fails at any level.
+            if (item.id === "article-categories") fail("categories", `${line} (R28)`);
+            else (item.level === "blocker" ? launch : warn)("launch-check", line);
         }
+        if (!results.some((x) => x.where === "categories")) proven.push("categories: articles use the site's own category list");
     }
     if (created?.id) {
         // The audit's own enquiry also made a contact (R33): erase it with the submission.
@@ -449,5 +510,17 @@ if (token) {
 await browser.close();
 const fails = results.filter((r) => r.level === "FAIL");
 for (const r of [...fails, ...results.filter((x) => x.level === "WARN")]) console.log(`${r.level}  ${r.where.padEnd(34)} ${r.what}`);
+for (const name of proven) console.log(`PASS  ${name}`);
 console.log(`\n${urls.length} pages, ${links.size} internal links, ${fails.length} failure(s), ${results.length - fails.length} warning(s)${LAUNCH ? " (launch mode)" : ""}`);
+// AUDIT_JSON=<file>: the full result as JSON. P0 writes the SEO baseline
+// this way (<frontend>/.gates/seo-baseline.json, before anything changes);
+// run-gates writes each pass's audit beside it, and CMS_REPORT.md compares them (R34).
+if (process.env.AUDIT_JSON) {
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(process.env.AUDIT_JSON), { recursive: true });
+    writeFileSync(process.env.AUDIT_JSON, JSON.stringify({ at: new Date().toISOString(), site: SITE, pages: urls.length, internalLinks: links.size,
+        fail: fails.length, warn: results.length - fails.length, results,
+        links: linkReport && { summary: linkReport.summary, suggestions: linkReport.suggestions, pages: linkReport.pages } }, null, 1));
+}
 process.exit(fails.length ? 1 : 0);

@@ -305,7 +305,48 @@ def validate(plan, facts):
         if "meta" in a["tools"] and a["windowDays"] > 180:
             report["warnings"].append(f"audience “{a['id']}”: Meta keeps website audiences for at most 180 days (it will use 180)")
     out["valueRules"] = []
+    report["gaps"] = completeness(out, facts)
     return out, report
+
+
+def completeness(plan, facts):
+    """What the site has that the plan doesn't cover (R31). An approved plan
+    must be complete, not just valid: every lead form has a primary lead
+    conversion, every offering page an intent, every booking/contact page a
+    cta_click conversion, and every option of a "who are you" form field a
+    segment. Returns readable gaps; [] = complete."""
+    from .site_facts import norm_path
+    from .tracking_library import SKIP_OPTIONS, lead_forms, offering_pages, segment_fields
+    gaps = []
+    convs = [c for c in plan.get("conversions") or [] if c.get("enabled", True)]
+
+    def where(c):
+        return (c.get("trigger") or {}).get("where") or {}
+
+    for form in lead_forms(facts):
+        if not any(c.get("tier") == "primary" and (c.get("trigger") or {}).get("event") == "generate_lead"
+                   and where(c).get("form") in (None, "", form["name"]) for c in convs):
+            gaps.append(f"lead form “{form['name']}” has no primary generate_lead conversion")
+    intents = plan.get("intents") or []
+    for _, entry in offering_pages(facts):
+        path = norm_path(entry["path"])
+        if not any(path in [norm_path(p) for p in (i.get("match") or {}).get("paths") or []]
+                   or any(path.startswith(norm_path(x).rstrip("/") + "/") for x in (i.get("match") or {}).get("pathPrefixes") or [])
+                   for i in intents):
+            gaps.append(f"offering page {path} has no intent")
+    for path in facts.get("ctaPages") or []:
+        if not any((c.get("trigger") or {}).get("event") == "cta_click"
+                   and (not where(c).get("ctaTargets") or path in [norm_path(t) for t in where(c)["ctaTargets"]]) for c in convs):
+            gaps.append(f"booking/contact page {path} has no cta_click conversion")
+    segments = plan.get("segments") or []
+    for form, field in segment_fields(facts):
+        for opt in field["options"]:
+            if opt["value"].strip().lower() in SKIP_OPTIONS:
+                continue
+            fo = {"form": form["name"], "field": field["name"], "option": opt["value"]}
+            if not any(fo in ((s.get("match") or {}).get("formOptions") or []) for s in segments):
+                gaps.append(f"“{opt['label']}” ({form['name']}.{field['name']}) has no segment")
+    return gaps
 
 
 def _num(v):

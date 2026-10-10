@@ -23,6 +23,10 @@ _FENCE = re.compile(r"```(?:json|JSON)?\s*\n?(.*?)```", re.DOTALL)
 _MD_LINK = re.compile(r"^\[([^\]]+)\]\(([^)]+)\)$")
 _BRACKETED_URL = re.compile(r"^\[(https?://[^\]]+)\]$")
 _INLINE_MD_LINK = re.compile(r"\[([^\]\n]+)\]\((?:https?://|mailto:|tel:|/)[^)\s]*\)")
+# Body-copy fields where "[anchor](/internal-path)" is a real link (rendered
+# by components/dynamic/EditableParagraphs.jsx). Mirrors INTERNAL_LINK there.
+LINKABLE_FIELDS = {"content"}
+INTERNAL_LINK = re.compile(r"\[([^\]\n]+)\]\((/(?!/)[^)\s]*)\)")
 
 
 class NormalizeError(ValueError):
@@ -50,21 +54,30 @@ def extract_json(raw):
     )
 
 
-def strip_markdown_links(value):
+def _keep_internal(match):
+    """Inside body copy, an internal link "[anchor](/path)" stays (the kit
+    renders it, R34); any other link keeps only its words."""
+    return match.group(0) if INTERNAL_LINK.fullmatch(match.group(0)) else match.group(1)
+
+
+def strip_markdown_links(value, key=None):
     if isinstance(value, str):
         m = _MD_LINK.match(value.strip())
-        if m:
+        if m and key not in LINKABLE_FIELDS:
             label, target = m.groups()
             return target if re.match(r"^(https?://|/)", target) else label
         m = _BRACKETED_URL.match(value.strip())
         if m:
             return m.group(1)
-        # Links inside prose: the site renders plain text, so keep the label.
+        # Links inside prose: only body copy (LINKABLE_FIELDS) renders
+        # internal links; everywhere else the site shows plain text.
+        if key in LINKABLE_FIELDS:
+            return _INLINE_MD_LINK.sub(_keep_internal, value)
         return _INLINE_MD_LINK.sub(r"\1", value)
     if isinstance(value, list):
-        return [strip_markdown_links(v) for v in value]
+        return [strip_markdown_links(v, key) for v in value]
     if isinstance(value, dict):
-        return {k: strip_markdown_links(v) for k, v in value.items()}
+        return {k: strip_markdown_links(v, k) for k, v in value.items()}
     return value
 
 

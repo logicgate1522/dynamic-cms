@@ -1,3 +1,63 @@
+# Upgrade Notes — R34 SEO audit + internal links; complete plans; one category list
+
+**What's new**
+- **R34 — audited before and after; every page properly linked.**
+  - **P0 SEO baseline:** `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node site-audit.mjs`
+    on the untouched site. A new `seo-baseline` gate fails without it.
+  - **Report:** `CMS_REPORT.md` needs a `### SEO audit` section. The report
+    gate checks its `before:` / `after:` failure counts against the baseline
+    and `.gates/pass-2-site-audit.json`, and needs an `internal links:` line.
+  - **One link analyser, `api/link_audit.py`**, used by:
+    - Site tools → SEO → **Internal links** (`seo/links/`, from the stored
+      site scan);
+    - site-audit (`seo/links/analyze/` on the production build);
+    - the launch check (`internal-links`, `internal-links-unscanned`);
+    - every AI prompt (`prompts.link_block`).
+  - **What it fails:**
+    - orphan or unreachable pages, and pages more than 3 clicks deep;
+    - offering pages linked from fewer than 2 pages' content;
+    - articles with no contextual link in;
+    - an article ↔ offering pair with no link between them;
+    - generic or empty anchors, links to redirected URLs, and internal
+      nofollow.
+  - **It also suggests links:** places where the copy already mentions
+    another page's topic.
+  - **Inline links in body copy:** `[anchor words](/path)` in a section's
+    `content`. `ai/normalize` keeps them there (internal paths only) and
+    strips them elsewhere; `EditableParagraphs` renders them.
+  - `lib/siteScan.js` now also sends each page's internal links, H1 and main
+    text. New kit file: `components/admin/InternalLinks.jsx`.
+- **R31 — the plan must be complete.**
+  - `tracking_plan.completeness` returns `report.gaps`. A plan has a gap
+    when one of these isn't covered:
+    - a lead form (needs a primary lead conversion);
+    - an offering page (needs an intent);
+    - a booking or contact page (needs a cta_click conversion);
+    - a "who are you" form option (needs a segment).
+  - site-audit fails on any gap. The panel shows them as "Not covered yet",
+    and the launch check reports `tracking-incomplete`.
+  - A full Checks run fails if it tested nothing or left a lead form
+    unproven (`summary.missing`).
+  - run-gates refuses to start without `CMS_USER`/`CMS_PASSWORD`.
+- **R28 — article categories are the site's own, in one place.**
+  - The list is the blog collection's `fields.category.options`.
+    `BlogPostEditor` reads it, and is now CORE, not ADAPT.
+  - The launch-check item `article-categories` fails site-audit when:
+    - the list is missing;
+    - it is the kit's "News / Guides / Updates";
+    - a published article uses an unlisted category.
+- **Gates can't silently lose evidence:** `IntegrationSpecTests` checks that
+  every `{gate, check}` in `rules-map.json` is a line its gate script can
+  print.
+- **Library:** a "who are you" option shared by two forms maps one segment
+  to both.
+- **Visual capture v2:** `visual.mjs` now scrolls in 300px steps, pausing
+  at each and at the very bottom, so scroll-revealed (in-view animated)
+  content is always captured. v1 could capture the last cards of long phone
+  pages still invisible, and then pass or fail by timing. Baselines record
+  `capture.json`, and a v1 baseline is refused with a clear message: retake
+  it on the P0 state.
+
 # Upgrade Notes — run-gates: one definition of done, three enforced passes
 
 **What's new**

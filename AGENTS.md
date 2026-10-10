@@ -11,7 +11,7 @@ instructions the docs already answer.
 ## Job A — "Integrate this CMS into <frontend>"
 
 1. Read `FRONTEND_INTEGRATION_PROMPT.md` in full, starting with "How to use
-   this file". Rules R1–R33 are mandatory; each has a rule card (Must / Never
+   this file". Rules R1–R34 are mandatory; each has a rule card (Must / Never
    / Proven by), a phase that builds it, an anti-pattern and a checklist line.
 2. Read `frontend-kit/MANIFEST.md`. Install the kit verbatim; change only the
    ADAPT files, and only as the manifest says.
@@ -20,15 +20,18 @@ instructions the docs already answer.
 4. **You are done only when `frontend-kit/acceptance/run-gates.mjs` prints
    `ALL GATES GREEN — 3 of 3 passes`.** Nothing else counts. It runs every
    gate (kit-verbatim, check-inline, check-sections, production-build,
-   visual, acceptance, tracking-edge, verify-tracking, site-audit, report)
-   against the production build and maps the results to R1–R33
+   visual, acceptance, tracking-edge, verify-tracking, seo-baseline,
+   site-audit, report)
+   against the production build and maps the results to R1–R34
    (`rules-map.json`):
    - P0: `node frontend-kit/acceptance/visual.mjs --baseline --dir <frontend>/.gates/visual`
-     BEFORE changing anything (R9 is measured against it).
+     and `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node frontend-kit/acceptance/site-audit.mjs`
+     BEFORE changing anything (R9 and R34 are measured against them).
    - P8: `--pass 1` until green → `rm -rf .next`, rebuild, restart, change
      nothing → `--pass 2` → write `<frontend>/CMS_REPORT.md` (spec §13
      format: every rule ticked with evidence, the pass-2 fingerprint, the §11
-     sweep, Defaults taken, Needs from the owner) → `--pass 3 --report …`.
+     sweep, the SEO audit before/after, Defaults taken, Needs from the owner)
+     → `--pass 3 --report …`.
      Pass 2 and 3 refuse to run if any file changed; any change means pass 1
      again.
    - Never weaken a gate, edit a kit CORE file (only ADAPT files and the
@@ -72,6 +75,10 @@ instructions the docs already answer.
      (R32 — `lib/consent.js`, `ConsentBanner`, "Cookie settings")
    - expose contacts outside admin endpoints, pre-tick a marketing opt-in or
      add people who didn't opt in to ad lists (R33)
+   - leave a page orphaned, buried (>3 clicks) or reachable only through
+     menus, use "read more"/"click here" anchors, link to a redirected URL,
+     or skip the P0 SEO baseline (R34 — Site tools → SEO → Internal links;
+     inline links are `[anchor](/path)` in a section's `content`)
 
 ## Job B — Change the backend
 
@@ -115,6 +122,12 @@ instructions the docs already answer.
     `api/tracking_sync.py`; checks/alerts `api/tracking_verify.py`; contacts
     `api/contacts.py`; credentials `api/crypto.py` (TRACKING_SECRET_KEY);
     background work `manage.py tracking_worker`. Tests: `api/tests_tracking.py`.
+  - Internal-link audit (R34): `api/link_audit.py` (one analyser for
+    Site tools → SEO → Internal links, `seo/links/analyze/` used by
+    site-audit, the launch check and `prompts.link_block`). Inline links in
+    body copy: `ai_normalize.LINKABLE_FIELDS` / `INTERNAL_LINK`, mirrored by
+    `frontend-kit/src/components/dynamic/EditableParagraphs.jsx`. Tests:
+    `api/tests_links.py`.
   - Launch readiness: `api/launch_check.py` (`GET launch-check/`). Anything
     that silently hurts a live site belongs here as a blocker or warning,
     and any owner step it asks for is explained in `LAUNCH_GUIDE.md`.
