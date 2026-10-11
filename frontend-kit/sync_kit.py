@@ -87,6 +87,7 @@ CORE = [
     "lib/siteScan.js",
     "lib/track.js",
     "lib/trackCapture.js",
+    "lib/useStable.js",
     "lib/visibility.js",
 ]
 # Gate scripts live in <frontend>/scripts and frontend-kit/scripts; they are

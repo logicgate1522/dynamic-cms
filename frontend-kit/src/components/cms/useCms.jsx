@@ -31,8 +31,14 @@ import { HIDDEN_KEY, isHidden, stripHidden } from "@/lib/visibility";
    options.fields     per-field hints for the All fields panel
                       ("items[].icon": { type: "select", options: [...] })
    options.afterSave(data)  runs after this block is published
-   options.excludeFromKeywordAudit  shared copy (footer, site-wide CTA)
-                      that should not count toward a page's keyword score
+   options.shared     true for a block that appears on MORE THAN ONE page
+                      (navbar, footer, site-wide banner / CTA / cookie text).
+                      Whole-page AI assist never sends it to the AI, never
+                      rewrites it and never counts it in the keyword score
+                      (that score is about THIS page's own blocks). Required
+                      for every block named in a layout's <CmsSection names>
+                      — check-inline fails otherwise. (`excludeFromKeywordAudit`
+                      is the old name and still works.)
    options.buttonPosition   classes placing the "All fields" pill
    options.hideable         false for blocks that hold shared labels rather
                             than a visible section (no "Hide" toggle)
@@ -166,13 +172,13 @@ export function useCms(name, defaults, options = {}) {
 
     /* ---------- inline primitives ---------- */
     const label = options.label || name;
-    stateRef.current = { data: visible, editMode, update, defaults, label, block: name };
+    stateRef.current = { data: visible, editMode, update, defaults, label, block: name, shared: Boolean(options.shared || options.excludeFromKeywordAudit) };
     const [E] = useState(() => createInline(stateRef));
 
     /* ---------- registry (admin bar, AI assist, panels) ---------- */
     const fields = options.fields;
     const afterSave = options.afterSave;
-    const excludeFromKeywordAudit = Boolean(options.excludeFromKeywordAudit);
+    const shared = Boolean(options.shared || options.excludeFromKeywordAudit);
 
     useEffect(() => {
         if (!isAdmin) return undefined;
@@ -183,7 +189,8 @@ export function useCms(name, defaults, options = {}) {
             data,
             fields,
             afterSave,
-            excludeFromKeywordAudit,
+            shared,
+            excludeFromKeywordAudit: shared,
             hidden: blockHidden,
             saveState,
             saveError,
@@ -191,7 +198,7 @@ export function useCms(name, defaults, options = {}) {
             replace,
             flush: persist,
         });
-    }, [isAdmin, register, name, label, defaults, data, fields, afterSave, excludeFromKeywordAudit,
+    }, [isAdmin, register, name, label, defaults, data, fields, afterSave, shared,
         blockHidden, saveState, saveError, update, replace, persist]);
 
     // Visitors get a hidden, zero-size marker instead: its parent is this

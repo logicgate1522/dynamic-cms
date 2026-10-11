@@ -35,6 +35,7 @@ from .dynamic_pages import (
     SECTION_TYPES,
     SINGLE_IMAGE_SECTION_TYPES,
 )
+from .copy_fit import LENGTH_GUIDE, limits_for
 from .keywords import section_coverage
 
 SEARCH_INTENTS = ("informational", "commercial", "transactional", "navigational", "local")
@@ -108,6 +109,7 @@ If any point fails, fix your reply first. Do not mention this checklist in your 
 
 RULE_JSON = "The reply is ONLY the JSON described above: no markdown fences, no explanation before or after, no comments."
 RULE_URLS = 'Every URL, path and image reference is a plain string exactly as given — never "[x](x)" markdown.'
+RULE_FIT = "Every text field is within its LIMIT and about the length of the text it replaces — no field grew into a paragraph, no headline became a sentence, nothing the design holds on one line wraps onto three."
 RULE_ARRAYS = "No existing list item was removed, shortened or reordered; new items were only ADDED where a list was thin."
 RULE_FACTS = ("Nothing is invented: no statistics or client counts, ratings, reviews or testimonials, years of experience, "
               "awards, accreditations or memberships, prices or 'fixed fee' promises, phone numbers, emails, addresses "
@@ -291,6 +293,7 @@ def page_prompt(section_types=None, context=None):
         'seo.title is 50–60 characters and seo.description is 120–160 characters, both containing the primary keyword.',
         RULE_KEYWORD + " The H1 (first hero heading) and at least one H2 contain it.",
         RULE_ARRAYS if mode == "edit" else "Lists (FAQ, steps, features) have real, specific entries — at least 3 where the section needs a list.",
+        RULE_FIT,
         RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_VOICE,
     )
     return f"""{opening}
@@ -300,6 +303,8 @@ def page_prompt(section_types=None, context=None):
 {_brief_block(context.get("brief"), site)}
 
 {link_block(context.get("path"))}{SEO_PRINCIPLES}
+{LENGTH_GUIDE}
+
 OUTPUT FORMAT — {output} {JSON_ONLY}
 
 {{
@@ -477,6 +482,8 @@ def section_prompt(*, content, section_type="", label="", path="", page_type="",
         + (f"Primary keyword to work in naturally: {keyword}\n\n" if keyword else "")
         + (f"CHANGE REQUESTED: {instruction}\n\n" if instruction else "")
         + strategy_text + "\n\n"
+        + LENGTH_GUIDE + "\n\nLIMITS (maximum characters per field):\n"
+        + json.dumps(limits_for(content) or {}, indent=2, ensure_ascii=False) + "\n\n"
         + link_block(path) + SEO_PRINCIPLES + "\n" + ARRAY_RULE + "\n\n"
         "OUTPUT FORMAT — return ONLY this block's content object: the exact same keys and nesting as "
         "CURRENT CONTENT (keep fields you did not change), NOT wrapped in another key, NOT the whole page. "
@@ -485,12 +492,18 @@ def section_prompt(*, content, section_type="", label="", path="", page_type="",
             RULE_JSON,
             "The reply has the SAME keys and nesting as CURRENT CONTENT — no new top-level keys, no wrapper key, every unchanged field kept.",
             RULE_ARRAYS, RULE_KEYWORD if keyword else "The copy stays on this block's topic.",
+            RULE_FIT,
             RULE_FACTS, RULE_PLAIN, RULE_URLS, RULE_LINKS, RULE_VOICE,
         )
     )
 
 
 # --------------------------------------------------------------- whole page
+
+def _is_shared(entry):
+    entry = entry if isinstance(entry, dict) else {}
+    return bool(entry.get("shared") or entry.get("excludeFromKeywordAudit"))
+
 
 def page_assist_prompt(*, path, sections, seo=None):
     """One prompt covering every editable block on a page.
@@ -501,11 +514,15 @@ def page_assist_prompt(*, path, sections, seo=None):
     site = site_context()
     seo = seo or {}
     keyword = ((seo.get("keywords") or {}).get("primary") or "").strip()
-    audit = section_coverage(keyword, sections)
+    audit = section_coverage(keyword, sections)  # shared blocks are listed as "shared" but never counted
     by_id = {r["id"]: r for r in seo_rule_checks(seo, keyword)}
     audit["rules"] = [by_id[i] for i in SEO_CHECKS_FOR_PAGE_ASSIST]
+    # Shared blocks (navigation, footer, site-wide banners...) appear on many pages: they are never
+    # sent to the AI, never rewritten and never counted. Only this page's own blocks are.
+    own = {sid: e for sid, e in (sections or {}).items() if not _is_shared(e)}
     payload = {sid: {"label": (e or {}).get("label") or sid, "content": (e or {}).get("content") or {}}
-               for sid, e in (sections or {}).items()}
+               for sid, e in own.items()}
+    limits = {sid: m for sid, e in own.items() if (m := limits_for((e or {}).get("content")))}
 
     missing = [f'{r["id"]} ({r["label"]})' for r in audit["sections"] if r["hasKeyword"] is False and not r["excluded"]]
     if keyword:
@@ -521,6 +538,7 @@ def page_assist_prompt(*, path, sections, seo=None):
     secondary = ", ".join((seo.get("keywords") or {}).get("secondary") or [])
     _checklist = final_check(
         RULE_JSON,
+        RULE_FIT,
         "Top-level keys are block ids copied EXACTLY from the input (e.g. " + ", ".join(f'"{k}"' for k in list(payload)[:3]) + ") — no other keys, no labels.",
         'Each block maps DIRECTLY to its content object, with every field it had (unchanged fields kept) — never {"label": …, "content": …}.',
         ("Every block listed as NOT mentioning the keyword now mentions it (or the reply explains in one line why that block cannot)." if keyword and missing else RULE_KEYWORD),
@@ -536,6 +554,11 @@ EVERY EDITABLE BLOCK, keyed by id:
 {json.dumps(payload, indent=2, ensure_ascii=False)}
 
 {precheck}
+
+{LENGTH_GUIDE}
+
+LIMITS — maximum characters per field, same keys and nesting as the blocks above (a field with no entry is not copy: leave it as it is):
+{json.dumps(limits, indent=2, ensure_ascii=False)}
 
 Check every block for TWO separate problems:
 1. KEYWORD: does it mention the primary keyword (or a natural variation) where it reads naturally — a heading, subheading or sentence? Every block flagged above as not mentioning it MUST get it, unless the block is so narrow (a legal line, a phone number) that it cannot fit naturally. One or two words changed is enough.

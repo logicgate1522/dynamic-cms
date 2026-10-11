@@ -17,6 +17,8 @@ admin UI sends its text to POST ai/normalize/ and applies only what comes back:
 import json
 import re
 
+from .copy_fit import fit_to_limits
+
 ARRAY_SHRINK_GUARD_MIN_LENGTH = 3
 
 _FENCE = re.compile(r"```(?:json|JSON)?\s*\n?(.*?)```", re.DOTALL)
@@ -116,7 +118,8 @@ def normalize_section(raw, current):
     if not isinstance(parsed, dict):
         raise NormalizeError("Expected a JSON object for this block's content.")
     warnings = []
-    return {"content": guarded_merge(current or {}, parsed, warnings), "warnings": warnings}
+    merged = guarded_merge(current or {}, parsed, warnings)
+    return {"content": fit_to_limits(merged, current or {}, warnings), "warnings": warnings}
 
 
 def normalize_page_assist(raw, current):
@@ -131,7 +134,9 @@ def normalize_page_assist(raw, current):
             unmatched.append(block_id)
             continue
         block_warnings = []
-        applied[block_id] = guarded_merge(current[block_id] or {}, unwrap_content(value), block_warnings)
+        merged = guarded_merge(current[block_id] or {}, unwrap_content(value), block_warnings)
+        # Copy that outgrew its field keeps the previous text (see copy_fit).
+        applied[block_id] = fit_to_limits(merged, current[block_id] or {}, block_warnings)
         warnings.extend(f"{block_id}: {w}" for w in block_warnings)
     return {"applied": applied, "unmatched": unmatched, "warnings": warnings}
 

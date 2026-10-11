@@ -28,7 +28,7 @@
 ========================================= */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 
 const root = resolve(process.argv[2] || "src");
 const require = createRequire(join(process.cwd(), "package.json"));
@@ -53,6 +53,41 @@ const files = [];
         else if (/\.(jsx|tsx|js|ts|mjs)$/.test(name)) files.push(path);
     }
 })(root);
+
+// Blocks a layout renders on EVERY page (<CmsSection names={[...]}> in a layout file) are shared.
+// Whole-page AI assist must never rewrite them or count them toward a page's keyword score, so each
+// must say so: useCms(name, defaults, { shared: true }). Names that read like site chrome count too.
+const layoutNames = new Set();
+for (const file of files) {
+    if (!/(^|\/)layout\.(jsx|tsx|js)$/.test(file)) continue;
+    const source = readFileSync(file, "utf8");
+    for (const m of source.matchAll(/names=\{\[([^\]]*)\]\}/g)) for (const n of m[1].matchAll(/["'`]([\w-]+)["'`]/g)) layoutNames.add(n[1]);
+}
+// A component imported directly by two or more route files (page / layout) renders the SAME block on
+// each of those pages, so it is shared too.
+const pageImports = new Map(); // component file basename -> Set of route files importing it
+for (const file of files) {
+    if (!/(^|\/)(page|layout)\.(jsx|tsx|js)$/.test(file)) continue;
+    const source = readFileSync(file, "utf8");
+    for (const m of source.matchAll(/import\s+(\w+)\s+from\s+["'][^"']*\/([\w-]+)["']/g)) {
+        if (!pageImports.has(m[2])) pageImports.set(m[2], new Set());
+        pageImports.get(m[2]).add(file);
+    }
+}
+const CHROME_NAME = /^(navbar|nav|header|footer|menu|sticky[\w-]*|announcement[\w-]*|banner|cookie[\w-]*|consent[\w-]*|site-[\w-]+)$/i;
+
+function sharedRule(ast, report, componentBase = "") {
+    visit(ast.program, (node) => {
+        if (node.type !== "CallExpression" || node.callee?.name !== "useCms") return;
+        const nameArg = node.arguments[0];
+        const name = nameArg?.type === "StringLiteral" ? nameArg.value : null;
+        const usedOnPages = (pageImports.get(componentBase)?.size || 0) > 1;
+        if (!name || !(layoutNames.has(name) || CHROME_NAME.test(name) || usedOnPages)) return;
+        const options = node.arguments[2];
+        const flagged = options?.type === "ObjectExpression" && options.properties.some((p) => ["shared", "excludeFromKeywordAudit"].includes(p.key?.name) && p.value?.value === true);
+        if (!flagged) report(node.loc.start.line, `block “${name}” appears on many pages (site chrome, or a component imported by several routes): add  shared: true  to its useCms options so whole-page AI assist never rewrites it and its text never counts toward a page's keyword score`);
+    });
+}
 
 function visit(node, fn) {
     if (!node || typeof node.type !== "string") return;
@@ -309,6 +344,10 @@ for (const file of files) {
         sourceType: "module",
         plugins: ["jsx", ...(file.endsWith(".tsx") ? ["typescript"] : [])],
     });
+    sharedRule(ast, (line, message) => {
+        problems++;
+        console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);
+    }, basename(file).replace(/\.\w+$/, ""));
     listRules(ast, source, (line, message) => {
         problems++;
         console.log(`${relative(process.cwd(), file)}:${line}  ${message}`);

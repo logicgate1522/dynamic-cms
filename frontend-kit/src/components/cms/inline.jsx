@@ -90,7 +90,7 @@ function placeCaret(node, offset) {
     selection.addRange(range);
 }
 
-function EditableSpan({ value, multiline, placeholder, label, block, path, onChange }) {
+function EditableSpan({ value, multiline, placeholder, label, block, shared, path, onChange }) {
     const ref = useRef(null);
     const focused = useRef(false);
     const start = useRef(value);
@@ -136,6 +136,7 @@ function EditableSpan({ value, multiline, placeholder, label, block, path, onCha
             spellCheck
             data-placeholder={placeholder}
             data-cms-block={block}
+            data-cms-shared={shared ? "true" : undefined}
             data-cms-path={path}
             className="cms-editable"
             style={multiline ? { whiteSpace: "pre-line" } : undefined}
@@ -183,7 +184,7 @@ function EditableSpan({ value, multiline, placeholder, label, block, path, onCha
 
 export function createInline(stateRef) {
     function Text({ path, multiline = false, placeholder = "Add text…" }) {
-        const { data, editMode, label, block } = stateRef.current;
+        const { data, editMode, label, block, shared } = stateRef.current;
         const raw = getPath(data, path);
         const value = raw === undefined || raw === null ? "" : String(raw);
         if (!editMode) return multiline && value.includes("\n") ? lines(value) : value;
@@ -194,6 +195,7 @@ export function createInline(stateRef) {
                 placeholder={placeholder}
                 label={`${label}: ${path}`}
                 block={block}
+                shared={shared}
                 path={path}
                 onChange={(next) => {
                     if (next !== String(getPath(stateRef.current.data, path) ?? "")) stateRef.current.update(path, next);

@@ -201,6 +201,11 @@ try {
     const promptText = await prompt.inputValue();
     check("opening AI assist builds the prompt (no extra click)", promptText.length > 500 && promptText.includes(block), `${promptText.length} chars`);
     check("prompt restates its rules at the end (FINAL CHECK)", promptText.slice(-2500).includes("FINAL CHECK"));
+    // Shared (site-wide) blocks belong to many pages: never sent to the AI, never counted.
+    const sharedBlocks = await page.evaluate(() => [...document.querySelectorAll("[data-cms-block][data-cms-shared]")].map((el) => el.getAttribute("data-cms-block")));
+    const sharedLeak = (sharedBlocks || []).filter((name) => promptText.includes(`"${name}":`));
+    check("AI assist: shared blocks (navbar, footer) are not sent to the AI and not counted", sharedLeak.length === 0, sharedLeak.join(", ") || `${(sharedBlocks || []).length} shared block(s) on the page`);
+    check("AI assist: prompt carries LENGTH guidance and per-field LIMITS", /LENGTH/.test(promptText) && /LIMITS/.test(promptText));
     check("keyword coverage card shows a percentage", (await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) === "0");
     check("“Other SEO rules” list is always shown (6 rules)", (await dialog5.locator("[data-cms-rule]").count()) === 6);
     const reply = `Here you go!\n\n\`\`\`json\n${JSON.stringify({ [block]: { content: { [field]: `${STAMP} ai [link](https://example.com) ok ${KW}` } } })}\n\`\`\`\nAnything else?`;
@@ -210,6 +215,12 @@ try {
         const v = (await admin(`home/${block}/?mode=draft`)).body?.[field];
         return v && v.startsWith(`${STAMP} ai`) ? v : null;
     });
+    const fitReply = await adminWrite("ai/normalize/", "POST", {
+        kind: "page_assist",
+        raw: JSON.stringify({ probe: { title: "Gigantic headline ".repeat(20) } }),
+        current: { probe: { title: "Short title" } },
+    });
+    check("AI paste too long for its field keeps the previous text", fitReply.body?.applied?.probe?.title === "Short title" && (fitReply.body?.warnings || []).length > 0);
     check("AI paste normalised (prose, fences, wrapper, markdown link)", aiValue === `${STAMP} ai link ok ${KW}`, aiValue || "no draft");
     const livePercent = await poll(async () => Number(await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) > 0);
     check("coverage updates live after Apply (no rebuild)", !!livePercent);

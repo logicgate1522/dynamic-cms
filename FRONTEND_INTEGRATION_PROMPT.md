@@ -193,19 +193,37 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 - **Must:** prompts come from `ai/*-prompt/`, `content/<key>/build-prompt/`
   and `collections/…/prompt/`, shown in the kit's `<PromptBox>`. Site context
   goes into `SiteSettings.ai` (seeded in P7), not into frontend strings.
-  Every backend prompt ends with its FINAL CHECK.
-- **Never:** prompt wording in the frontend; a prompt without a FINAL CHECK.
-- **Proven by:** `check:inline` (fails on prompt wording in the frontend);
-  acceptance "prompt restates its rules at the end (FINAL CHECK)".
+  Every backend prompt ends with its FINAL CHECK. Every prompt that writes
+  copy carries the LENGTH guide and a `LIMITS` object (maximum characters per
+  field, same shape as the content) so the reply fits the design.
+  **Whole-page AI assist is scoped to the page:** a block that appears on
+  more than one page — navbar, footer, site-wide banner / CTA / cookie text,
+  or any component imported by two or more routes — declares
+  `useCms(name, defaults, { shared: true })`. A shared block is never sent to
+  the AI, never rewritten, and never counted in the page's keyword
+  percentage (that percentage is only the page's own blocks). Every block
+  named in a layout's `<CmsSection names>` must be shared.
+- **Never:** prompt wording in the frontend; a prompt without a FINAL CHECK;
+  a site-wide block that lets page-level AI rewrite or score it; AI copy
+  longer than the field it replaces.
+- **Proven by:** `check:inline` (prompt wording in the frontend; a layout /
+  multi-route block without `shared: true`); acceptance "prompt restates its
+  rules at the end (FINAL CHECK)", "AI assist: shared blocks (navbar, footer)
+  are not sent to the AI and not counted", "AI assist: prompt carries LENGTH
+  guidance and per-field LIMITS".
 
 #### R6 — Every pasted reply is normalised by the backend
 - **Must:** pasted AI or JSON goes through `POST ai/normalize/` (or
   `paste-to-build` / `paste-to-edit` / `collections/…/apply/`, which
   normalise server-side) before it touches content.
+  The backend also **fits** the reply: a text field longer than its limit
+  (about 25% over the text it replaces, capped by its role — label, button,
+  headline) keeps its previous text and a warning says why, so oversized AI
+  copy never reaches the page.
 - **Never:** `JSON.parse` a pasted reply yourself, or write one straight into
   content.
 - **Proven by:** acceptance "AI paste normalised (prose, fences, wrapper,
-  markdown link)".
+  markdown link)", "AI paste too long for its field keeps the previous text".
 
 #### R7 — The backend webhook refreshes caches
 - **Must:** public reads use `lib/cms.js` (ISR with `cms:*` tags);

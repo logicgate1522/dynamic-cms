@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -987,6 +988,15 @@ class PermissionAuditTests(APITestCase):
             if view_cls is None or issubclass(view_cls, APIRootView):
                 continue
             name = pattern.name
+            # A project that mounts its own app under api/ (with its own
+            # permission policy and its own audit) lists it in settings:
+            #   CMS_PERMISSION_AUDIT_EXEMPT_MODULES = ("myapp.",)
+            #   CMS_PERMISSION_AUDIT_EXEMPT_NAMES = ("my-function-view",)
+            # The CMS's own routes are always audited.
+            exempt_modules = tuple(getattr(settings, "CMS_PERMISSION_AUDIT_EXEMPT_MODULES", ()))
+            exempt_names = set(getattr(settings, "CMS_PERMISSION_AUDIT_EXEMPT_NAMES", ()))
+            if (exempt_modules and view_cls.__module__.startswith(exempt_modules)) or name in exempt_names:
+                continue
             actions = getattr(callback, "actions", None)  # router viewsets
             for method in ("POST", "PUT", "PATCH", "DELETE"):
                 if actions is not None:
@@ -1450,6 +1460,39 @@ class AiNormalizeTests(AdminAuthMixin, APITestCase):
         r = self.post({"kind": "page_assist", "raw": raw, "current": {"hero": {"title": "Old", "sub": "s"}}})
         self.assertEqual(r.data["applied"], {"hero": {"title": "Better", "sub": "s"}})
         self.assertEqual(r.data["unmatched"], ["ghost"])
+
+    def test_page_assist_never_rewrites_or_counts_shared_blocks(self):
+        sections = {
+            "hero": {"label": "Hero", "content": {"title": "VAT returns for Leeds firms"}},
+            "navbar": {"label": "Navbar", "content": {"links": [{"label": "ZZNAVLABEL"}]}, "shared": True},
+            "footer": {"label": "Footer", "content": {"blurb": "ZZFOOTERCOPY"}, "excludeFromKeywordAudit": True},
+        }
+        r = self.admin_client.post("/api/ai/page-assist-prompt/", {"path": "services/vat", "sections": sections}, format="json")
+        self.assertNotIn("ZZNAVLABEL", r.data["prompt"])
+        self.assertNotIn("ZZFOOTERCOPY", r.data["prompt"])
+        self.assertEqual(r.data["audit"]["total"], 1)
+        self.assertEqual({row["id"] for row in r.data["audit"]["sections"] if row["excluded"]}, {"navbar", "footer"})
+
+    def test_page_assist_prompt_carries_length_limits_and_guidance(self):
+        r = self.admin_client.post("/api/ai/page-assist-prompt/", {"path": "about", "sections": {
+            "hero": {"label": "Hero", "content": {"title": "Short title", "cta_href": "/start"}}}}, format="json")
+        self.assertIn("LIMITS", r.data["prompt"])
+        self.assertIn("LENGTH", r.data["prompt"])
+        self.assertIn('"title": 24', r.data["prompt"])
+        self.assertNotIn('"cta_href": ', r.data["prompt"].split("LIMITS")[1].split("Check every block")[0])
+
+    def test_oversized_ai_copy_keeps_previous_text(self):
+        current = {"hero": {"title": "Short title", "sub": "A short line of support copy."}}
+        raw = '{"hero": {"title": "' + "Gigantic headline " * 12 + '", "sub": "Tighter support copy."}}'
+        r = self.post({"kind": "page_assist", "raw": raw, "current": current})
+        self.assertEqual(r.data["applied"]["hero"]["title"], "Short title")
+        self.assertEqual(r.data["applied"]["hero"]["sub"], "Tighter support copy.")
+        self.assertTrue(any("fits" in w for w in r.data["warnings"]))
+
+    def test_section_prompt_has_limits(self):
+        r = self.admin_client.post("/api/ai/section-prompt/", {"label": "Hero", "path": "about",
+                                   "content": {"title": "Short title"}}, format="json")
+        self.assertIn("LIMITS", r.data["prompt"])
 
     def test_seo_flat_keys_map_to_pageseo_shape(self):
         raw = ('Audit text...\n```json\n{"seoTitle": "VAT Returns | Acme", "primaryKeyword": "vat returns", '

@@ -10,9 +10,11 @@
      unsafe methods -> X-CSRFToken from GET auth/csrf/
 ========================================= */
 
+// The backend's origin. A value that already ends in /api (a common way to
+// write it) is accepted and normalised, so `${API_ORIGIN}/api` never doubles.
 export const API_ORIGIN = (
     process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-).replace(/\/+$/, "");
+).replace(/\/+$/, "").replace(/\/api$/, "");
 
 export const API = `${API_ORIGIN}/api`;
 

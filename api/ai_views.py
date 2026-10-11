@@ -138,7 +138,7 @@ class SectionPromptView(APIView):
 
 
 class PageAssistPromptView(APIView):
-    """POST ai/page-assist-prompt/ {path, sections: {id: {label, content, excludeFromKeywordAudit?}}}
+    """POST ai/page-assist-prompt/ {path, sections: {id: {label, content, shared?}}}
     -> {prompt, audit}. One prompt for every editable block on a page."""
     permission_classes = [IsAdminUser]
 

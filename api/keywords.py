@@ -49,14 +49,14 @@ def flatten_text(value, out=None):
 
 
 def section_coverage(keyword, sections):
-    """sections: {id: {"label", "content", "excludeFromKeywordAudit"?}} ->
+    """sections: {id: {"label", "content", "shared"?}} ("excludeFromKeywordAudit" is the old name) ->
     per-section keyword presence + overall percentage (excluded sections are
     still listed but don't count toward the score)."""
     rows = []
     counted = with_keyword = 0
     for sid, entry in (sections or {}).items():
         entry = entry if isinstance(entry, dict) else {}
-        excluded = bool(entry.get("excludeFromKeywordAudit"))
+        excluded = bool(entry.get("shared") or entry.get("excludeFromKeywordAudit"))
         has = contains_keyword(" \n ".join(flatten_text(entry.get("content"))), keyword) if keyword else None
         rows.append({"id": sid, "label": entry.get("label") or sid, "hasKeyword": has, "excluded": excluded})
         if not excluded:

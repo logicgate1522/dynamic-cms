@@ -1,3 +1,35 @@
+# Upgrade Notes — AI assist fits the page: shared blocks, length limits, migration tools
+
+**What's new**
+- **Whole-page AI assist is scoped to the page (R5).** A block that appears on
+  more than one page — navbar, footer, site-wide CTA / banner / cookie text,
+  or any component imported by two or more routes — declares
+  `useCms(name, defaults, { shared: true })` (`excludeFromKeywordAudit` is the
+  old name and still works). Shared blocks are never sent to the AI, never
+  rewritten (Apply also ignores their ids) and never counted in the page's
+  keyword percentage. `check:inline` now FAILS for a block that is named in a
+  layout's `<CmsSection names>`, looks like site chrome, or lives in a
+  component imported by several routes but lacks `shared: true`. Acceptance
+  checks that no shared block reaches the prompt.
+  - Existing sites: run `npm run check:inline` and add `shared: true` where
+    it points. Copy the new kit files (`useCms.jsx`, `inline.jsx`,
+    `PageAssist.jsx`, `ConsentBanner.jsx`, `scripts/check-inline.mjs`).
+- **Copy fits the design (R5/R6).** New `api/copy_fit.py`: every prompt that
+  writes copy now carries a LENGTH guide (sizes per kind of field) and a
+  `LIMITS` object — maximum characters per field, shaped like the content
+  (about +25% of the current text, capped by role: label, button, headline).
+  On the way back in, `ai/normalize/` keeps the previous text of any field that
+  outgrew its limit and adds a warning, so oversized AI copy never lands on
+  the page. Applies to block, whole-page and single-section prompts.
+- **`NEXT_PUBLIC_API_URL`** may end in `/api` (normalised in `lib/api.js` and
+  `middleware.js`).
+- **Migration tools** (`frontend-kit/tools/`): `cms-migrate-legacy.mjs` strips
+  an old per-component editor (also `useXxxCmsSection` hooks, `*EditBar` /
+  `AdminControls`, `--component` for files with several sections,
+  `--name-expr` for one block per article/product, `--static` for display-only
+  components) and `cms-convert.mjs` wires the copy to `<E.*>` (§3 recipe).
+  New kit file `lib/useStable.js` (stable `defaults` built from props).
+
 # Upgrade Notes — security: Django 5.2 LTS, patched dependencies, a dependencies gate
 
 **What's new**

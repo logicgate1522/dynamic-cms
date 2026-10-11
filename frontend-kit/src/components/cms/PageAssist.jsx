@@ -57,7 +57,7 @@ export function useKeywordCoverage(path) {
         const rows = blocks.map((e) => ({
             id: e.name,
             label: e.label,
-            excluded: Boolean(e.excludeFromKeywordAudit),
+            excluded: Boolean(e.shared || e.excludeFromKeywordAudit),
             hasKeyword: keyword ? containsKeyword(flattenText(e.data).join(" \n "), keyword) : null,
         }));
         const counted = rows.filter((r) => !r.excluded);
@@ -89,8 +89,9 @@ function PageAssistDrawer({ onClose }) {
     const [error, setError] = useState("");
     const [result, setResult] = useState("");
     const [warnings, setWarnings] = useState("");
-    // Hidden blocks/sections are not on the live page: not audited, not rewritten.
-    const blocks = Object.values(editables).filter((e) => !e.hidden);
+    // Hidden blocks are not on the live page: not audited, not rewritten. Shared blocks (navbar,
+    // footer, site-wide banners) belong to many pages: never sent to the AI, never rewritten.
+    const blocks = Object.values(editables).filter((e) => !e.hidden && !e.shared && !e.excludeFromKeywordAudit);
     const built = useRef(false);
 
     const rules = useMemo(() => {
@@ -106,7 +107,7 @@ function PageAssistDrawer({ onClose }) {
         setError("");
         try {
             const sections = Object.fromEntries(
-                blocks.map((e) => [e.name, { label: e.label, content: e.data, excludeFromKeywordAudit: e.excludeFromKeywordAudit }])
+                Object.values(editables).filter((e) => !e.hidden).map((e) => [e.name, { label: e.label, content: e.data, shared: Boolean(e.shared || e.excludeFromKeywordAudit) }])
             );
             const data = await apiRequest("ai/page-assist-prompt/", { method: "POST", body: { path, sections } });
             setPrompt(data.prompt);
@@ -131,7 +132,9 @@ function PageAssistDrawer({ onClose }) {
         try {
             const current = Object.fromEntries(blocks.map((e) => [e.name, e.data]));
             const data = await apiRequest("ai/normalize/", { method: "POST", body: { kind: "page_assist", raw, current } });
-            const applied = Object.entries(data.applied);
+            // Only this page's own blocks, even if a stale or malformed reply names shared ones.
+            const allowed = new Set(blocks.map((e) => e.name));
+            const applied = Object.entries(data.applied).filter(([name]) => allowed.has(name));
             applied.forEach(([name, content]) => {
                 const entry = editables[name];
                 entry?.replace(entry.defaults && Object.keys(entry.defaults).length ? mergeDefaults(entry.defaults, content) : content);

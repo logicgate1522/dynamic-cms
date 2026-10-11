@@ -43,7 +43,7 @@ export function CookieSettingsLink({ children, className = "" }) {
 }
 
 export default function ConsentBanner({ consent = null }) {
-    const { data, hidden, E, editButton, editMode } = useCms("consent-banner", defaults, { label: "Cookie banner", hideable: false });
+    const { data, hidden, E, editButton, editMode } = useCms("consent-banner", defaults, { label: "Cookie banner", hideable: false, shared: true });
     const [open, setOpen] = useState(false);
     const [choosing, setChoosing] = useState(false);
     const [choice, setChoice] = useState({ analytics: false, marketing: false });

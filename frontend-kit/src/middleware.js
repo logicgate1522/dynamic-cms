@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
    counter in the CMS stays accurate.
 ========================================= */
 
-const API = `${(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "")}/api`;
+const API = `${(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "").replace(/\/api$/, "")}/api`;
 // Identifies this server to the backend (shared secret, server-only) so its
 // requests aren't rate-limited as one anonymous visitor.
 const SERVER_HEADERS = process.env.REVALIDATE_SECRET ? { "X-CMS-Frontend": process.env.REVALIDATE_SECRET } : {};
