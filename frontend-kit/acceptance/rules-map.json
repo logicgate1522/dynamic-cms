@@ -21,7 +21,7 @@
   "R19": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "nothing token-like in web storage" }],
   "R20": [{ "gate": "acceptance", "check": "responsive: no horizontal scroll at 390px" }, { "gate": "acceptance", "check": "responsive: panels fit a phone screen" }, { "gate": "site-audit" }],
   "R21": [{ "gate": "site-audit" }],
-  "R22": [{ "gate": "site-audit" }, { "gate": "report" }],
+  "R22": [{ "gate": "site-audit" }, { "gate": "report" }, { "gate": "dependencies" }],
   "R23": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "a hidden block is not in the visitor's HTML" }, { "gate": "acceptance", "check": "a hidden list item is not shown to visitors" }, { "gate": "acceptance", "check": "a hidden section is not in the visitor's HTML" }],
   "R24": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "emailed via FormSubmit to the Settings address" }, { "gate": "acceptance", "check": "the submission is also in the CMS inbox" }],
   "R25": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "data layer variables are pushed before GTM" }, { "gate": "acceptance", "check": "the GTM container from Settings is loaded" }, { "gate": "site-audit" }],

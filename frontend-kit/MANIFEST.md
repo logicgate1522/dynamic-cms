@@ -37,7 +37,7 @@ The Next.js (App Router) half of dynamic-cms. Copy `src/**` into the app's
 | Floating tools | `components/cms/floating.jsx` | The admin layer (end of `<body>`, immune to site zoom) and `useFloating` / `FloatingTools` / `usePopoverPosition`. Every edit tool, the admin bar, its menus and panels render here, so editing never moves, covers or crowds the page (R30). |
 | Block editor | `components/cms/SectionEditor.jsx`, `FieldEditor.jsx` | All fields, AI assist, JSON, History. |
 | AI | `components/cms/ai.jsx`, `PageAssist.jsx`, `SeoEditPanel.jsx` | Prompt/paste UI. Every prompt comes from the backend; every paste goes through `ai/normalize`. The SEO panel opens on Ask AI; the whole-page assist builds on open and shows live coverage + SEO rules. |
-| Articles | `components/cms/BlogPostEditor.jsx` | Create/edit a blog post. Its category list is the blog collection's `fields.category.options` from Settings (R28), never code. |
+| Articles | `components/cms/BlogPostEditor.jsx` | Create/edit a blog post. Its category list is the blog collection's `fields.category.options` from Settings (R28), never code; its primary keyword (needed to publish) is saved to `seo/blog/<slug>/` (R34). |
 | Collections | `components/cms/CollectionPanel.jsx` | "＋ New <item>" on a collection's index page, entry settings / AI rewrite on its entries. Driven by `SiteSettings.collections`. |
 | One-off pages | `components/cms/CreatePage.jsx` | Brief → prompt → paste form, used only by Dashboard → Pages. |
 | SSR data | `components/cms/CmsSection.jsx`, `CmsDataProvider.jsx` | Server-fetches published blocks so visitors need no client fetch. |

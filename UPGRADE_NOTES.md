@@ -1,3 +1,23 @@
+# Upgrade Notes — security: Django 5.2 LTS, patched dependencies, a dependencies gate
+
+**What's new**
+- **Backend on Django 5.2.18 LTS** (5.1 is out of security support), with
+  DRF 3.18.3, django-filter 26.2 and django-cors-headers 4.9.0. Pillow
+  12.3.0, urllib3 2.8.0, sqlparse 0.6.0, idna 3.20, python-dotenv 1.2.4
+  and certifi are patched too. `pip-audit -r requirements.txt` reports no
+  known vulnerabilities. No migrations are needed; all backend tests pass.
+  Run `pip install -r requirements.txt` on every deployment.
+- **New run-gates gate `dependencies`** (R22): `npm audit --omit=dev` must
+  find no high or critical advisory in the site's production dependencies.
+  Fix nested packages with npm `overrides`.
+  - The reference site moved to Next 15.5.27, with overrides for sharp
+    0.35.5 and postcss 8.5.29: 0 vulnerabilities.
+  - Sites on Next ≤ 15.5.26 must upgrade.
+- **Article editor:** a "Primary keyword" field, needed to publish, saved to
+  `seo/blog/<slug>/`. Hand-made articles no longer fail R34's keyword check.
+- `api/sitemaps.py`: timezone-aware date instead of the deprecated
+  `datetime.utcnow()`.
+
 # Upgrade Notes — R34 SEO audit + internal links; complete plans; one category list
 
 **What's new**

@@ -109,6 +109,26 @@ function run(name, cmd, argv, { cwd = HERE, env = {} } = {}) {
     return { name, ok, checks, log: `pass-${PASS}-${name}.log` };
 }
 
+// R22: no known high or critical advisory in the site's production
+// dependencies (npm audit; needs the npm registry). A launch with a known
+// exploitable dependency is not "ready".
+function dependencyGate() {
+    process.stdout.write("▶ dependencies … ");
+    const r = spawnSync("npm", ["audit", "--omit=dev", "--json"], { cwd: FRONTEND, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    writeFileSync(join(GATES_DIR, `pass-${PASS}-dependencies.log`), `${r.stdout || ""}${r.stderr || ""}`);
+    let report = null;
+    try { report = JSON.parse(r.stdout || ""); } catch { /* not JSON: registry unreachable */ }
+    const counts = report?.metadata?.vulnerabilities;
+    const bad = counts ? (counts.high || 0) + (counts.critical || 0) : null;
+    const ok = bad === 0;
+    const names = report ? Object.entries(report.vulnerabilities || {}).filter(([, v]) => ["high", "critical"].includes(v.severity)).map(([n, v]) => `${n} (${v.severity})`) : [];
+    const detail = counts == null ? "npm audit gave no report (is the npm registry reachable?)"
+        : ok ? `0 high/critical (${counts.moderate || 0} moderate, ${counts.low || 0} low)`
+        : `${bad} high/critical: ${names.slice(0, 6).join(", ")} — upgrade them (npm audit; "overrides" for nested packages)`;
+    console.log(`${ok ? "green" : "RED"}\n    ${ok ? "PASS" : "FAIL"}  no high or critical advisories in production dependencies  — ${detail}`);
+    return { name: "dependencies", ok, checks: [{ ok, name: "no high or critical advisories in production dependencies" }] };
+}
+
 function kitVerbatim() {
     const sync = readFileSync(join(KIT, "sync_kit.py"), "utf8");
     const core = [...sync.slice(sync.indexOf("CORE = ["), sync.indexOf("]", sync.indexOf("CORE = ["))).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
@@ -207,6 +227,7 @@ const want = (g) => !ONLY.length || ONLY.includes(g);
 const nodeEnv = { SITE_URL: SITE, API_URL: API, NEXT_PUBLIC_API_URL: API };
 
 if (want("kit-verbatim")) gates.push(kitVerbatim());
+if (want("dependencies")) gates.push(dependencyGate());
 if (want("check-inline")) gates.push(run("check-inline", "node", ["scripts/check-inline.mjs", "src"], { cwd: FRONTEND }));
 if (want("check-sections")) gates.push(run("check-sections", "node", ["scripts/check-sections.mjs"], { cwd: FRONTEND, env: nodeEnv }));
 const build = want("production-build") ? await buildGate() : null;

@@ -19,7 +19,7 @@ instructions the docs already answer.
    section with the §3 recipe.
 4. **You are done only when `frontend-kit/acceptance/run-gates.mjs` prints
    `ALL GATES GREEN — 3 of 3 passes`.** Nothing else counts. It runs every
-   gate (kit-verbatim, check-inline, check-sections, production-build,
+   gate (dependencies, kit-verbatim, check-inline, check-sections, production-build,
    visual, acceptance, tracking-edge, verify-tracking, seo-baseline,
    site-audit, report)
    against the production build and maps the results to R1–R34
@@ -138,6 +138,9 @@ instructions the docs already answer.
     (`X-CMS-Frontend` = `REVALIDATE_SECRET`) skip the general limits;
     `login` and `form_submit` always apply. A new public endpoint with its own
     `throttle_classes` must use `SiteAwareScopedRateThrottle`.
+- **Dependencies:** keep `requirements.txt` free of known advisories:
+  `pip-audit -r requirements.txt` (in a throwaway venv) after any upgrade
+  and before each release; stay on a supported Django release (LTS).
 - **Every behaviour change ships with a test** in `api/tests.py`. The
   permission-audit test fails if you add an unauthenticated write endpoint
   without adding it to `PUBLIC_WRITE_ALLOWLIST` on purpose.

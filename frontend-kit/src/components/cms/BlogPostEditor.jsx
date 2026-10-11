@@ -101,12 +101,36 @@ export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
         if (categories?.length) setState((s) => (s.content.category ? s : { ...s, content: { ...s.content, category: categories[0] } }));
     }, [categories]);
     const [slug, setSlug] = useState(post?.slug || "");
+    // The article's primary keyword lives in its page SEO (seo/blog/<slug>/),
+    // like every other page's. Every published page needs its own (R34).
+    const [keyword, setKeyword] = useState("");
+    const [savedKeyword, setSavedKeyword] = useState("");
+    useEffect(() => {
+        if (!post?.slug) return undefined;
+        let live = true;
+        apiRequest(`seo/blog/${post.slug}/`)
+            .then((seo) => {
+                const value = String(seo?.keywords?.primary || "");
+                if (live) {
+                    setKeyword(value);
+                    setSavedKeyword(value);
+                }
+            })
+            .catch(() => {});
+        return () => {
+            live = false;
+        };
+    }, [post?.slug]);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const isNew = !post;
     const isDynamic = post?.body_mode === "dynamic";
 
     async function save() {
+        if (state.meta.status === "published" && !keyword.trim()) {
+            setError("Add a primary keyword before publishing: the words people search for this article's topic. No two pages share one.");
+            return;
+        }
         setSaving(true);
         setError("");
         try {
@@ -128,6 +152,10 @@ export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
             const saved = isNew
                 ? await apiRequest("blog/", { method: "POST", body })
                 : await apiRequest(`blog/${post.slug}/`, { method: "PATCH", body });
+            if (keyword.trim() !== savedKeyword) {
+                await apiRequest(`seo/blog/${saved.slug || post.slug}/`, { method: "PATCH", body: { keywords: { primary: keyword.trim() } } });
+                setSavedKeyword(keyword.trim());
+            }
 
             onSaved?.(saved);
         } catch (err) {
@@ -184,6 +212,17 @@ export default function BlogPostEditor({ post, onClose, onSaved, onDeleted }) {
                         />
                     </label>
                 ) : null}
+
+                <label className="block">
+                    <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#475569]">Primary keyword (needed to publish)</span>
+                    <input
+                        className="w-full rounded-lg border border-[#D6DEE8] px-3 py-2 text-[13px]"
+                        value={keyword}
+                        onChange={(e) => setKeyword(e.target.value)}
+                        placeholder="What people search for this article's topic"
+                        data-cms-field="primary-keyword"
+                    />
+                </label>
 
                 <ObjectFields
                     value={state.meta}

@@ -74,6 +74,7 @@ node run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT
 
 | Gate | Proves |
 |---|---|
+| dependencies | `npm audit --omit=dev` finds no high or critical advisory in the site's production dependencies — R22 |
 | kit-verbatim | every kit CORE file and gate script is byte-identical to the kit (theme block excepted) — R1 |
 | check-inline | no hard-coded copy, index keys, `hidden` guard, `{editButton}` marker, forms via `submitForm` + `data-cms-form`, tracking via `track`, uploads via `E.Image`, no unsafe HTML, no secrets, no prompt text, no visitor storage without consent |
 | check-sections | renderer registry = backend section types |
@@ -125,7 +126,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | R19 | Foundation | The site's server sends `X-CMS-Frontend` | `check:inline`, acceptance | P1 |
 | R20 | Look | Responsive at 390 / 768 / 1024 / 1280 / 1920px: readable, nothing cut off, admin included | acceptance, site-audit | P3 |
 | R21 | Quality | Every page passes the site audit | site-audit | P2, P6, P7 |
-| R22 | Launch | No launch-check blockers; never invent business details | `LAUNCH=1` site-audit | P7, P8 |
+| R22 | Launch | No launch-check blockers; no high/critical dependency advisories; never invent business details | `LAUNCH=1` site-audit, dependencies | P7, P8 |
 | R23 | Editing | Blocks, items and sections can be hidden; hidden = gone for visitors | `check:inline`, acceptance | P3, P5 |
 | R24 | Leads | Forms use `submitForm()`; email via FormSubmit to Settings address | `check:inline`, acceptance | P4, P7 |
 | R25 | Tracking | Tracking and search verification configured in Site tools; events via `track()` | `check:inline`, acceptance, site-audit | P1, P7 |
@@ -374,10 +375,15 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   "Needs from the owner". Launch-check **warnings** cover the owner's own
   launch steps (search verification, analytics, consent default, FormSubmit
   alias, default social image); `LAUNCH_GUIDE.md` explains each one step by
-  step, and the P8 report hands it to the owner.
+  step, and the P8 report hands it to the owner. The site's production
+  dependencies have no known high or critical advisory (`npm audit
+  --omit=dev`): upgrade the package, or pin a fixed nested version with
+  npm `overrides`.
 - **Never:** invent business details to clear a blocker (this is the one
-  case where R12 does not apply).
-- **Proven by:** `LAUNCH=1 node site-audit.mjs`; the dashboard card.
+  case where R12 does not apply); ship a framework or library version with a
+  known high/critical advisory; silence `npm audit` instead of upgrading.
+- **Proven by:** `LAUNCH=1 node site-audit.mjs`; the dashboard card;
+  run-gates `dependencies` (`npm audit --omit=dev`: 0 high/critical).
 
 #### R23 — Admins can hide anything; hidden means gone
 - **Must:** every `useCms` block, object list item and CMS-page section can
@@ -665,6 +671,8 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   "click here", "learn more" or empty (a card whose visible text is
   generic gets an `aria-label` that names the page); links point at the
   final URL, never a redirect; internal links are never `rel=nofollow`.
+  Articles get their keyword in the article editor ("Primary keyword",
+  needed to publish) or the SEO panel; AI-made entries get it from the reply.
   Body copy links inline with `[anchor words](/path)` in a section's
   `content` (the kit renders it; AI prompts list the pages and the missing
   links). **Site tools → SEO → Internal links** (`lib/siteScan.js` +
@@ -1933,7 +1941,7 @@ Pass 2 fingerprint: <the fingerprint pass 2 printed>
 - [ ] **R19** `lib/cms.js` and `middleware.js` send `X-CMS-Frontend`; the secret never reaches the browser. (`check:inline`; acceptance shows no 429s)
 - [ ] **R20** Every page works at 390px, 768px, 1024px, 1280px and 1920px: no horizontal scroll, no text under 11px, nothing cut off; admin panels fit a phone. (acceptance "responsive…", site-audit responsive checks)
 - [ ] **R21** `site-audit.mjs` reports 0 failures: SEO on every page, links, one phone/email everywhere, default og:image, forms end to end. (site-audit)
-- [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner". (`LAUNCH=1` site-audit, dashboard card)
+- [ ] **R22** Launch readiness has no blockers, or every remaining blocker is listed under "Needs from the owner"; no high/critical dependency advisory. (`LAUNCH=1` site-audit, dashboard card, dependencies)
 - [ ] **R23** Blocks, list items and CMS-page sections can be hidden; every `useCms` component returns `null` when `hidden`; hidden content is absent from visitor HTML after Publish. (`check:inline`, acceptance "Hide …")
 - [ ] **R24** Every form uses `submitForm()`; leads are stored, emailed via FormSubmit to Settings → Form notifications (first settings card, test button works) and tracked. (`check:inline`, acceptance "emailed via FormSubmit…")
 - [ ] **R25** All tracking IDs, data layer variables, consent default and custom code live in Settings → Tracking, and verification codes in Settings → Search engine verification; `<Analytics>` and the layout metadata render them; events go through `track()` only. (`check:inline`, acceptance "GTM container…", "page_view…", site-audit verification check)

@@ -18,7 +18,6 @@ SiteSettings.data.sitemap.overrides = {"<path>": {"include", "priority",
 with its source and effective settings (admin).
 """
 
-from datetime import datetime
 from importlib import import_module
 from xml.sax.saxutils import escape
 
@@ -149,7 +148,7 @@ def sitemap_index(request):
             '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for name in names:
         body.append(f"<sitemap><loc>{escape(base)}/sitemap-{name}.xml</loc>"
-                    f"<lastmod>{datetime.utcnow().date().isoformat()}</lastmod></sitemap>")
+                    f"<lastmod>{timezone.now().date().isoformat()}</lastmod></sitemap>")
     body.append("</sitemapindex>")
     return HttpResponse("\n".join(body), content_type="application/xml")
 
