@@ -92,7 +92,8 @@ function dropElements(html, test) {
 function readPage(html) {
     let body = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [, html])[1];
     body = body.replace(/<!--[\s\S]*?-->/g, "");
-    body = body.replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1>/gi, " ");
+    // <title> can be streamed into the body on request-rendered pages; head metadata is R34's job, not words a visitor reads.
+    body = body.replace(/<(script|style|noscript|template|svg|title)\b[\s\S]*?<\/\1>/gi, " ");
     body = dropElements(body, (_name, attrs) => /\bdata-visual-ignore\b|\bdata-cms-adminbar\b|\bdata-cms-layer\b|\bdata-cms-consent-banner\b/.test(attrs));
     const attr = (attrs, key) => decode((attrs.match(new RegExp(`\\b${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i")) || [])[1] ?? (attrs.match(new RegExp(`\\b${key}\\s*=\\s*'([^']*)'`, "i")) || [])[1] ?? "");
     const links = [];

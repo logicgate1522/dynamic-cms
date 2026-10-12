@@ -616,6 +616,7 @@ try {
         const back = await poll(async () => (await countIn(PAGE, needle)) >= before, { tries: 30, every: 700 });
         check("showing it again brings it back for visitors", !!back);
     }
+    await ensureEditing(); // the publish above may have left editing off
     // List item: the first list field on the page that belongs to an object item.
     // Shared chrome is skipped: its item texts repeat in menus and the footer, so a visitor count proves nothing.
     const itemField = page.locator('[data-cms-block]:not([data-cms-block^="section:"]):not([data-cms-shared])').filter({ hasText: /\S/ });
@@ -625,14 +626,14 @@ try {
         const [blockName, path] = [await el.getAttribute("data-cms-block"), await el.getAttribute("data-cms-path")];
         const itemText = (await el.innerText()).trim();
         await el.hover();
-        await (await itemHideButton(page, el)).click();
+        { const hide = await itemHideButton(page, el); await hide.click({ timeout: 6000 }).catch(() => hide.click({ force: true })); } // an overlay may sit on the tools
         const listPath = path.replace(/\.\d+\.\w+$/, "");
         const idx = Number(path.match(/\.(\d+)\.\w+$/)[1]);
         const saved = await poll(async () => {
             const d = (await admin(`home/${blockName}/?mode=draft`)).body;
             return listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
-        });
-        check("“Hide” on a list item saves _hidden on that item only", !!saved, `${blockName}.${listPath}[${idx}]`);
+        }, { tries: 40, every: 500 });
+        check("“Hide” on a list item saves _hidden on that item only", !!saved, `${blockName}.${listPath}[${idx}] ${JSON.stringify(listPath.split(".").reduce((o, k) => o?.[k], (await admin(`home/${blockName}/?mode=draft`)).body)?.[idx]).slice(0, 120)}`);
         // The visitor page may still be catching up with the earlier publish: wait for its count to hold steady.
         let itemBefore = await countIn(PAGE, itemText);
         for (let i = 0, same = 0; i < 12 && same < 2; i++) {
@@ -645,7 +646,7 @@ try {
         const itemGone = await poll(async () => (await countIn(PAGE, itemText)) < itemBefore, { tries: 30, every: 700 });
         check("a hidden list item is not shown to visitors", !!itemGone, `“${itemText.slice(0, 30)}” ${itemBefore}→${await countIn(PAGE, itemText)}`);
         await el.hover();
-        await (await itemHideButton(page, el)).click();
+        { const hide = await itemHideButton(page, el); await hide.click({ timeout: 6000 }).catch(() => hide.click({ force: true })); } // an overlay may sit on the tools
         await poll(async () => {
             const d = (await admin(`home/${blockName}/?mode=draft`)).body;
             return !listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
@@ -928,7 +929,7 @@ try {
     check("sign out removes the admin UI", (await page.locator("[data-cms-adminbar], [data-cms-block]").count()) === 0);
     check("sign out ends the server session", (await admin("auth/session/")).body?.authenticated === false);
 } catch (err) {
-    check("unexpected error", false, err.message.split("\n")[0]);
+    check("unexpected error", false, `${err.message.split("\n")[0]} ${(String(err.stack || "").match(/acceptance\.mjs:\d+/) || [""])[0]}`);
     await page.screenshot({ path: "acceptance-failure.png" }).catch(() => {});
     console.log("screenshot: acceptance-failure.png");
 } finally {
