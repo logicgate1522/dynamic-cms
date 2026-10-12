@@ -135,7 +135,14 @@ const closeDrawer = () => page.locator('[role="dialog"] [aria-label="Close"]').f
 // The Hide button of the item under the pointer: every item has its own tools, so pick the one nearest the item.
 async function itemHideButton(page, el) {
     const buttons = page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]');
-    await buttons.first().waitFor({ state: "visible", timeout: 8000 }).catch(() => {}); // the tools mount a moment after the hover
+    // The tools mount a moment after the hover; if they don't, move away and hover again.
+    for (let attempt = 0; attempt < 4; attempt++) {
+        await el.scrollIntoViewIfNeeded().catch(() => {});
+        await el.hover();
+        if (await buttons.first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false)) break;
+        await page.mouse.move(2, 2);
+        await sleep(400);
+    }
     const box = await el.boundingBox();
     // The button nearest the item's top-right corner (re-resolved by index: a re-render must not strand the handle).
     const nearest = await buttons.evaluateAll((els, b) => {
