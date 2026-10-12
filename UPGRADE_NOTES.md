@@ -609,25 +609,32 @@ A second pass against the Prometheus editor.
 
 ## Faster gates (same rules, same evidence)
 
-- **`visual.mjs` captures pages in parallel** (`VISUAL_WORKERS`, default 6) with bounded
-  waits (images ≤3s, the page height must hold still ≤1.2s) instead of fixed pauses:
-  a full baseline of ~110 pages at two widths went from 23 minutes to about 7. Capture
-  v3: the baseline index records the mode and a baseline from an older capture is
-  refused. `VISUAL_ONLY=/a/,/b/` re-checks just some pages while iterating (never a pass).
-- **`VISUAL_MODE=layout`** (opt-in): every page is read as data (each visible text with
-  its box and font size/weight/colour, each image, each coloured block) and compared with
-  the baseline within 3px; a small pixel sample (home + the first page of each section)
-  keeps the "does it look right" check. It takes about 3 minutes and names the elements
-  that changed. Use it on sites without animated content; mark animated regions
-  `data-visual-ignore`. The baseline and the later run must use the same mode.
+- **`visual.mjs` is now a code check (capture v4): no browser, no screenshots, seconds.**
+  It fetches every sitemap page as a visitor gets it and compares, with the P0 baseline,
+  the visible words in reading order, the headings, every link target and every image
+  (file + alt). A failing page names the first words / links / images that changed.
+  It proves R9 ("the defaults are the original copy, verbatim; nothing dropped or
+  reworded") and catches things pixels miss (a category shown as `a-b` instead of `a b`,
+  a changed email, a lost link). It does not look at colours, spacing or fonts — keep the
+  original classes when converting (the converters do) and look at the site once by eye.
+  The staff entry points (`/admin…`) and `data-visual-ignore` regions are left out;
+  `<head>` metadata is R34's job. Pages that R5/R20/R27/R29/R34 *require* to change
+  (a staff link, a guide block, one contact address, one H1) get their baseline retaken
+  from the converted site — list them in the report. `VISUAL_ONLY=/a/,/b/` iterates.
+  The old pixel/layout modes were removed (a full run took 23–120 minutes and flaked on
+  animation).
 - **`site-audit.mjs` visits pages in parallel** (`AUDIT_WORKERS`, default 4; the SEO
-  pass and the 390/1024px responsive pass): 14 minutes → under 4. It also dismisses a
+  pass and the 390/1024px responsive pass): 14 minutes → about 3.5. It dismisses a
   cookie banner before the form checks.
 - **`tracking-edge.mjs` / `acceptance.mjs`:** links to the form page match `/path`,
   `/path/` and `/path?…`; clicks use visible links; the list-focus and hide-item steps
-  skip shared blocks; the hide-item check waits for the visitor page to settle.
+  skip shared blocks; the hide-item check waits for the visitor page to settle; the
+  consent step waits for the banner after a config change.
+- **`Analytics` tolerates `analytics: null`** in the settings (a fresh install or a
+  failed fetch) instead of crashing the layout.
 - Don't kill a gate run midway: acceptance edits real content (nav label, hero text,
-  page keyword) and restores it at the end. A killed run leaves the test edits behind.
+  page keyword, analytics ids) and restores it at the end. A killed run leaves the test
+  edits behind.
 
 ## Moving forward
 

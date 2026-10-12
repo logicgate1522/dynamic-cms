@@ -79,7 +79,7 @@ node run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT
 | check-inline | no hard-coded copy, index keys, `hidden` guard, `{editButton}` marker, forms via `submitForm` + `data-cms-form`, tracking via `track`, uploads via `E.Image`, no unsafe HTML, no secrets, no prompt text, no visitor storage without consent |
 | check-sections | renderer registry = backend section types |
 | production-build | the server under test is THIS build (build id matches) |
-| visual | every page matches the P0 baseline at 390px and 1280px (R9) |
+| visual | every page has the same words, headings, links and images as the P0 baseline — a code check, seconds (R9) |
 | acceptance | editing, drafts, AI, SEO panel, collections, focus, hover tools, responsive, hide, forms, tracking, consent, contacts, auth |
 | tracking-edge | every tracking, consent and contacts edge case |
 | verify-tracking | every plan conversion triggered and checked in a real browser |
@@ -758,13 +758,13 @@ a list of the business details you'll need from the owner.
 --baseline --dir <frontend>/.gates/visual`. It is what R9 is measured
 against in every later pass. Never retake it after you start changing code.
 
-Carousels, auto-advancing slides, rotating words and looping animations must
-stand still under `prefers-reduced-motion` (it is a WCAG rule, and the visual
-capture runs with reduced motion): otherwise the baseline and the later run
-photograph different frames. Anything that still moves gets
-`data-visual-ignore`. If R20 forces a change the baseline can't contain (text
-under 11px, content cut off on a phone), retake only those pages' baselines
-from the original site with the same fix and list them in the report.
+The baseline records each page's server-rendered words, headings, links and
+images (no browser, no screenshots). Content that is meant to differ per visit
+(a live counter, a random quote) gets `data-visual-ignore`. If a rule *requires*
+a change the baseline can't contain (a staff link, one contact address, one H1, a
+guide block for R34), retake only those pages' baselines from the converted site
+and list them in the report. Carousels and auto-advancing slides should also stand
+still under `prefers-reduced-motion` (a WCAG rule).
 
 **Then record the SEO baseline** (R34) the same way, on the same untouched
 build: `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node
