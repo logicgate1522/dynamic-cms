@@ -45,7 +45,8 @@ const SITE = (process.env.SITE_URL || "http://localhost:3000").replace(/\/+$/, "
 const API = `${(process.env.API_URL || "http://localhost:8000").replace(/\/+$/, "")}/api`;
 const { CMS_USER, CMS_PASSWORD } = process.env;
 const PAGE = process.env.CMS_PAGE || "/";
-const DYNAMIC_PAGE = process.env.CMS_DYNAMIC_PAGE || "";
+// A CMS-built page to test sections on. Without CMS_DYNAMIC_PAGE the entry this run creates (and deletes) is used.
+let DYNAMIC_PAGE = process.env.CMS_DYNAMIC_PAGE || "";
 const STAMP = `ACC${Date.now().toString(36)}`;
 
 if (!CMS_USER || !CMS_PASSWORD) {
@@ -506,6 +507,7 @@ try {
         await page.locator('[data-cms-action="toggle-entry-status"]').click();
         const live = await poll(async () => (await fetch(`${SITE}/${cfg.pathPrefix}/${createdEntry.slug}`)).status === 200, { tries: 30, every: 700 });
         check("publishing from entry settings makes it public", !!live);
+        if (!DYNAMIC_PAGE && live) DYNAMIC_PAGE = `/${cfg.pathPrefix}/${createdEntry.slug}`;
         if (!cfg.allowAdd?.length) {
             check("fixed template: no add/move/delete on the entry's sections", (await page.locator('[title="Delete section"], [title="Move up"]').count()) === 0);
         }
