@@ -109,6 +109,11 @@ function parsePage(html, url) {
     // Copy only: text that is already a link can't become one.
     body.querySelectorAll("header, footer, nav, form, script, style, noscript, [hidden], a").forEach((n) => n.remove());
     const forms = [...doc.querySelectorAll("form[data-cms-form]")].map((f) => ({ name: f.dataset.cmsForm, fields: fields(f) }));
+    // A multi-step form that mounts on a later step declares itself in the server HTML: <span hidden data-cms-form-declared="name">.
+    for (const d of doc.querySelectorAll("[data-cms-form-declared]")) {
+        const name = d.getAttribute("data-cms-form-declared");
+        if (name && !forms.some((f) => f.name === name)) forms.push({ name, fields: [] });
+    }
     const ctaCandidates = links.filter((a) => !a.closest("header, footer")).map((a) => ({ el: a, target: norm(a.getAttribute("href"), url) }))
         .filter((x) => x.target && x.target !== path).map((x) => ({ label: text(x.el).slice(0, 60), target: x.target, block: blockFor(x.el), explicit: x.el.hasAttribute("data-track-cta") }));
     return {

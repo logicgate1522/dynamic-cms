@@ -607,6 +607,28 @@ A second pass against the Prometheus editor.
 **Theming**
 - The admin UI reads five `--cms-*` CSS variables (`app/cms.css`).
 
+## Faster gates (same rules, same evidence)
+
+- **`visual.mjs` captures pages in parallel** (`VISUAL_WORKERS`, default 6) with bounded
+  waits (images ≤3s, the page height must hold still ≤1.2s) instead of fixed pauses:
+  a full baseline of ~110 pages at two widths went from 23 minutes to about 7. Capture
+  v3: the baseline index records the mode and a baseline from an older capture is
+  refused. `VISUAL_ONLY=/a/,/b/` re-checks just some pages while iterating (never a pass).
+- **`VISUAL_MODE=layout`** (opt-in): every page is read as data (each visible text with
+  its box and font size/weight/colour, each image, each coloured block) and compared with
+  the baseline within 3px; a small pixel sample (home + the first page of each section)
+  keeps the "does it look right" check. It takes about 3 minutes and names the elements
+  that changed. Use it on sites without animated content; mark animated regions
+  `data-visual-ignore`. The baseline and the later run must use the same mode.
+- **`site-audit.mjs` visits pages in parallel** (`AUDIT_WORKERS`, default 4; the SEO
+  pass and the 390/1024px responsive pass): 14 minutes → under 4. It also dismisses a
+  cookie banner before the form checks.
+- **`tracking-edge.mjs` / `acceptance.mjs`:** links to the form page match `/path`,
+  `/path/` and `/path?…`; clicks use visible links; the list-focus and hide-item steps
+  skip shared blocks; the hide-item check waits for the visitor page to settle.
+- Don't kill a gate run midway: acceptance edits real content (nav label, hero text,
+  page keyword) and restores it at the end. A killed run leaves the test edits behind.
+
 ## Moving forward
 
 ```bash

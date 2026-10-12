@@ -31,6 +31,9 @@ const SITE = (process.env.SITE_URL || "http://localhost:3000").replace(/\/+$/, "
 const API = `${(process.env.API_URL || "http://localhost:8000").replace(/\/+$/, "")}/api`;
 const { CMS_USER, CMS_PASSWORD } = process.env;
 const FORM_PAGE = process.env.FORM_PAGE || "/contact";
+// FORM_PAGE may carry a query ("/start?cms-form=1") so multi-step forms mount their form straight away;
+// FORM_PATH is the bare path used wherever the page is matched rather than opened.
+const FORM_PATH = FORM_PAGE.split("?")[0];
 const STAMP = `edge${Date.now().toString(36)}`;
 // EDGE_ONLY=A,D runs only those sections (A capture, B consent, C profile, D panel, E contacts, F phone).
 const ONLY = (process.env.EDGE_ONLY || "").split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
@@ -79,7 +82,7 @@ async function login() {
     await page.fill("#email", CMS_USER);
     await page.fill("#password", CMS_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForURL((u) => u.pathname === "/admin", { timeout: 20000 });
+    await page.waitForURL((u) => u.pathname.replace(/(.)\/+$/, "$1") === "/admin", { timeout: 20000 });
 }
 const layerEvents = (p, name) => p.evaluate((n) => (window.dataLayer || []).filter((e) => e && e.event === n), name);
 async function waitForPage(p, needle) {
@@ -114,7 +117,7 @@ try {
     const pages = facts.pages || [];
     // The site's enquiry form: the one on FORM_PAGE (else the first with an email field).
     const leadForms = (facts.forms || []).filter((f) => (f.fields || []).some((x) => x.type === "email" || x.name === "email"));
-    const leadForm = leadForms.find((f) => (f.pages || []).includes(FORM_PAGE)) || leadForms[0] || null;
+    const leadForm = leadForms.find((f) => (f.pages || []).includes(FORM_PATH)) || leadForms[0] || null;
     const formName = leadForm?.name || "contact";
     /** A valid submission for the site's own form definition (any fields). */
     const formPayload = (email) => {
@@ -147,8 +150,8 @@ try {
         // A1. In-site navigation: one page_view per navigation, none on a hash change.
         const target = await v.evaluate(() => [...document.querySelectorAll("main a[href^='/']")].map((a) => a.getAttribute("href")).find((h) => h !== "/" && !h.includes("#")));
         if (target) {
-            await v.locator(`main a[href="${target}"]`).first().click();
-            await v.waitForURL((u) => u.pathname === target.split("?")[0], { timeout: 15000 }).catch(() => {});
+            await v.locator(`main a[href="${target}"], main a[href="${target}/"]`).first().click();
+            await v.waitForURL((u) => u.pathname.replace(/(.)\/+$/, "$1") === target.split("?")[0].replace(/(.)\/+$/, "$1"), { timeout: 15000 }).catch(() => {});
             await sleep(800);
             const views = await layerEvents(v, "page_view");
             check("capture: in-site navigation fires exactly one page_view", views.length === 1, `${views.length} for ${target}`);
@@ -279,12 +282,13 @@ try {
 
         // A8. Form started then left: form_abandon with the last field, no values.
         await v.goto(`${SITE}${FORM_PAGE}`);
+        await v.locator("form[data-cms-form]").first().waitFor({ timeout: 8000 }).catch(() => {}); // a client-mounted form
         const form = v.locator("form[data-cms-form]:visible").first();
         const email = form.locator("input[type=email]").first();
         if (await email.count()) {
             await email.fill(`secret.${STAMP}@example.org`);
             const leave = await v.evaluate(() => [...document.querySelectorAll("header a[href^='/']")].map((a) => a.getAttribute("href")).find((h) => h !== location.pathname));
-            await v.locator(`header a[href="${leave}"]`).first().click().catch(() => {});
+            await v.locator(`header a[href="${leave}"], header a[href="${leave}/"]`).first().click().catch(() => {});
             await sleep(1000);
             const ab = await layerEvents(v, "form_abandon");
             check("capture: leaving a started form fires form_abandon with the last field", ab.length === 1 && !!ab[0].last_field, JSON.stringify(ab[0] || {}));
@@ -434,8 +438,8 @@ try {
         await v.goto(`${SITE}/?utm_source=google&utm_medium=cpc&utm_campaign=${STAMP}&gclid=G-${STAMP}`);
         await v.waitForLoadState("networkidle").catch(() => {});
         if (servicePage) {
-            await v.locator(`a[href="${servicePage}"]`).first().click({ force: true });
-            await v.waitForURL((u) => u.pathname === servicePage, { timeout: 15000 }).catch(() => {});
+            await v.locator(`a[href="${servicePage}"]:visible, a[href="${servicePage}/"]:visible`).first().click({ force: true });
+            await v.waitForURL((u) => u.pathname.replace(/(.)\/+$/, "$1") === servicePage.replace(/(.)\/+$/, "$1"), { timeout: 15000 }).catch(() => {});
             await v.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.6));
             await sleep(800);
         }
@@ -443,8 +447,8 @@ try {
         v.on("response", async (r) => {
             if (r.request().method() === "POST" && /\/forms\/[^/]+\/submit\//.test(r.url())) response = await r.json().catch(() => null);
         });
-        await v.locator(`a[href="${FORM_PAGE}"]`).first().click({ force: true });
-        await v.waitForURL((u) => u.pathname === FORM_PAGE, { timeout: 15000 }).catch(() => {});
+        await v.locator(`a[href="${FORM_PATH}"]:visible, a[href="${FORM_PATH}/"]:visible, a[href^="${FORM_PATH}?"]:visible, a[href^="${FORM_PATH}/?"]:visible`).first().click({ force: true });
+        await v.waitForURL((u) => u.pathname.replace(/(.)\/+$/, "$1") === FORM_PATH.replace(/(.)\/+$/, "$1"), { timeout: 15000 }).catch(() => {});
         await sleep(1000);
         const form = v.locator("form[data-cms-form]:visible").first();
         for (const el of await form.locator("input:visible, textarea:visible, select:visible").all()) {
@@ -557,9 +561,14 @@ try {
         if (await pickBtn.count()) {
             await pickBtn.click();
             await page.locator("[data-cms-pick-banner]").waitFor({ timeout: 5000 });
-            const ctaHref = (facts.ctaPages || [])[0];
+            // A CTA target that really is a link inside this page's main content (the first one listed may only be in the menus).
+            const wanted = new Set((facts.ctaPages || []).map((p) => String(p).replace(/(.)\/+$/, "$1")));
+            const ctaHref = await page.evaluate((w) => {
+                const hit = [...document.querySelectorAll("main a[href^='/']")].find((a) => a.offsetParent && w.includes(a.getAttribute("href").split(/[?#]/)[0].replace(/(.)\/+$/, "$1")));
+                return hit ? hit.getAttribute("href") : "";
+            }, [...wanted]);
             const pickTarget = ctaHref ? page.locator(`main a[href="${ctaHref}"]:visible`).first() : page.locator("main a:visible").first();
-            await pickTarget.click();
+            await pickTarget.click({ timeout: 8000 }).catch(() => pickTarget.click({ force: true })); // an edit-tool overlay may sit on the link
             const rows = page.locator("[role=dialog] [data-cms-conversion]");
             await poll(async () => (await rows.count()) > (originalPlan.conversions || []).length);
             const last = (await rows.last().innerText().catch(() => "")).replace(/\s+/g, " ");
@@ -642,7 +651,7 @@ try {
         await phone.close();
     }
 } catch (err) {
-    check("unexpected error", false, err.message.split("\n")[0]);
+    check("unexpected error", false, `${err.message.split("\n")[0]} ${(String(err.stack || "").match(/tracking-edge\.mjs:\d+/) || [""])[0]}`);
     await page.screenshot({ path: "tracking-edge-failure.png" }).catch(() => {});
 } finally {
     // Put everything back.

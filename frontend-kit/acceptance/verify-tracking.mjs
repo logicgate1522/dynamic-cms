@@ -75,7 +75,7 @@ for (const test of tests) {
     const sep = test.page.includes("?") ? "&" : "?";
     process.stdout.write(`… ${test.label || test.conversion} `);
     try {
-        await page.goto(`${SITE}${test.page}${sep}cms-verify=${encodeURIComponent(run.token)}&cms-test=${encode(test)}`, { waitUntil: "load", timeout: 45000 });
+        await page.goto(`${SITE}${test.page}${sep}cms-verify=${encodeURIComponent(run.token)}&cms-test=${encode(test)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
         const results = await page.waitForFunction(() => window.__cmsVerifyDone, null, { timeout: 70000 }).then((h) => h.jsonValue());
         const bad = results.filter((r) => r.status === "fail").length;
         console.log(bad ? `FAIL (${bad})` : "ok");

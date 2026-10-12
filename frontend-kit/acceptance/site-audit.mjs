@@ -70,7 +70,20 @@ import { chromium } from "playwright";
 const SITE = (process.env.SITE_URL || "http://localhost:3000").replace(/\/+$/, "");
 const API = `${(process.env.API_URL || "http://localhost:8000").replace(/\/+$/, "")}/api`;
 const { CMS_USER, CMS_PASSWORD } = process.env;
+
+// A slow third-party image must not abort the audit: wait for the load event, then settle for the parsed page.
+async function goSoft(target, url) {
+    try {
+        return await target.goto(url, { waitUntil: "load", timeout: 60000 });
+    } catch {
+        return await target.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    }
+}
+
 const FORM_PAGE = process.env.FORM_PAGE || "/contact";
+// FORM_PAGE may carry a query ("/start?cms-form=1") so multi-step forms mount their form straight away;
+// FORM_PATH is the bare path used wherever the page is matched rather than opened.
+const FORM_PATH = FORM_PAGE.split("?")[0];
 const LAUNCH = process.env.LAUNCH === "1";
 // Mirrors CLAIMS in api/launch_check.py (R26).
 const CLAIMS = /\b\d{2,}[,\d]*\s?\+(?=\s|$|[^\w])|\b\d(?:\.\d)?\s?\/\s?5\b|★{3,}|\b\d{2,3}\s?%\s*(?:client|customer|satisf|success|retention)|\b\d+\+?\s*years?\s+(?:of\s+)?experience|\b(?:trusted|chosen|used)\s+by\s+(?:over\s+)?\d|\bfixed[- ](?:fees?|prices?|pricing)\b|\baward[- ]winning\b|\b(?:certified|accredited|chartered)\b/gi;
@@ -87,6 +100,18 @@ const browser = await chromium.launch(
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {},
 );
 const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+
+// Pages are independent reads: AUDIT_WORKERS (default 4) browser contexts take them from one queue.
+const AUDIT_WORKERS = Math.max(1, Number(process.env.AUDIT_WORKERS || 4));
+async function pool(items, viewport, fn) {
+    const queue = [...items];
+    await Promise.all(Array.from({ length: Math.min(AUDIT_WORKERS, items.length) }, async () => {
+        const ctx = await browser.newContext({ viewport });
+        const worker = await ctx.newPage();
+        for (let item = queue.shift(); item !== undefined; item = queue.shift()) await fn(item, worker);
+        await ctx.close();
+    }));
+}
 
 /* ---------- sitemap + robots ---------- */
 const sitemap = await (await fetch(`${SITE}/sitemap.xml`)).text();
@@ -131,12 +156,12 @@ const note = (map, value, path) => { if (!map.has(value)) map.set(value, new Set
 const descriptions = {};
 const links = new Map();
 let canonicalOrigin = null;
-for (const url of urls) {
+await pool(urls, { width: 1440, height: 900 }, async (url, page) => {
     const path = new URL(url).pathname;
-    const res = await page.goto(`${SITE}${path}`, { waitUntil: "load" });
+    const res = await goSoft(page, `${SITE}${path}`);
     if (res.status() !== 200) {
         fail(path, `in the sitemap but returns ${res.status()}`);
-        continue;
+        return;
     }
     const m = await page.evaluate(() => {
         const q = (s, a = "content") => document.querySelector(s)?.getAttribute(a) || "";
@@ -232,7 +257,8 @@ for (const url of urls) {
     m.ld.filter((d) => d.__error).forEach((d) => fail(path, `invalid JSON-LD: ${d.__error}`));
     const types = m.ld.flatMap((d) => (d["@graph"] || [d]).flatMap((n) => [].concat(n["@type"] || [])));
     if (path !== "/" && !types.includes("BreadcrumbList")) fail(path, "no BreadcrumbList in JSON-LD");
-    if (/^\/(blog|news|articles?)\//.test(path) && !types.some((t) => /Article|BlogPosting/.test(t))) fail(path, "article page without Article/BlogPosting schema");
+    // An article is /blog/<slug>/ — not the blog index (/blog/) nor its category pages (/blog/categories/<x>/).
+    if (/^\/(blog|news|articles?)\/(?!categories\/)[^/]+\/?$/.test(path) && !types.some((t) => /Article|BlogPosting/.test(t))) fail(path, "article page without Article/BlogPosting schema");
     if (/\/faqs?$/.test(path) && !types.includes("FAQPage")) fail(path, "FAQ page without FAQPage schema");
     if (m.noAlt) fail(path, `${m.noAlt} <img> without alt`);
     // Contact details: every tel:/mailto: link and the JSON-LD must agree.
@@ -275,7 +301,7 @@ for (const url of urls) {
         if (!links.has(clean)) links.set(clean, new Set());
         links.get(clean).add(path);
     }
-}
+});
 if (phones.size > 1) fail("site", `${phones.size} different phone numbers across the site: ${[...phones].map(([n, p]) => `${n} (${[...p].slice(0, 2).join(", ")})`).join(" vs ")}`);
 if (emails.size > 1) fail("site", `${emails.size} different email addresses across the site: ${[...emails].map(([e, p]) => `${e} (${[...p].slice(0, 2).join(", ")})`).join(" vs ")}`);
 for (const [title, paths] of Object.entries(titles)) if (paths.length > 1) fail(paths.join(", "), `duplicate title “${title}”`);
@@ -287,24 +313,25 @@ if (canonicalOrigin && /localhost|127\.0\.0\.1/.test(canonicalOrigin)) launch("s
 
 /* ---------- responsive: readable and nothing off-screen (R20) ---------- */
 for (const width of (process.env.RESPONSIVE_WIDTHS || "390,1024").split(",").map(Number)) {
-    await page.setViewportSize({ width, height: width < 800 ? 844 : 900 });
-    for (const url of urls) {
+    await pool(urls, { width, height: width < 800 ? 844 : 900 }, async (url, page) => {
         const path = new URL(url).pathname;
         if (process.env.AUDIT_DEBUG) console.error(`[responsive ${width}] ${path}`);
-        await page.goto(`${SITE}${path}`, { waitUntil: "load" });
+        await goSoft(page, `${SITE}${path}`);
         // Scroll through slowly so in-view animations run, then let them finish.
         await page.evaluate(async () => {
             for (let y = 0; y < document.body.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 120)); }
             window.scrollTo(0, 0);
         });
-        await page.waitForTimeout(1400);
+        await page.waitForTimeout(900);
         const r = await page.evaluate((vw) => {
             const out = { tiny: [], cut: [] };
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent.trim().length > 2 ? 1 : 2) });
             const parents = new Set();
             while (walker.nextNode()) parents.add(walker.currentNode.parentElement);
             for (const el of parents) {
-                if (!el || el.closest("[aria-hidden='true'], [data-cms-adminbar], [data-cms-layer], script, style, noscript, [inert]")) continue;
+                // [data-ticker]: a continuously moving strip (logos, marquee, drifting tiles) whose items
+                // are meant to enter from off-screen. Mark the strip itself, never a whole page section.
+                if (!el || el.closest("[aria-hidden='true'], [data-cms-adminbar], [data-cms-layer], [data-ticker], script, style, noscript, [inert]")) continue;
                 const rect = el.getBoundingClientRect();
                 if (!rect.width || !rect.height) continue;
                 const cs = getComputedStyle(el);
@@ -315,9 +342,12 @@ for (const width of (process.env.RESPONSIVE_WIDTHS || "390,1024").split(",").map
                     let clip = null;
                     for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
                         const st = getComputedStyle(a);
-                        if (/(hidden|clip)/.test(st.overflowX + st.overflow)) { clip = a.getBoundingClientRect(); break; }
+                        // A scroll container (overflow-x: auto | scroll) keeps off-screen items one swipe away.
+                        if (/(auto|scroll)/.test(st.overflowX) && a.scrollWidth > a.clientWidth + 2) { clip = "scroll"; break; }
+                        // A clipping card inside a scroll rail is still one swipe away: keep looking upward.
+                        if (!clip && /(hidden|clip)/.test(st.overflowX + st.overflow)) clip = a.getBoundingClientRect();
                     }
-                    const cut = clip ? rect.right > Math.min(clip.right, vw) + 2 || rect.left < Math.max(clip.left, 0) - 2 : true;
+                    const cut = clip === "scroll" ? false : clip ? rect.right > Math.min(clip.right, vw) + 2 || rect.left < Math.max(clip.left, 0) - 2 : true;
                     if (cut) out.cut.push(`“${text}” at ${Math.round(rect.left)}→${Math.round(rect.right)}`);
                 }
             }
@@ -325,7 +355,7 @@ for (const width of (process.env.RESPONSIVE_WIDTHS || "390,1024").split(",").map
         }, width);
         if (r.tiny.length) fail(path, `[${width}px] text smaller than 11px: ${r.tiny.slice(0, 4).join(" | ")}`);
         if (r.cut.length) fail(path, `[${width}px] text off the screen: ${r.cut.slice(0, 3).join(" | ")}`);
-    }
+    });
 }
 await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -348,7 +378,9 @@ if (CMS_USER && CMS_PASSWORD) {
 {
     const posts = [];
     page.on("request", (r) => r.method() === "POST" && r.url().includes("/forms/") && posts.push(r.url()));
-    await page.goto(`${SITE}${FORM_PAGE}`, { waitUntil: "load" });
+    await goSoft(page, `${SITE}${FORM_PAGE}`);
+    await page.locator("form[data-cms-form]").first().waitFor({ timeout: 8000 }).catch(() => {}); // a client-mounted form
+    await page.locator("[data-cms-consent='reject']").click({ timeout: 1500 }).catch(() => {}); // a cookie banner would cover the form
     const forms = page.locator("form").filter({ has: page.locator('input[type="email"]') });
     let form = null;
     for (let i = 0; i < (await forms.count()); i++) if (await forms.nth(i).isVisible()) form = form || forms.nth(i);
@@ -408,7 +440,7 @@ if (token) {
         }
     }
 }
-if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, `${pageWords.get(FORM_PAGE)} words besides the form — say what happens after someone submits it`);
+if (pageWords.has(FORM_PATH) && pageWords.get(FORM_PATH) < 120) fail(FORM_PATH, `${pageWords.get(FORM_PATH)} words besides the form — say what happens after someone submits it`);
 
 /* ---------- tracking, consent, contacts (R31–R33) ---------- */
 {
@@ -423,7 +455,7 @@ if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, 
     }
     for (const [path, type] of Object.entries(config.pageTypes || {})) {
         if (type !== "faq") continue;
-        await page.goto(`${SITE}${path}`, { waitUntil: "load" });
+        await goSoft(page, `${SITE}${path}`);
         const toggles = await page.evaluate(() => document.querySelectorAll("main [aria-expanded], main summary").length);
         if (!toggles) fail(path, "FAQ answers have no aria-expanded / <summary> toggle — FAQ opens can't be tracked and screen readers can't tell (R31)");
     }
@@ -440,7 +472,9 @@ if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, 
         }
     }
     // R33: a marketing opt-in is never pre-ticked.
-    await page.goto(`${SITE}${FORM_PAGE}`, { waitUntil: "load" });
+    await goSoft(page, `${SITE}${FORM_PAGE}`);
+    await page.locator("form[data-cms-form]").first().waitFor({ timeout: 8000 }).catch(() => {}); // a client-mounted form
+    await page.locator("[data-cms-consent='reject']").click({ timeout: 1500 }).catch(() => {}); // a cookie banner would cover the form
     if (await page.evaluate(() => [...document.querySelectorAll("input[data-cms-field='consent_marketing']")].some((i) => i.checked))) {
         fail(FORM_PAGE, "the marketing opt-in is ticked before the visitor chooses (R33)");
     }
@@ -448,7 +482,7 @@ if (pageWords.has(FORM_PAGE) && pageWords.get(FORM_PAGE) < 120) fail(FORM_PAGE, 
     if (hasTags) {
         const ctx = await browser.newContext();
         const v = await ctx.newPage();
-        await v.goto(`${SITE}/`, { waitUntil: "load" });
+        await goSoft(v, `${SITE}/`);
         await v.waitForTimeout(1500);
         const banner = await v.locator("[data-cms-consent-banner]").count();
         if (config.region !== "us" && !banner) fail("/", "tracking tags are set but no consent banner appears for a new visitor (R32)");

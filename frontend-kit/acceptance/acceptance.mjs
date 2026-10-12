@@ -98,7 +98,7 @@ async function login(next) {
     await page.fill("#email", CMS_USER);
     await page.fill("#password", CMS_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForURL((url) => url.pathname === next, { timeout: 15000 });
+    await page.waitForURL((url) => url.pathname.replace(/(.)\/+$/, "$1") === next, { timeout: 15000 });
 }
 // Admin-bar actions sit inline when they fit and in "More" when they don't
 // (R30); menus render in the admin layer, outside the bar element.
@@ -132,6 +132,22 @@ async function publishMenu(item) {
 }
 const closeDrawer = () => page.locator('[role="dialog"] [aria-label="Close"]').first().click();
 
+// The Hide button of the item under the pointer: every item has its own tools, so pick the one nearest the item.
+async function itemHideButton(page, el) {
+    const buttons = page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]');
+    await buttons.first().waitFor({ state: "visible", timeout: 8000 }).catch(() => {}); // the tools mount a moment after the hover
+    const box = await el.boundingBox();
+    const all = await buttons.elementHandles();
+    let best = all[0], bestDistance = Infinity;
+    for (const handle of all) {
+        const b = await handle.boundingBox();
+        if (!b || !box) continue;
+        const d = Math.hypot(b.x + b.width / 2 - (box.x + box.width), b.y + b.height / 2 - box.y);
+        if (d < bestDistance) { bestDistance = d; best = handle; }
+    }
+    return best;
+}
+
 let block = null;
 let original = null;
 let originalSeo = null;
@@ -159,7 +175,8 @@ try {
 
     /* ---------- 3. True inline editing -> draft autosave ---------- */
     await ensureEditing();
-    const candidates = page.locator('[data-cms-block]:not([data-cms-block^="section:"])');
+    // The block under test belongs to THIS page: shared blocks (navbar, footer) are never sent to page AI assist.
+    const candidates = page.locator('[data-cms-block]:not([data-cms-block^="section:"]):not([data-cms-shared])');
     await candidates.first().waitFor({ timeout: 10000 });
     let target = null;
     for (let i = 0; i < (await candidates.count()) && !target; i++) {
@@ -208,7 +225,7 @@ try {
     check("AI assist: prompt carries LENGTH guidance and per-field LIMITS", /LENGTH/.test(promptText) && /LIMITS/.test(promptText));
     check("keyword coverage card shows a percentage", (await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) === "0");
     check("“Other SEO rules” list is always shown (6 rules)", (await dialog5.locator("[data-cms-rule]").count()) === 6);
-    const reply = `Here you go!\n\n\`\`\`json\n${JSON.stringify({ [block]: { content: { [field]: `${STAMP} ai [link](https://example.com) ok ${KW}` } } })}\n\`\`\`\nAnything else?`;
+    const reply = `Here you go!\n\n\`\`\`json\n${JSON.stringify({ [block]: { content: { [field]: `${STAMP} [ai](https://example.com) ${KW}` } } })}\n\`\`\`\nAnything else?`;
     await dialog5.locator("textarea:not([readonly])").last().fill(reply);
     await dialog5.getByRole("button", { name: /Apply/ }).click();
     const aiValue = await poll(async () => {
@@ -221,7 +238,7 @@ try {
         current: { probe: { title: "Short title" } },
     });
     check("AI paste too long for its field keeps the previous text", fitReply.body?.applied?.probe?.title === "Short title" && (fitReply.body?.warnings || []).length > 0);
-    check("AI paste normalised (prose, fences, wrapper, markdown link)", aiValue === `${STAMP} ai link ok ${KW}`, aiValue || "no draft");
+    check("AI paste normalised (prose, fences, wrapper, markdown link)", aiValue === `${STAMP} ai ${KW}`, aiValue || "no draft");
     const livePercent = await poll(async () => Number(await dialog5.locator("[data-cms-coverage-percent]").getAttribute("data-cms-coverage-percent")) > 0);
     check("coverage updates live after Apply (no rebuild)", !!livePercent);
     await closeDrawer();
@@ -264,8 +281,9 @@ try {
         check(`the field is never re-created while typing: ${label}`, state.sameElement, state.sameElement ? "" : "re-created mid-typing — is the list keyed by the item's text? use the index");
         await page.keyboard.press("Escape"); // reverts the field
     }
+    // Shared chrome (navbar, footer) is skipped: its open dropdowns would cover the page under test.
     const listCandidates = await page.locator('[data-cms-block]:not([data-cms-block^="section:"])').evaluateAll((els) =>
-        els.map((el, i) => ({ i, path: el.dataset.cmsPath, visible: el.offsetParent !== null && el.innerText.trim().length > 0 }))
+        els.map((el, i) => ({ i, path: el.dataset.cmsPath, visible: el.offsetParent !== null && el.innerText.trim().length > 0 && !el.hasAttribute("data-cms-shared") }))
             .filter((c) => /\.\d+(\.|$)/.test(c.path) && c.visible).map((c) => c.i));
     if (listCandidates.length) {
         await typesWithoutLosingFocus(page.locator('[data-cms-block]:not([data-cms-block^="section:"])').nth(listCandidates[0]), "inline field inside a list");
@@ -275,7 +293,10 @@ try {
     const plainField = page.locator(`[data-cms-block="${block}"][data-cms-path="${field}"]`).first();
     await typesWithoutLosingFocus(plainField, "inline field");
     // The "All fields" panel: a regular form input.
-    await page.locator(`button[title^="All fields"]`).first().click({ force: true });
+    // The block's own tools appear while it is hovered: hover the block under test, then open ITS panel
+    // (not whichever block's pill happens to come first — the header's, on most sites).
+    await plainField.hover();
+    await page.locator(`button[title^="All fields"][data-cms-block-name="${block}"]`).click();
     const panelInput = page.getByRole("dialog").locator('input[type="text"], input:not([type]), textarea').first();
     await panelInput.click();
     await page.keyboard.press("End");
@@ -463,7 +484,7 @@ try {
         await page.locator("#cms-new-title").fill(title);
         await page.locator('[data-cms-action="create-blank"]').click();
         createdEntry = { key: cfg.key, slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-") };
-        await page.waitForURL((url) => url.pathname === `/${cfg.pathPrefix}/${createdEntry.slug}`, { timeout: 15000 });
+        await page.waitForURL((url) => url.pathname.replace(/\/+$/, "") === `/${cfg.pathPrefix}/${createdEntry.slug}`, { timeout: 15000 });
         check("blank entry created and opened", true);
         const hostPath = cfg.hostKind === "blog" ? `blog/${createdEntry.slug}` : `content/${cfg.pathPrefix}/${createdEntry.slug}`;
         const rows = (await admin(`${hostPath}/sections/`)).body;
@@ -485,7 +506,7 @@ try {
         const rewrite = await adminWrite(`collections/${cfg.key}/entries/${createdEntry.slug}/apply/`, "POST", {
             raw: "```json\n" + JSON.stringify({ sections: [{ type: first, heading: `${STAMP} rewritten`, content: "x", description: "x", text: "x", items: [{ question: "Q?", answer: "A." }] }] }) + "\n```",
         });
-        check("AI rewrite applied as drafts, fitted to the template", rewrite.status === 200 && JSON.stringify(rewrite.body.sections.map((r) => r.section_type).slice(0, cfg.sections.length)) === JSON.stringify(cfg.sections));
+        check("AI rewrite applied as drafts, fitted to the template", rewrite.status === 200 && JSON.stringify(rewrite.body.sections.map((r) => r.section_type).slice(0, cfg.sections.length)) === JSON.stringify(cfg.sections), `${rewrite.status} ${JSON.stringify(rewrite.body).slice(0, 240)}`);
         check("visitors still see the published entry, not the rewrite draft", !(await (await fetch(`${SITE}/${cfg.pathPrefix}/${createdEntry.slug}`)).text()).includes(`${STAMP} rewritten`));
         await closeDrawer().catch(() => {});
     }
@@ -594,14 +615,15 @@ try {
         check("showing it again brings it back for visitors", !!back);
     }
     // List item: the first list field on the page that belongs to an object item.
-    const itemField = page.locator('[data-cms-block]:not([data-cms-block^="section:"])').filter({ hasText: /\S/ });
+    // Shared chrome is skipped: its item texts repeat in menus and the footer, so a visitor count proves nothing.
+    const itemField = page.locator('[data-cms-block]:not([data-cms-block^="section:"]):not([data-cms-shared])').filter({ hasText: /\S/ });
     const itemIndex = await itemField.evaluateAll((els) => els.findIndex((el) => /\.\d+\.\w+$/.test(el.dataset.cmsPath) && el.offsetParent));
     if (itemIndex >= 0) {
         const el = itemField.nth(itemIndex);
         const [blockName, path] = [await el.getAttribute("data-cms-block"), await el.getAttribute("data-cms-path")];
         const itemText = (await el.innerText()).trim();
         await el.hover();
-        await page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]').first().click();
+        await (await itemHideButton(page, el)).click();
         const listPath = path.replace(/\.\d+\.\w+$/, "");
         const idx = Number(path.match(/\.(\d+)\.\w+$/)[1]);
         const saved = await poll(async () => {
@@ -609,12 +631,19 @@ try {
             return listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
         });
         check("“Hide” on a list item saves _hidden on that item only", !!saved, `${blockName}.${listPath}[${idx}]`);
-        const itemBefore = await countIn(PAGE, itemText);
+        // The visitor page may still be catching up with the earlier publish: wait for its count to hold steady.
+        let itemBefore = await countIn(PAGE, itemText);
+        for (let i = 0, same = 0; i < 12 && same < 2; i++) {
+            await new Promise((r) => setTimeout(r, 800));
+            const now = await countIn(PAGE, itemText);
+            same = now === itemBefore ? same + 1 : 0;
+            itemBefore = now;
+        }
         await publishPage();
         const itemGone = await poll(async () => (await countIn(PAGE, itemText)) < itemBefore, { tries: 30, every: 700 });
         check("a hidden list item is not shown to visitors", !!itemGone, `“${itemText.slice(0, 30)}” ${itemBefore}→${await countIn(PAGE, itemText)}`);
         await el.hover();
-        await page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]').first().click();
+        await (await itemHideButton(page, el)).click();
         await poll(async () => {
             const d = (await admin(`home/${blockName}/?mode=draft`)).body;
             return !listPath.split(".").reduce((o, k) => o?.[k], d)?.[idx]?._hidden;
@@ -677,6 +706,7 @@ try {
             await route.fulfill({ status: 200, contentType: "application/json", body: '{"success":"true","message":"ok"}' });
         });
         await v.goto(`${SITE}${FORM_PAGE}`);
+        await v.locator("form[data-cms-form]").first().waitFor({ timeout: 8000 }).catch(() => {}); // a client-mounted form
         const forms = v.locator("form").filter({ has: v.locator('input[type="email"]') });
         let form = null;
         for (let i = 0; i < (await forms.count()); i++) if (!form && (await forms.nth(i).isVisible())) form = forms.nth(i);
@@ -796,6 +826,7 @@ try {
         }
         // A form started.
         await v.goto(`${SITE}${FORM_PAGE}`);
+        await v.locator("form[data-cms-form]").first().waitFor({ timeout: 8000 }).catch(() => {}); // a client-mounted form
         const field = v.locator("form[data-cms-form] input:visible").first();
         if (await field.count()) {
             await field.click();

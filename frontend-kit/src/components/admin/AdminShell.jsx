@@ -22,7 +22,8 @@ const NAV = [
 ];
 
 export default function AdminShell({ children }) {
-    const pathname = usePathname();
+    // Sites served with trailingSlash: true report "/admin/login/": compare without it.
+    const pathname = (usePathname() || "/").replace(/(.)\/+$/, "$1");
     const router = useRouter();
     const { signOut, isAdmin, checked } = useAdmin();
     const isLogin = pathname === "/admin/login";

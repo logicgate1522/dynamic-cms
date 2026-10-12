@@ -1347,13 +1347,25 @@ class RevalidationWebhookTests(AdminAuthMixin, APITestCase):
     def test_delivery_is_signed(self):
         from unittest import mock
         from api import revalidation
-        with mock.patch("urllib.request.urlopen") as urlopen:
+        with mock.patch.object(revalidation._opener, "open") as urlopen:
             revalidation._deliver({"cms:home:hero"})
         request = urlopen.call_args[0][0]
         body = request.data
         timestamp = request.get_header("X-cms-timestamp")
         self.assertEqual(request.get_header("X-cms-signature"), revalidation.sign(body, timestamp, "s3cret"))
         self.assertEqual(json_loads(body), {"tags": ["cms:home:hero"]})
+
+
+    def test_post_follows_a_trailing_slash_redirect(self):
+        """A site with trailingSlash answers /api/revalidate with 308 -> /api/revalidate/."""
+        import urllib.request
+        from api import revalidation
+        original = urllib.request.Request("https://site.test/api/revalidate", data=b"{}", method="POST", headers={"X-CMS-Signature": "x"})
+        redirected = revalidation._KeepPostOnRedirect().redirect_request(original, None, 308, "Permanent Redirect", {}, "https://site.test/api/revalidate/")
+        self.assertEqual(redirected.get_method(), "POST")
+        self.assertEqual(redirected.data, b"{}")
+        self.assertEqual(redirected.full_url, "https://site.test/api/revalidate/")
+        self.assertEqual(redirected.get_header("X-cms-signature"), "x")
 
 
 def json_loads(raw):
@@ -1478,7 +1490,7 @@ class AiNormalizeTests(AdminAuthMixin, APITestCase):
             "hero": {"label": "Hero", "content": {"title": "Short title", "cta_href": "/start"}}}}, format="json")
         self.assertIn("LIMITS", r.data["prompt"])
         self.assertIn("LENGTH", r.data["prompt"])
-        self.assertIn('"title": 24', r.data["prompt"])
+        self.assertIn('"title": 27', r.data["prompt"])
         self.assertNotIn('"cta_href": ', r.data["prompt"].split("LIMITS")[1].split("Check every block")[0])
 
     def test_oversized_ai_copy_keeps_previous_text(self):
@@ -2489,3 +2501,12 @@ class HiddenContentTests(AdminAuthMixin, APITestCase):
                                                       "promo": {"_hidden": True, "text": "lorem ipsum"}}, format="json")
         ids = {i["id"] for i in self.admin_client.get("/api/launch-check/").data["items"]}
         self.assertNotIn("placeholders", ids)
+
+
+class FitToTemplateRepeatedTypeTests(APITestCase):
+    def test_flexible_template_with_a_repeated_type_keeps_every_slot(self):
+        from .site_collections import fit_to_template
+        cfg = {"sections": ["rich_text", "rich_text", "faq"], "allowAdd": ["faq"]}
+        out, warnings = fit_to_template(cfg, [{"section_type": "rich_text", "content": {"heading": "x"}, "media": []}])
+        self.assertEqual([s["section_type"] for s in out], ["rich_text", "rich_text", "faq"])
+        self.assertEqual(len(warnings), 2)

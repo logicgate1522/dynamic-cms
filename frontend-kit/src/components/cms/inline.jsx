@@ -99,7 +99,7 @@ function EditableSpan({ value, multiline, placeholder, label, block, shared, pat
     // Uncontrolled while focused, so the caret never jumps.
     useLayoutEffect(() => {
         const node = ref.current;
-        if (node && !focused.current && node.innerText !== value) node.innerText = value;
+        if (node && !focused.current && node.textContent !== value) node.textContent = value;
     }, [value]);
 
     // Re-mounted mid-edit? Take focus back (runs after the text is set above).
@@ -121,7 +121,9 @@ function EditableSpan({ value, multiline, placeholder, label, block, shared, pat
     }, [id]);
 
     const read = (node) => {
-        const text = node.innerText.replace(/\n$/, "");
+        // textContent, not innerText: innerText applies CSS (text-transform: uppercase would be SAVED as
+        // upper-case text, and collapsed whitespace would be lost).
+        const text = node.textContent.replace(/\n$/, "");
         return multiline ? text : text.replace(/\s*\n\s*/g, " ");
     };
 
@@ -155,7 +157,7 @@ function EditableSpan({ value, multiline, placeholder, label, block, shared, pat
                     event.currentTarget.blur();
                 }
                 if (event.key === "Escape") {
-                    event.currentTarget.innerText = start.current;
+                    event.currentTarget.textContent = start.current;
                     onChange(start.current);
                     event.currentTarget.blur();
                 }

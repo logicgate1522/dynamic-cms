@@ -68,9 +68,23 @@ def _deliver(tags):
         },
     )
     try:
-        urllib.request.urlopen(request, timeout=5).close()
+        _opener.open(request, timeout=5).close()
     except Exception as exc:  # never let cache refresh break a save
         logger.warning("CMS revalidation webhook failed: %s", exc)
+
+
+class _KeepPostOnRedirect(urllib.request.HTTPRedirectHandler):
+    """A site served with trailingSlash redirects /api/revalidate -> /api/revalidate/ (308).
+    urllib refuses to follow that for a POST; follow it, keeping method and body (the
+    signature does not depend on the URL)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if code in (307, 308):
+            return urllib.request.Request(newurl, data=req.data, headers=dict(req.header_items()), method=req.get_method())
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_KeepPostOnRedirect)
 
 
 def _flush():

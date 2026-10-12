@@ -257,6 +257,7 @@ function AllFieldsButton({ name, label, saveState, onClick, hidden, onToggleHidd
                     type="button"
                     onClick={onClick}
                     title={`All fields, AI and history for “${label}”`}
+                    data-cms-block-name={name}
                     className="inline-flex h-[30px] items-center gap-2 whitespace-nowrap rounded-full border border-white/40 bg-[#0F172A]/90 px-3 text-[11px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.25)] backdrop-blur transition hover:bg-[var(--cms-accent)]"
                 >
                     <span className={`h-2 w-2 rounded-full ${STATE_DOT[saveState] || STATE_DOT.idle}`} aria-hidden="true" />

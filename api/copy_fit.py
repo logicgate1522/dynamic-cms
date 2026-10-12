@@ -19,7 +19,7 @@ writes copy.
 import re
 
 LENGTH_GUIDE = """LENGTH — write to fit the design, not to fill space:
-- Match the length of the current text of every field. A field may be at most about 25% longer than it is now; shorter is always fine. The "LIMITS" object below gives the maximum characters per field (same keys and nesting as the content) — never exceed it.
+- Match the length of the current text of every field. A field may be at most about 25% (or 16 characters, for short labels) longer than it is now; shorter is always fine. The "LIMITS" object below gives the maximum characters per field (same keys and nesting as the content) — never exceed it.
 - Typical sizes when a field is new or empty: eyebrow / badge / label 1–3 words (≤ 30 characters); button or link text 1–4 words (≤ 28); page or hero headline 4–10 words (≤ 80); section heading 3–9 words (≤ 70); card / list-item title ≤ 60; subheading or hero sub-text 1–2 sentences (≤ 170); card / list-item body 1–2 sentences (≤ 150); FAQ question ≤ 110, answer 2–4 sentences (≤ 500); paragraph of body copy 40–90 words; navigation and footer link labels 1–3 words.
 - One idea per field. Do not add paragraphs, lists or sentences to a field that holds a single line. Do not pack several sentences into a headline.
 - A field that is a short label stays a short label."""
@@ -46,7 +46,7 @@ def _is_copy(key, value):
 
 def _limit_for(key, text):
     current = len(text)
-    limit = max(round(current * 1.25), current + 8, MIN_LIMIT)
+    limit = max(round(current * 1.25), current + 16, MIN_LIMIT)
     for pattern, cap in _CAPS:
         if key and pattern.search(str(key)):
             limit = min(limit, max(cap, current))

@@ -305,6 +305,11 @@ out = out.replace(/\nconst apiUrl = [\s\S]*?;\n/, "\n").replace(/\nconst (?:\w*_
 if (!STATIC && !KEEP_DEFAULTS_NAME && !AGAIN) out = out.replace(new RegExp(`\\b${defaultsName}\\b`, "g"), "defaults");
 
 // Insert the hook as the first statement of the component.
+// A whole import line, placed before the first import (never inside a multi-line one).
+function addImport(code, line) {
+    const first = code.search(/^import\s/m);
+    return first === -1 ? `${line}\n${code}` : `${code.slice(0, first)}${line}\n${code.slice(first)}`;
+}
 const label = (NAME_EXPR ? basename(path).replace(/\.\w+$/, "").replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase() : NAME).split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 const sig = AGAIN ? ["", ""] : out.match(WANTED ? new RegExp(`function ${WANTED}\\s*\\([^)]*\\)\\s*\\{`) : /export default function \w*\([^)]*\)\s*\{/);
 if (!sig) {
@@ -320,17 +325,24 @@ if (NAME_EXPR && !AGAIN) {
     const m = out.match(/(\n\s*)const defaults =([\s\S]*?);(\n)/);
     if (m && m.index > at) {
         out = out.replace(m[0], `${m[1]}const defaults = useStable(${m[2].trim()});${m[3]}`);
-        out = out.replace(/(\nimport [^\n]*\n)(?![\s\S]*\nimport )/, `$1import { useStable } from "@/lib/useStable";\n`);
+        out = addImport(out, `import { useStable } from "@/lib/useStable";`);
     } else manual.push("defaults must be a stable object: wrap it in useStable() from @/lib/useStable");
 }
 // Imports: add useCms, drop names nothing uses any more.
-if (!STATIC && !AGAIN && !/useCms/.test(source)) out = out.replace(/(\nimport [^\n]*\n)(?![\s\S]*\nimport )/, `$1import { useCms } from "@/components/cms/useCms";\n`);
+if (!STATIC && !AGAIN && !/useCms/.test(source)) out = addImport(out, `import { useCms } from "@/components/cms/useCms";`);
 if (!AGAIN && !/^(?:\s*\/\/[^\n]*\n|\s*\/\*[\s\S]*?\*\/)*\s*["']use client["']/.test(out)) out = `"use client";\n\n${out}`;
 
 out = out.replace(/\nimport [A-Za-z_$][\w$]* from ["'](\.\.?\/[^"']*lib\/revalidate)["'];?/g, "");
 
 // Top-level helpers nothing references any more (edit-only sub-components).
-const reparsed = parser.parse(out, { sourceType: "module", plugins: ["jsx"] });
+let reparsed;
+try {
+    reparsed = parser.parse(out, { sourceType: "module", plugins: ["jsx"] });
+} catch (error) {
+    if (process.env.CMS_DEBUG) writeFileSync("/tmp/cms-migrate-broken.jsx", out);
+    console.error(`The edited file does not parse (${error.message}). Re-run with CMS_DEBUG=1 to keep it in /tmp/cms-migrate-broken.jsx.`);
+    process.exit(2);
+}
 const drop = [];
 for (const node of reparsed.program.body) {
     const name = node.type === "FunctionDeclaration" ? node.id?.name : null;

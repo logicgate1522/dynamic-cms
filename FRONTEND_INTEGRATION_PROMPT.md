@@ -353,7 +353,11 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   absolutely positioned cards scale with the viewport (`clamp()`, `%`) and
   stay inside their container at tablet and laptop widths; decorative images
   never sit on top of copy (keep copy in its own column or a faded area). The
-  admin UI follows R30 (one-line bar, panels fit the screen).
+  admin UI follows R30 (one-line bar, panels fit the screen). A strip the
+  visitor swipes (`overflow-x: auto`) is fine: its items are one swipe away.
+  A continuously moving strip (logo marquee, drifting tiles) carries
+  `data-ticker` on the strip itself — never on a whole section — and a
+  strip of interactive items keeps them reachable by keyboard.
 - **Never:** a section that overflows on phones or stretches edge to edge on
   large screens; `text-[8px]`-style sizes; cards positioned with negative
   offsets that leave the screen; layouts designed only for 390px and 1440px.
@@ -754,6 +758,14 @@ a list of the business details you'll need from the owner.
 --baseline --dir <frontend>/.gates/visual`. It is what R9 is measured
 against in every later pass. Never retake it after you start changing code.
 
+Carousels, auto-advancing slides, rotating words and looping animations must
+stand still under `prefers-reduced-motion` (it is a WCAG rule, and the visual
+capture runs with reduced motion): otherwise the baseline and the later run
+photograph different frames. Anything that still moves gets
+`data-visual-ignore`. If R20 forces a change the baseline can't contain (text
+under 11px, content cut off on a phone), retake only those pages' baselines
+from the original site with the same fix and list them in the report.
+
 **Then record the SEO baseline** (R34) the same way, on the same untouched
 build: `AUDIT_JSON=<frontend>/.gates/seo-baseline.json node
 frontend-kit/acceptance/site-audit.mjs` (it runs without the CMS; with
@@ -849,6 +861,12 @@ real page around the form: H1 first, what happens next, what to have ready,
 links to the main offerings (R29). Every `<form>` has
 `data-cms-form="<name>"` (R31). A form that offers updates/marketing uses a
 `consent_marketing` field, unticked and never required (R33).
+
+**Multi-step forms.** If the form only mounts on a later step, also mount it
+straight away when the URL has `?cms-form` or `?cms-verify` (the gates and the
+tracking checks pass these), and run the gates with `FORM_PAGE=/path?cms-form=1`.
+Declare the form in the server HTML with `<span hidden data-cms-form-declared="name" />` so the site scan and the tracking plan find it. Server-render an `<h1>` in the `Suspense` fallback when the step UI is client-only,
+so the page has exactly one crawlable H1 (R29).
 
 **Exit check P4:** `grep -rn "fetch(.*submit\|formsubmit\|mailto:.*body" src --include=*.jsx` finds nothing outside `lib/forms.js`; each form submits once in the browser and the entry appears in Dashboard → Form inbox.
 

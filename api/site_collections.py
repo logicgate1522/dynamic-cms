@@ -318,7 +318,8 @@ def fit_to_template(cfg, sections, title=""):
             warnings.append(f"Dropped section type(s) this collection does not use: {', '.join(dropped)}.")
         present = [s["section_type"] for s in out]
         for index, section_type in enumerate(template):
-            if section_type not in present:
+            # A template may repeat a type (two rich_text slots): count slots, not kinds.
+            if present.count(section_type) < template[:index + 1].count(section_type):
                 warnings.append(f'"{section_type}" was missing from the reply — added with placeholder text.')
                 out.insert(min(index, len(out)), {"section_type": section_type,
                                                   "content": starter_content(section_type), "media": []})
