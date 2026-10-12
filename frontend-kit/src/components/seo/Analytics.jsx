@@ -43,7 +43,9 @@ function id(analytics, key) {
 // JSON safe to inline in a <script> (no "</script>" breakouts).
 const inline = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
 
-export default async function Analytics({ analytics = {} }) {
+export default async function Analytics({ analytics: given }) {
+    // Settings may carry analytics: null (a fresh install, or a failed fetch): treat it as empty.
+    const analytics = given && typeof given === "object" ? given : {};
     const tracking = await getTrackingConfig();
     const gtm = id(analytics, "gtmId");
     const ga4 = id(analytics, "ga4Id");

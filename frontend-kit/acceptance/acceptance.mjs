@@ -137,15 +137,17 @@ async function itemHideButton(page, el) {
     const buttons = page.locator('[data-cms-item-tools] [data-cms-action="toggle-item-hidden"]');
     await buttons.first().waitFor({ state: "visible", timeout: 8000 }).catch(() => {}); // the tools mount a moment after the hover
     const box = await el.boundingBox();
-    const all = await buttons.elementHandles();
-    let best = all[0], bestDistance = Infinity;
-    for (const handle of all) {
-        const b = await handle.boundingBox();
-        if (!b || !box) continue;
-        const d = Math.hypot(b.x + b.width / 2 - (box.x + box.width), b.y + b.height / 2 - box.y);
-        if (d < bestDistance) { bestDistance = d; best = handle; }
-    }
-    return best;
+    // The button nearest the item's top-right corner (re-resolved by index: a re-render must not strand the handle).
+    const nearest = await buttons.evaluateAll((els, b) => {
+        let best = 0, bestDistance = Infinity;
+        els.forEach((e, i) => {
+            const r = e.getBoundingClientRect();
+            const d = b ? Math.hypot(r.x + r.width / 2 - (b.x + b.width), r.y + r.height / 2 - b.y) : i;
+            if (d < bestDistance) { bestDistance = d; best = i; }
+        });
+        return best;
+    }, box);
+    return buttons.nth(nearest);
 }
 
 let block = null;

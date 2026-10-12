@@ -338,6 +338,12 @@ try {
         const v = await ctx.newPage();
         await v.goto(`${SITE}/`);
         await v.locator("[data-cms-consent-banner]").waitFor({ timeout: 8000 }).catch(() => {});
+        // A config change reaches cached pages a moment later: reload until the banner shows.
+        for (let tries = 0; tries < 4 && !(await v.locator("[data-cms-consent-banner]").count()); tries++) {
+            await sleep(2500);
+            await v.reload();
+            await v.locator("[data-cms-consent-banner]").waitFor({ timeout: 4000 }).catch(() => {});
+        }
         await v.locator("[data-cms-consent='choose']").click();
         const boxes = v.locator("[data-cms-consent-banner] input[type=checkbox]:not([disabled])");
         await boxes.nth(0).check();
@@ -450,6 +456,7 @@ try {
         await v.locator(`a[href="${FORM_PATH}"]:visible, a[href="${FORM_PATH}/"]:visible, a[href^="${FORM_PATH}?"]:visible, a[href^="${FORM_PATH}/?"]:visible`).first().click({ force: true });
         await v.waitForURL((u) => u.pathname.replace(/(.)\/+$/, "$1") === FORM_PATH.replace(/(.)\/+$/, "$1"), { timeout: 15000 }).catch(() => {});
         await sleep(1000);
+        await v.locator("[data-cms-consent='reject']").click({ timeout: 1500 }).catch(() => {}); // a cookie banner would cover the submit button
         const form = v.locator("form[data-cms-form]:visible").first();
         for (const el of await form.locator("input:visible, textarea:visible, select:visible").all()) {
             await el.focus().catch(() => {});

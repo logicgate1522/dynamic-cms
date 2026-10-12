@@ -167,29 +167,32 @@ const shots = {};
 async function capture(page, width, path) {
     // A slow third-party image must not abort the run: wait for the load event, then settle for the parsed page.
     await page.goto(`${SITE}${path}`, { waitUntil: "load", timeout: 60000 }).catch(() => page.goto(`${SITE}${path}`, { waitUntil: "domcontentloaded", timeout: 60000 }));
-    await page.evaluate(async () => {
+    await page.evaluate(async (fast) => {
         // Reveal every in-view (scroll-triggered) element: steps with a short pause so observers fire, and a stop at
         // the very bottom (the page may grow while scrolling).
         const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-        for (let y = 0; y < document.documentElement.scrollHeight; y += 400) {
+        // Pixel mode scrolls slowly enough for every reveal to fire; layout mode only needs the boxes in place.
+        const step = fast ? 400 : 300;
+        const dwell = fast ? 70 : 120;
+        for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
             window.scrollTo(0, y);
-            await pause(70);
+            await pause(dwell);
         }
         window.scrollTo(0, document.documentElement.scrollHeight);
-        await pause(400);
+        await pause(fast ? 400 : 700);
         // Bounded waits: images still loading, then the page height holding still (both change what is captured).
-        for (const until = Date.now() + 3000; Date.now() < until && [...document.images].some((img) => !img.complete);) await pause(100);
+        for (const until = Date.now() + 4000; Date.now() < until && [...document.images].some((img) => !img.complete);) await pause(100);
         for (let last = -1, same = 0, i = 0; i < 6 && same < 2; i++) {
             const height = document.documentElement.scrollHeight;
             same = height === last ? same + 1 : 0;
             last = height;
-            await pause(200);
+            await pause(250);
         }
         window.scrollTo(0, 0);
         // The header and other scroll-linked parts finish their transition back to the top state.
         for (let i = 0; i < 10 && window.scrollY > 0; i++) await pause(100);
-        await pause(700);
-    });
+        await pause(fast ? 700 : 1200);
+    }, MODE === "layout");
     if (MODE === "layout") {
         const layout = await page.evaluate(readLayout);
         const file = fileName(width, path, "json");
