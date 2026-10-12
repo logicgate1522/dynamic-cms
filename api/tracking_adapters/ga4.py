@@ -52,7 +52,9 @@ def send(event, conn):
     mid = acct.get("measurementId")
     if not secret or not mid:
         return {"ok": False, "skipped": True, "detail": "GA4 server copies need the measurement id and an API secret (created by Sync)."}
-    client_id = (event.get("context") or {}).get("ga_client_id") or f"{int(base.sha256(event["event_id"])[:9], 16)}.{base.event_time(event)}"
+    # (no nested same-type quotes inside the f-string: they are a SyntaxError before Python 3.12)
+    fallback_id = f"{int(base.sha256(event['event_id'])[:9], 16)}.{base.event_time(event)}"
+    client_id = (event.get("context") or {}).get("ga_client_id") or fallback_id
     body = mp_body(event, client_id)
     if event.get("is_test"):
         # Verification: the validation server checks the payload without recording it.

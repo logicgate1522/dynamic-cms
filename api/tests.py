@@ -2510,3 +2510,28 @@ class FitToTemplateRepeatedTypeTests(APITestCase):
         out, warnings = fit_to_template(cfg, [{"section_type": "rich_text", "content": {"heading": "x"}, "media": []}])
         self.assertEqual([s["section_type"] for s in out], ["rich_text", "rich_text", "faq"])
         self.assertEqual(len(warnings), 2)
+
+
+class PythonCompatibilityTests(APITestCase):
+    """The backend runs on Python 3.11 in some deployments: no f-string nested with the
+    same quote type (PEP 701 syntax, Python 3.12+ only)."""
+
+    def test_no_nested_same_quote_fstrings(self):
+        import io
+        import pathlib
+        import tokenize
+        if not hasattr(tokenize, "FSTRING_START"):  # on 3.11 the file would not import at all
+            return
+        bad = []
+        for path in pathlib.Path(__file__).resolve().parent.rglob("*.py"):
+            if "migrations" in path.parts:
+                continue
+            stack = []
+            for tok in tokenize.generate_tokens(io.StringIO(path.read_text()).readline):
+                if tok.type == tokenize.FSTRING_START:
+                    stack.append(tok.string[-3:] if tok.string[-3:] in ('"""', "'''") else tok.string[-1])
+                elif tok.type == tokenize.FSTRING_END:
+                    stack.pop()
+                elif stack and tok.type == tokenize.STRING and len(stack[-1]) == 1 and tok.string.lstrip("rbfuRBFU").startswith(stack[-1]):
+                    bad.append(f"{path.name}:{tok.start[0]}")
+        self.assertEqual(bad, [], "f-string nested with the same quote type (Python 3.12+ only)")
