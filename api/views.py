@@ -756,6 +756,9 @@ class RedirectImportExportView(APIView):
 
 class FormSubmitView(APIView):
     """Public, throttled endpoint that accepts a submission for a named form definition."""
+    # No session authentication: it is anonymous by design. With one, a signed-in editor browsing the
+    # site (same-origin proxy, so the session cookie is sent) would be refused with "CSRF Failed".
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [SiteAwareScopedRateThrottle]
     throttle_scope = 'form_submit'

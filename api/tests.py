@@ -2535,3 +2535,16 @@ class PythonCompatibilityTests(APITestCase):
                 elif stack and tok.type == tokenize.STRING and len(stack[-1]) == 1 and tok.string.lstrip("rbfuRBFU").startswith(stack[-1]):
                     bad.append(f"{path.name}:{tok.start[0]}")
         self.assertEqual(bad, [], "f-string nested with the same quote type (Python 3.12+ only)")
+
+
+class FormSubmitWithSessionTests(APITestCase):
+    """A signed-in editor browsing the site submits a public form: the session cookie travels with the
+    request (same-origin proxy) but the endpoint is anonymous, so it must not demand a CSRF token."""
+
+    def test_signed_in_browser_can_submit_a_public_form_without_csrf(self):
+        from django.test import Client
+        user = User.objects.create_user(username="editor-form", email="e@example.com", password="correct-horse", is_staff=True)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(user)
+        res = client.post("/api/forms/quote/submit/", data='{"name": "A"}', content_type="application/json")
+        self.assertEqual(res.status_code, 201, getattr(res, "content", b"")[:200])
