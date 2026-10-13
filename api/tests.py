@@ -2622,3 +2622,15 @@ class FormFollowUpTests(AdminAuthMixin, APITestCase):
         FormSubmission.objects.filter(event_id=event_id).update(created_at=timezone.now() - timedelta(hours=25))
         r = self.client.post("/api/forms/quote/followup/", {"event_id": event_id, "heardFrom": "x"}, format="json")
         self.assertEqual(r.status_code, 404)
+
+
+class FormListTests(AdminAuthMixin, APITestCase):
+    def test_lists_forms_with_inbox_counts_for_admins_only(self):
+        self.admin_client.put("/api/home/form-quote/", {"label": "Quote requests", "fields": [{"name": "name", "type": "text"}]}, format="json")
+        self.client.post("/api/forms/quote/submit/", {"name": "A"}, format="json")
+        self.client.post("/api/forms/orphan/submit/", {"x": "1"}, format="json")
+        self.assertIn(self.client.get("/api/forms/").status_code, (401, 403))
+        rows = {f["name"]: f for f in self.admin_client.get("/api/forms/").json()}
+        self.assertEqual(rows["quote"]["label"], "Quote requests")
+        self.assertEqual((rows["quote"]["total"], rows["quote"]["unread"]), (1, 1))
+        self.assertEqual(rows["orphan"]["total"], 1)

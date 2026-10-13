@@ -887,6 +887,35 @@ def _filtered_submissions(name, params):
     return qs
 
 
+class FormListView(APIView):
+    """GET forms/ (admin) — every form the site has (defined or with submissions) with its inbox counts,
+    for the Form submissions page: [{name, label, total, unread, last_at}]."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        from django.db.models import Count, Max, Q
+        stats = {
+            row["form_name"]: row
+            for row in FormSubmission.objects.filter(is_spam=False).values("form_name").annotate(
+                total=Count("id"), unread=Count("id", filter=Q(is_read=False)), last=Max("created_at"))
+        }
+        labels = {}
+        for row in ComponentData.objects.filter(name__startswith="form-"):
+            labels[row.name[len("form-"):]] = (row.data or {}).get("label") or ""
+        out = []
+        for name in set(stats) | set(labels):
+            stat = stats.get(name) or {}
+            out.append({
+                "name": name,
+                "label": labels.get(name) or name.replace("-", " ").replace("_", " ").title(),
+                "total": stat.get("total", 0),
+                "unread": stat.get("unread", 0),
+                "last_at": stat.get("last"),
+            })
+        out.sort(key=lambda f: (f["last_at"] is None, -(f["last_at"].timestamp() if f["last_at"] else 0), f["name"]))
+        return Response(out)
+
+
 class FormSubmissionListView(ListAPIView):
     """Admin-only list of submissions for a named form.
     Filters: ?is_read=&is_spam=&since=ISO8601."""

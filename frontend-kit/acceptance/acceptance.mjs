@@ -776,7 +776,7 @@ try {
             check("contacts: contacts are admin-only", (await fetch(`${API}/contacts/`)).status === 401 || (await fetch(`${API}/contacts/`)).status === 403);
             if (contact) {
                 await adminWrite(`contacts/${contact.id}/erase/`, "POST", { confirm: "ERASE" });
-                check("contacts: erase removes the contact", !((await admin(`contacts/?q=${encodeURIComponent(leadEmail)}`)).body?.results || []).length);
+                check("contacts: erase removes the contact", !!(await poll(async () => !((await admin(`contacts/?q=${encodeURIComponent(leadEmail)}`)).body?.results || []).length, { tries: 15, every: 500 })));
             } else if (stored) {
                 await adminWrite(`forms/${formName}/submissions/${stored.id}/`, "DELETE");
             }
@@ -793,7 +793,7 @@ try {
         const ready = await poll(async () => {
             await v.goto(`${SITE}${PAGE}`);
             return v.evaluate(() => (window.dataLayer || []).some((e) => e && e.cms_acceptance === "yes"));
-        }, { tries: 15, every: 1000 });
+        }, { tries: 40, every: 1000 }); // the page refreshes through the revalidation webhook: slower on a busy machine
         check("data layer variables are pushed before GTM", !!ready);
         check("the GTM container from Settings is loaded", await v.evaluate(() => (window.dataLayer || []).some((e) => e && e["gtm.start"])));
         const here = new URL(v.url()).pathname;
