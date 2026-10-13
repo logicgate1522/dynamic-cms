@@ -61,6 +61,7 @@ from .views import (
     FormSubmissionExportView,
     FormSubmissionListView,
     FormSubmitView,
+    FormFollowUpView,
     OrganizationSchemaView,
     RedirectImportExportView,
     RedirectResolveView,
@@ -159,6 +160,7 @@ urlpatterns = [
     path('blog/<slug:key>/sections/', BlogSectionListView.as_view(), name='blog-section-list'),
 
     path('forms/<slug:name>/submit/', FormSubmitView.as_view(), name='form-submit'),
+    path('forms/<slug:name>/followup/', FormFollowUpView.as_view(), name='form-followup'),
     path('forms/<slug:name>/submissions/export/', FormSubmissionExportView.as_view(), name='form-submissions-export'),
     path('forms/<slug:name>/submissions/<int:pk>/', FormSubmissionDetailView.as_view(), name='form-submission-detail'),
     path('forms/<slug:name>/submissions/', FormSubmissionListView.as_view(), name='form-submissions'),

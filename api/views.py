@@ -838,6 +838,41 @@ class FormSubmitView(APIView):
         )
 
 
+class FormFollowUpView(APIView):
+    """POST forms/<name>/followup/ {event_id, <fields>} — adds answers to a submission that was ALREADY
+    stored (e.g. "where did you hear about us?" on the thank-you page), so the lead is never lost when the
+    visitor skips the follow-up. Only fields the form definition marks `followUp: true` are accepted; the
+    submission's event id (returned by submit) is the visitor's receipt, valid for 24 hours."""
+    authentication_classes = []  # anonymous, like the submit it follows
+    permission_classes = [AllowAny]
+    throttle_classes = [SiteAwareScopedRateThrottle]
+    throttle_scope = 'form_submit'
+
+    def post(self, request, *args, **kwargs):
+        form_name = kwargs.get('name')
+        payload = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
+        event_id = str(payload.pop("event_id", "") or "").strip()
+        row = ComponentData.objects.filter(name=f"form-{form_name}").first()
+        definition = (row.data or {}) if row is not None else {}
+        submission = None
+        if event_id:
+            submission = FormSubmission.objects.filter(
+                form_name=form_name, event_id=event_id, created_at__gte=timezone.now() - timedelta(hours=24),
+            ).first()
+        if submission is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        follow_up = [dict(f, required=False) for f in (definition.get("fields") or []) if isinstance(f, dict) and f.get("followUp")]
+        if not follow_up:
+            return Response({"detail": "This form has no follow-up fields."}, status=status.HTTP_400_BAD_REQUEST)
+        cleaned, errors = validate_submission({"fields": follow_up}, payload)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        if cleaned:
+            submission.data = {**(submission.data or {}), **cleaned}
+            submission.save(update_fields=["data"])
+        return Response({"success": True, "saved": sorted(cleaned)})
+
+
 def _filtered_submissions(name, params):
     qs = FormSubmission.objects.filter(form_name=name)
     if params.get("is_read") in ("0", "1"):

@@ -7,7 +7,7 @@ import { newEventId, track, trackingPlan } from "@/lib/track";
    Form submissions — the ONLY way the site submits a form.
 
      const result = await submitForm("quote", payload, { honeypotField: "website" });
-     // result: { ok, status, errors, message }
+     // result: { ok, status, errors, message, eventId }
 
    1. POST forms/<name>/submit/ — the CMS validates against the form's
       definition (home/form-<name>/), drops bots (honeypot) and stores the
@@ -129,5 +129,23 @@ export async function submitForm(formName, payload, { honeypotField = "website" 
         });
     }
     return result({ form: formName, ok: true, status: res.status, errors: {}, message: "", duplicate: Boolean(body.duplicate),
-                    conversions: body.conversions || [], summary: body.summary || "" });
+                    conversions: body.conversions || [], summary: body.summary || "", eventId: body.event_id || eventId });
+}
+
+/* Adds answers to a submission that was already stored (e.g. "where did you hear about us?" on the thank-you
+   page). The lead is saved by submitForm first, so skipping this loses nothing. Only fields the form's
+   definition marks followUp: true are accepted, for 24 hours. `eventId` is result.eventId from submitForm.
+   Returns { ok }; never throws. */
+export async function followUpForm(formName, eventId, fields) {
+    if (!eventId) return { ok: false };
+    try {
+        const res = await fetch(`${API}/forms/${formName}/followup/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...fields, event_id: eventId }),
+        });
+        return { ok: res.ok };
+    } catch {
+        return { ok: false };
+    }
 }

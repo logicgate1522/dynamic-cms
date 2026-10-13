@@ -2579,3 +2579,46 @@ class PublicWriteAuthGuardTests(APITestCase):
 
         walk(get_resolver().url_patterns)
         self.assertEqual(bad, [], "public write views using session authentication")
+
+
+from .models import FormSubmission  # noqa: E402
+
+
+class FormFollowUpTests(AdminAuthMixin, APITestCase):
+    """Answers added after the submission was stored (e.g. "where did you hear about us?")."""
+
+    def setUp(self):
+        from .models import FormSubmission  # noqa: F401
+        super().setUp()
+        cache.clear()
+        self.admin_client.put("/api/home/form-quote/", {"fields": [
+            {"name": "name", "label": "Name", "type": "text", "required": True},
+            {"name": "heardFrom", "label": "Heard from", "type": "text", "followUp": True},
+            {"name": "heardFromOther", "label": "Details", "type": "text", "followUp": True},
+        ]}, format="json")
+
+    def _submit(self):
+        r = self.client.post("/api/forms/quote/submit/", {"name": "Ada", "_cms": {"event_id": "evt-follow-1"}}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["event_id"]
+
+    def test_follow_up_adds_answers_to_the_stored_submission(self):
+        event_id = self._submit()
+        r = self.client.post("/api/forms/quote/followup/", {"event_id": event_id, "heardFrom": "Google search"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        stored = FormSubmission.objects.get(event_id=event_id)
+        self.assertEqual(stored.data["heardFrom"], "Google search")
+        self.assertEqual(stored.data["name"], "Ada")
+
+    def test_only_follow_up_fields_can_change_and_unknown_receipts_are_refused(self):
+        event_id = self._submit()
+        self.client.post("/api/forms/quote/followup/", {"event_id": event_id, "name": "Mallory"}, format="json")
+        self.assertEqual(FormSubmission.objects.get(event_id=event_id).data["name"], "Ada")
+        r = self.client.post("/api/forms/quote/followup/", {"event_id": "nope", "heardFrom": "x"}, format="json")
+        self.assertEqual(r.status_code, 404)
+
+    def test_follow_up_expires_after_a_day(self):
+        event_id = self._submit()
+        FormSubmission.objects.filter(event_id=event_id).update(created_at=timezone.now() - timedelta(hours=25))
+        r = self.client.post("/api/forms/quote/followup/", {"event_id": event_id, "heardFrom": "x"}, format="json")
+        self.assertEqual(r.status_code, 404)
