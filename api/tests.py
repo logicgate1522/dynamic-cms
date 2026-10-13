@@ -2548,3 +2548,34 @@ class FormSubmitWithSessionTests(APITestCase):
         client.force_login(user)
         res = client.post("/api/forms/quote/submit/", data='{"name": "A"}', content_type="application/json")
         self.assertEqual(res.status_code, 201, getattr(res, "content", b"")[:200])
+
+
+class PublicWriteAuthGuardTests(APITestCase):
+    """Any view that is open to everyone and accepts writes must not use the session cookie: with the
+    same-origin proxy a signed-in editor's cookie travels with public requests, and session
+    authentication would then demand a CSRF token the public client never has ("CSRF Failed")."""
+
+    def test_no_public_write_view_uses_session_authentication(self):
+        from django.urls import get_resolver
+        from rest_framework.authentication import SessionAuthentication
+        from rest_framework.permissions import AllowAny
+        allowed = {"AdminLoginView", "LogoutView"}  # session based on purpose (CSRF-protected)
+        seen, bad = set(), []
+
+        def walk(patterns):
+            for pattern in patterns:
+                if hasattr(pattern, "url_patterns"):
+                    walk(pattern.url_patterns)
+                    continue
+                cls = getattr(pattern.callback, "cls", None) or getattr(pattern.callback, "view_class", None)
+                if not cls or cls in seen:
+                    continue
+                seen.add(cls)
+                writes = [m for m in ("post", "put", "patch", "delete") if hasattr(cls, m)]
+                open_to_all = AllowAny in getattr(cls, "permission_classes", [])
+                uses_session = any(issubclass(a, SessionAuthentication) for a in getattr(cls, "authentication_classes", []))
+                if writes and open_to_all and uses_session and cls.__name__ not in allowed:
+                    bad.append(cls.__name__)
+
+        walk(get_resolver().url_patterns)
+        self.assertEqual(bad, [], "public write views using session authentication")
