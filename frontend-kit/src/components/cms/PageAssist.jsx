@@ -190,6 +190,8 @@ function PageAssistDrawer({ onClose }) {
 
 function CoverageCard({ coverage, rules, failingRules, onOpenSeo }) {
     const { keyword, percent, withKeyword, total, rows } = coverage;
+    const sharedRows = rows.filter((r) => r.excluded);
+    const pageRows = rows.filter((r) => !r.excluded);
     return (
         <div className="space-y-3 rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4" data-cms-coverage>
             <div className="flex items-center justify-between gap-2">
@@ -205,23 +207,25 @@ function CoverageCard({ coverage, rules, failingRules, onOpenSeo }) {
                     ? `“${keyword}” appears in ${withKeyword} of ${total} section${total === 1 ? "" : "s"} below.`
                     : "Set a primary keyword in this page's SEO (Ask AI → Find keywords can choose one) to see per-section coverage."}
             </p>
+            {sharedRows.length ? (
+                // Site-wide blocks (navbar, footer…) are edited on their own and never counted: one small
+                // muted line, not chips, so they don't make this page's coverage look incomplete.
+                <p data-cms-coverage-shared className="text-[11px] leading-4 text-[#64748B]" title="Shared across pages: edited on their own, never sent to the AI and not counted here">
+                    Site-wide, not counted: {sharedRows.map((r) => r.label).join(" · ")}
+                </p>
+            ) : null}
             <div className="flex flex-wrap gap-1.5">
-                {rows.map((r) => (
+                {pageRows.map((r) => (
                     <span
                         key={r.id}
-                        data-cms-coverage-chip={r.hasKeyword ? "yes" : r.excluded ? "shared" : "no"}
-                        title={r.excluded ? "Shared across pages — not counted" : r.hasKeyword ? `Contains “${keyword}”` : keyword ? `Does not contain “${keyword}”` : ""}
+                        data-cms-coverage-chip={r.hasKeyword ? "yes" : "no"}
+                        title={r.hasKeyword ? `Contains “${keyword}”` : keyword ? `Does not contain “${keyword}”` : ""}
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.02em] ${
-                            r.excluded
-                                ? "border-dashed border-[#CBD5E1] text-[#64748B]"
-                                : r.hasKeyword
-                                  ? "border-[#86EFAC] bg-[#F0FDF4] text-[#15803D]"
-                                  : "border-[#E2E8F0] bg-white text-[#64748B]"
+                            r.hasKeyword ? "border-[#86EFAC] bg-[#F0FDF4] text-[#15803D]" : "border-[#E2E8F0] bg-white text-[#64748B]"
                         }`}
                     >
-                        {r.hasKeyword && !r.excluded ? <span aria-hidden="true">✓</span> : null}
+                        {r.hasKeyword ? <span aria-hidden="true">✓</span> : null}
                         {r.label}
-                        {r.excluded ? " · shared" : ""}
                     </span>
                 ))}
             </div>
