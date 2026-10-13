@@ -2634,3 +2634,76 @@ class FormListTests(AdminAuthMixin, APITestCase):
         self.assertEqual(rows["quote"]["label"], "Quote requests")
         self.assertEqual((rows["quote"]["total"], rows["quote"]["unread"]), (1, 1))
         self.assertEqual(rows["orphan"]["total"], 1)
+
+
+class AutoReplyTests(AdminAuthMixin, APITestCase):
+    """The visitor's "we have received your request" email: personal, no blanks, repliable."""
+
+    DEFINITION = {
+        "fields": [
+            {"name": "name", "label": "Name", "type": "text", "required": True},
+            {"name": "phone", "label": "Phone", "type": "text"},
+            {"name": "whatsapp", "label": "On WhatsApp", "type": "text"},
+            {"name": "email", "label": "Email", "type": "email"},
+            {"name": "goal", "label": "Goal", "type": "text"},
+            {"name": "plan", "label": "Plan", "type": "text"},
+            {"name": "notes", "label": "Notes", "type": "textarea"},
+        ],
+        "autoReply": {"enabled": True, "replyTo": "team@example.com"},
+    }
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        mail.outbox = []
+        self.admin_client.patch("/api/settings/site/", {"organization": {"name": "Acme Studio"}, "contact": {"email": "hello@acme.test", "phone": "+1 555 0100"}}, format="json")
+        self.admin_client.put("/api/home/form-quote/", self.DEFINITION, format="json")
+
+    def _submit(self, payload, **extra):
+        return self.client.post("/api/forms/quote/submit/", payload, format="json", **extra)
+
+    def test_personal_email_with_reply_to_and_no_blanks(self):
+        r = self._submit({"name": "ada lovelace", "email": "ada@example.com", "phone": "+44 7700 900123", "whatsapp": "Yes",
+                          "goal": "Build a Mobile App", "plan": "Customer app", "notes": "Launch in May.\nBudget is flexible."})
+        self.assertEqual(r.status_code, 201, r.content)
+        ack = [m for m in mail.outbox if m.to == ["ada@example.com"]]
+        self.assertEqual(len(ack), 1)
+        m = ack[0]
+        self.assertEqual(m.reply_to, ["team@example.com"])
+        self.assertIn("Dear Ada,", m.body)
+        self.assertIn("Build a Mobile App (Customer app)", m.body)
+        self.assertIn("on WhatsApp (+44 7700 900123)", m.body)
+        self.assertIn("Acme Studio", m.body)
+        self.assertNotIn("{", m.body)
+        html = m.alternatives[0][0]
+        self.assertIn("Launch in May.<br>Budget is flexible.", html)
+
+    def test_missing_pieces_drop_out_instead_of_leaving_gaps(self):
+        self._submit({"name": "Bo", "email": "bo@example.com"})
+        m = [x for x in mail.outbox if x.to == ["bo@example.com"]][0]
+        self.assertIn("We have received your request, and", m.body)
+        self.assertIn("by email", m.body)
+        self.assertNotIn("regarding", m.body)
+
+    def test_html_is_escaped_and_headers_are_safe(self):
+        self._submit({"name": "<script>alert(1)</script>\r\nBcc: x@evil.test", "email": "e@example.com", "goal": "<b>x</b>"})
+        m = [x for x in mail.outbox if x.to == ["e@example.com"]][0]
+        html = m.alternatives[0][0]
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("<b>x</b>", html)
+        self.assertNotIn("\n", m.subject)
+
+    def test_no_email_when_disabled_without_address_or_for_tests(self):
+        self.admin_client.put("/api/home/form-quote/", {**self.DEFINITION, "autoReply": {"enabled": False}}, format="json")
+        self._submit({"name": "A", "email": "a@example.com"})
+        self.assertEqual([m for m in mail.outbox if m.to == ["a@example.com"]], [])
+        self.admin_client.put("/api/home/form-quote/", self.DEFINITION, format="json")
+        self._submit({"name": "NoMail"})
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_admin_notification_replies_go_to_the_visitor(self):
+        from django.test import override_settings
+        with override_settings(FORM_NOTIFICATION_EMAIL="owner@example.com"):
+            self._submit({"name": "Cy", "email": "cy@example.com"})
+        note = [m for m in mail.outbox if m.to == ["owner@example.com"]][0]
+        self.assertEqual(note.reply_to, ["cy@example.com"])

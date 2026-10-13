@@ -470,6 +470,7 @@ try {
             else if (type === "email") await el.fill(`profile+${STAMP}@example.org`);
             else if (type === "tel") await el.fill("07700 900555");
             else if (type === "date") await el.fill("2030-01-01");
+            else if (type === "url") await el.fill("https://example.org");
             else await el.fill(`Edge ${STAMP}`);
         }
         await form.locator("button[type=submit]").first().click();

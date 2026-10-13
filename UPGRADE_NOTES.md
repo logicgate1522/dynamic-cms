@@ -607,6 +607,20 @@ A second pass against the Prometheus editor.
 **Theming**
 - The admin UI reads five `--cms-*` CSS variables (`app/cms.css`).
 
+## Form emails: the visitor's confirmation, and replies
+
+- **`api/auto_reply.py`:** a form definition with `autoReply: { enabled: true, replyTo, fromName, subject?, intro?, steps?, closing?, signoff? }`
+  sends the visitor a formal, personal "we have received your request" email (HTML + plain text) after a real
+  submission. It reads like a letter: greeting by first name, the topic and the way you will reach them are
+  worked out from their answers (WhatsApp / phone / email), anything missing drops out of the sentence instead of
+  leaving a blank, their answers are read back, "what happens next", and a sign-off with the Settings contact lines.
+  `Reply-To` is the team inbox, so the visitor can answer directly. Never sent for tests, spam or duplicates; sent in
+  the background so a slow mail server never slows the form; a failure never fails the submission.
+- **The team's notification email** now has `Reply-To` = the visitor, so replying from the inbox writes to them.
+- **Needs SMTP on the server** (`EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`,
+  `FORM_NOTIFICATION_EMAIL`). With Resend: host `smtp.resend.com`, port 587, user `resend`, password = the API key,
+  From on a verified domain. Keep keys in the server's env file, never in the repo.
+
 ## Faster gates (same rules, same evidence)
 
 - **`visual.mjs` is now a code check (capture v4): no browser, no screenshots, seconds.**

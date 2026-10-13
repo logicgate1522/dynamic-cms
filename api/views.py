@@ -816,6 +816,7 @@ class FormSubmitView(APIView):
         )
         if not submission.is_test:
             self._notify(form_name, payload, definition)
+            self._acknowledge(payload, definition)
         tracking = after_submission(submission, envelope, request)
         return Response({"success": True, "event_id": submission.event_id, **tracking}, status=status.HTTP_201_CREATED)
 
@@ -829,13 +830,23 @@ class FormSubmitView(APIView):
         subject = notify.get("subject") or f"New {form_name} submission"
         body_lines = [f"New '{form_name}' form submission:\n"]
         body_lines += [f"{key}: {value}" for key, value in payload.items()]
-        send_mail(
+        from django.core.mail import EmailMessage
+        from .auto_reply import recipient_of
+        sender = recipient_of(payload)
+        EmailMessage(
             subject=subject,
-            message="\n".join(body_lines),
+            body="\n".join(body_lines),
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient],
-            fail_silently=True,
-        )
+            to=[recipient],
+            # Replying to this notification writes to the person who enquired.
+            reply_to=[sender] if sender else None,
+        ).send(fail_silently=True)
+
+    def _acknowledge(self, payload, definition):
+        """The visitor's own "we have received your request" email (see auto_reply.py). Best effort."""
+        from .auto_reply import send_acknowledgement
+        row = SiteSettings.objects.filter(pk=1).first()
+        send_acknowledgement(definition or {}, payload, (row.data if row else {}) or {})
 
 
 class FormFollowUpView(APIView):
