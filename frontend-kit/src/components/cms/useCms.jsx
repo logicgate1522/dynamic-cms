@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdmin } from "@/components/cms/AdminProvider";
 import { useCmsInitial } from "@/components/cms/CmsDataProvider";
+import Binder from "@/components/cms/Binder";
 import { FloatingTools, PLACE, useFloating } from "@/components/cms/floating";
 import { createInline } from "@/components/cms/inline";
 import { API, apiRequest, isEmpty, mergeDefaults, setPath } from "@/lib/api";
@@ -204,15 +205,19 @@ export function useCms(name, defaults, options = {}) {
     // Visitors get a hidden, zero-size marker instead: its parent is this
     // block, so tracking knows which block every click/view belongs to (R31).
     const editButton = editMode ? (
-        <AllFieldsButton
-            name={name}
-            label={label}
-            saveState={saveState}
-            position={options.buttonPosition}
-            hidden={blockHidden}
-            onToggleHidden={hideable ? () => setHidden(!blockHidden) : null}
-            onClick={() => openPanel("section", { name })}
-        />
+        <>
+            <AllFieldsButton
+                name={name}
+                label={label}
+                saveState={saveState}
+                position={options.buttonPosition}
+                hidden={blockHidden}
+                onToggleHidden={hideable ? () => setHidden(!blockHidden) : null}
+                onClick={() => openPanel("section", { name })}
+            />
+            {/* Everything else this block shows (props from a data file, images, image lists) is editable in place too. */}
+            <Binder name={name} data={visible} update={update} />
+        </>
     ) : (
         <span hidden data-track-block={name} />
     );

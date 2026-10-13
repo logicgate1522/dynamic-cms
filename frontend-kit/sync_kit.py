@@ -56,6 +56,8 @@ CORE = [
     "components/cms/SeoEditPanel.jsx",
     "components/cms/SiteTools.jsx",
     "components/cms/useCms.jsx",
+    "components/cms/Binder.jsx",
+    "components/cms/withCmsProps.jsx",
     "components/dynamic/DynamicPageAdmin.jsx",
     "components/dynamic/DynamicPageRenderer.jsx",
     "components/dynamic/edit-context.jsx",

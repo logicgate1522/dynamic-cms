@@ -1,7 +1,7 @@
 {
   "_about": "Evidence for every rule (R1–R34 in FRONTEND_INTEGRATION_PROMPT.md §0). run-gates.mjs marks a rule proven only when EVERY item listed for it passed in the same run: {gate} = that gate finished green; {gate, check} = a PASS line whose check name matches the regex. IntegrationSpecTests fails if a rule in the spec has no entry here.",
   "R1": [{ "gate": "kit-verbatim" }, { "gate": "check-sections" }],
-  "R2": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "click-and-type saved a draft" }, { "gate": "acceptance", "check": "page has a visible top-level inline-editable text" }],
+  "R2": [{ "gate": "check-inline" }, { "gate": "inline-coverage" }, { "gate": "acceptance", "check": "click-and-type saved a draft" }, { "gate": "acceptance", "check": "page has a visible top-level inline-editable text" }],
   "R3": [{ "gate": "acceptance", "check": "public data unchanged before publish" }, { "gate": "acceptance", "check": "publish copies the draft live" }, { "gate": "acceptance", "check": "discard drops the draft" }],
   "R4": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "session cookie is httpOnly" }, { "gate": "acceptance", "check": "sign out ends the server session" }],
   "R5": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "opening AI assist builds the prompt" }, { "gate": "acceptance", "check": "prompt restates its rules at the end" }, { "gate": "acceptance", "check": "AI assist: shared blocks" }, { "gate": "acceptance", "check": "AI assist: prompt carries LENGTH" }],
@@ -10,7 +10,7 @@
   "R8": [{ "gate": "acceptance", "check": "visitor: no admin bar, no editable spans" }],
   "R9": [{ "gate": "visual" }],
   "R10": [{ "gate": "check-inline" }],
-  "R11": [{ "gate": "check-inline" }, { "gate": "acceptance", "check": "/admin/images renders" }],
+  "R11": [{ "gate": "check-inline" }, { "gate": "inline-coverage" }, { "gate": "acceptance", "check": "/admin/images renders" }],
   "R12": [{ "gate": "report" }],
   "R13": [{ "gate": "acceptance", "check": "SEO panel opens on Ask AI" }, { "gate": "acceptance", "check": "every SEO check is listed" }],
   "R14": [{ "gate": "acceptance", "check": "offered on /" }, { "gate": "acceptance", "check": "new entry follows the collection template exactly" }, { "gate": "acceptance", "check": "on a page that is not a collection index" }],

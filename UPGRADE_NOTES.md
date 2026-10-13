@@ -607,6 +607,25 @@ A second pass against the Prometheus editor.
 **Theming**
 - The admin UI reads five `--cms-*` CSS variables (`app/cms.css`).
 
+## Inline editing everywhere (R2 made enforceable)
+
+- **Why this changed:** R2 said "inline first", but nothing measured it. A site could pass every gate
+  while most of its pages were popup-only ("All fields" panels for props-driven sections), had blank or
+  dead regions, and images that could not be replaced on the spot. Logic Gate was exactly that: a sample of
+  16% of visible text editable in place across 18 pages.
+- **`components/cms/Binder.jsx` (installed by `useCms`, no per-component work):** for admins with editing
+  on, every string a block shows that equals a text value in the block's data gets the E.Text outline and
+  is edited in place (click, type, Enter) in an overlay drawn over the text; every image that is one of the
+  block's image values gets "Replace image"; every list of images (carousel, 3D stack, gallery) gets a
+  strip below it with ‹ › reorder, ✕ remove and "+ Add image" (multi-file). Page layout never changes (R30).
+- **`withCmsProps` is now a kit file** and is no longer a popup shortcut: the binder edits its props in place.
+- **New gate `inline-coverage`** (acceptance/inline-coverage.mjs, ~75 s, parallel): signed in, editing on,
+  every sitemap page; fails below `INLINE_MIN_TEXT` (85) % of text or `INLINE_MIN_IMAGES` (80) % of content
+  images, and lists the biggest dead strings with their section and the images without a Replace tool.
+  Wired into run-gates and rules-map (R2, R11). `data-cms-static` marks decoration that is not content.
+- Content that lives in a code file (a constants/data file read straight into JSX) is still dead to the
+  editor: move it into block/collection data with the original wording as defaults.
+
 ## Form emails: the visitor's confirmation, and replies
 
 - **`api/auto_reply.py`:** a form definition with `autoReply: { enabled: true, replyTo, fromName, subject?, intro?, steps?, closing?, signoff? }`

@@ -43,6 +43,20 @@
     font-style: italic;
 }
 
+/* ===== Bound text: copy a block shows without <E.Text> (props from a data file, child components) =====
+   Same look as an <E.Text>; click it and type, in place (components/cms/Binder.jsx). */
+[data-cms-bind] {
+    outline: 1px dashed color-mix(in srgb, var(--cms-accent) 55%, transparent);
+    outline-offset: 2px;
+    border-radius: 2px;
+    cursor: text;
+    transition: outline-color 0.15s, background-color 0.15s;
+}
+[data-cms-bind]:hover {
+    outline: 2px dashed var(--cms-accent);
+    background-color: color-mix(in srgb, var(--cms-accent) 6%, transparent);
+}
+
 /* ===== The admin layer (components/cms/floating.jsx) =====
    Every edit tool, the admin bar, menus and panels are drawn here, at the
    end of <body>: above every site element, at 1:1 scale whatever zoom the

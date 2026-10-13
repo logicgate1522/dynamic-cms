@@ -238,6 +238,7 @@ if (PASS === 2 && build && prev?.buildId && build.buildId === prev.buildId) {
 if (PASS < 3) {
     if (want("visual")) gates.push(run("visual", "node", ["visual.mjs", "--dir", join(GATES_DIR, "visual")], { env: nodeEnv }));
     if (want("acceptance")) gates.push(run("acceptance", "node", ["acceptance.mjs"], { env: nodeEnv }));
+    if (want("inline-coverage")) gates.push(run("inline-coverage", "node", ["inline-coverage.mjs"], { env: nodeEnv }));
     if (want("tracking-edge")) gates.push(run("tracking-edge", "node", ["tracking-edge.mjs"], { env: nodeEnv }));
     if (want("verify-tracking")) {
         gates.push(process.env.RUNNER_SECRET

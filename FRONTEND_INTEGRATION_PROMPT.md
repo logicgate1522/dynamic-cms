@@ -76,6 +76,7 @@ node run-gates.mjs --frontend <frontend> --pass 3 --report <frontend>/CMS_REPORT
 |---|---|
 | dependencies | `npm audit --omit=dev` finds no high or critical advisory in the site's production dependencies — R22 |
 | kit-verbatim | every kit CORE file and gate script is byte-identical to the kit (theme block excepted) — R1 |
+| inline-coverage | as a signed-in editor, every sitemap page has ≥ 85% of its visible text and ≥ 80% of its content images editable in place (R2, R11); names what is not |
 | check-inline | no hard-coded copy, index keys, `hidden` guard, `{editButton}` marker, forms via `submitForm` + `data-cms-form`, tracking via `track`, uploads via `E.Image`, no unsafe HTML, no secrets, no prompt text, no visitor storage without consent |
 | check-sections | renderer registry = backend section types |
 | production-build | the server under test is THIS build (build id matches) |
@@ -106,7 +107,7 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
 | # | Area | Rule | Proven by | Built in |
 |---|---|---|---|---|
 | R1 | Foundation | Install the kit verbatim; change only ADAPT files and the theme block | kit-verbatim, `check:sections` | P1 |
-| R2 | Editing | Inline editing first: `E.Text` / `E.Image` / `E.Item` + `E.Add` / `E.Link` | `check:inline`, acceptance | P3 |
+| R2 | Editing | Inline editing for EVERYTHING a page shows (text, images, image lists); no popup-only path; content from the CMS, not code files | `check:inline`, `inline-coverage`, acceptance | P3 |
 | R3 | Editing | Every edit is a draft; only Publish goes live | acceptance | P3 |
 | R4 | Foundation | Session cookie + CSRF auth only | `check:inline`, acceptance | P1 |
 | R5 | AI | The backend owns every AI prompt | `check:inline`, acceptance | P1, P8 |
@@ -166,8 +167,34 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   legal marks, the honeypot label, the staff-login link); a bare `E` in a
   function that didn't receive it; a raw `url('/file.png')`; a client-only
   helper imported into a server component (prerender crashes).
-- **Proven by:** `check:inline`; acceptance "page has a visible top-level
-  inline-editable text", "public data unchanged before publish".
+- **Everything on the page, not a sample (the "coverage" rule).** A page where
+  one hero is inline and the rest opens a popup, or where whole sections are
+  blank to the editor, is NOT done. Concretely:
+  - **No popup-only editing, anywhere.** A component whose copy arrives as props
+    (`withCmsProps`, a data file) is still edited on the page: the block's
+    binder (`components/cms/Binder.jsx`, installed by `useCms`) outlines every
+    string and image the block shows and edits it in place. The "All fields"
+    panel is an extra (AI, history, bulk), never the only way.
+  - **Every content image** has "Replace image" on the image itself (`<E.Image>`
+    or bound by the binder). **Every list of images** (carousel, 3D card stack,
+    gallery, logo wall) gets a strip below it — thumbnails, ‹ › reorder, ✕
+    remove, "+ Add image" — automatically, as long as the images are in the
+    block's data (`items: [{ src, alt }]`). Images imported in code
+    (`import hero from "./hero.png"`) are not editable: put the URL in the
+    block's defaults.
+  - **Content comes from the CMS, not a code file.** Services, case studies,
+    products, projects and the like are rendered from block / collection data
+    (defaults = the original wording), never from a constants file read
+    straight into JSX: text in a constants file is dead to the editor.
+  - **Text the code builds itself** (templates, truncation, `.toUpperCase()` in
+    JS) can't be bound: print it through `<E.Text>` or restructure it.
+  - Decoration that is not content (aria-hidden art, mock screens) is
+    `aria-hidden` or `data-cms-static`.
+- **Proven by:** `check:inline`; **`inline-coverage`** (as a signed-in editor,
+  every sitemap page: ≥ 85% of visible text and ≥ 80% of content images are
+  editable in place; failures name the dead strings and their section);
+  acceptance "page has a visible top-level inline-editable text", "public data
+  unchanged before publish".
 
 #### R3 — Drafts, then Publish
 - **Must:** every edit — inline, panel, AI paste, JSON paste, hide/show,

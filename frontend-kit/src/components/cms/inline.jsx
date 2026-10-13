@@ -221,7 +221,7 @@ export function createInline(stateRef) {
         if (!editMode) return null;
         return (
             <>
-                <span ref={anchor} hidden />
+                <span ref={anchor} hidden data-cms-image-anchor="inline" />
                 <FloatingTools tools={tools} place={PLACE.insideTopLeft} className="flex flex-col items-start gap-1" data-cms-image-tools>
                     <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#0F172A]/90 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg ring-1 ring-white/30 backdrop-blur hover:bg-[var(--cms-accent)]">
                         {busy ? "Uploading…" : "Replace image"}
