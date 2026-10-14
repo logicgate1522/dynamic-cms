@@ -862,3 +862,7 @@ endpoint's shape is documented in `FRONTEND_INTEGRATION_PROMPT.md` §13.6.
 - **Fill with AI**: `POST ai/settings-prompt/ {notes?}` builds ONE prompt with everything the site knows, the missing fields and, for each, the question to ask; the AI is told to ask the owner (numbered, ≤8) instead of guessing, then reply with one JSON block. `POST settings/setup/ {reply}` applies it: only assistant-fillable keys, each validated (email, https URL, tracking-ID shapes, length), owner-only items (logo, share image, verification) never written.
 - **Tabs**: Your business · Search & sharing · Enquiries · Tracking · Advanced (the old single page rendered every stored key, including collections).
 - **Tracking → "Set up & fire all events"** (`/admin/tracking/?run=all`): syncs every conversion to the connected tools, then runs every check once so each tool receives its events.
+
+
+## Cascading collections (countries, services, …)
+Index page + children = a collection, not a code array (R13 "Must (cascade)"). Adding one is "＋ New …" on the index: fill the facts (or paste the AI reply that fills them all), publish, and the page, map pin, index card, sitemap entry, schema and neighbour links follow. Verified on Logic Gate's `markets` collection: a published "Japan" entry went 404 → 200, appeared on the index, the sitemap and the map within seconds, without a rebuild.
