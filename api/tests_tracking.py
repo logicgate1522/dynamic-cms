@@ -818,3 +818,43 @@ class MarketingOptInFieldTests(APITestCase):
         self.assertEqual(errors, {})
         self.assertIs(cleaned["updates"], False)
         self.assertIs(validate_submission(definition, {"updates": "on"})[0]["updates"], True)
+
+
+class TrackingFixtureTests(TrackingBase):
+    """tracking_export writes what scripts/tracking-seed.mjs installs: the approved plan must come back
+    approved, through the same endpoints, on an environment that has no plan."""
+
+    def test_export_then_install_on_a_fresh_site(self):
+        import os
+        import tempfile
+        from django.core.management import call_command
+        from .models import TrackingScan
+        from .tracking_plan import get_plan
+
+        approved = self.approved_plan()
+        path = os.path.join(tempfile.mkdtemp(), "tracking-seed.json")
+        call_command("tracking_export", path, stdout=mock.MagicMock())
+        fixture = json.load(open(path))
+        self.assertEqual({c["id"] for c in fixture["plan"]["conversions"]}, {c["id"] for c in approved["conversions"]})
+        self.assertNotIn("status", fixture["plan"])
+        self.assertTrue(all("text" not in p and "links" not in p for p in fixture["scan"]["pages"]))
+
+        # a fresh environment: no scan, no plan
+        TrackingScan.objects.all().delete()
+        site = SiteSettings.objects.get(pk=1)
+        site.data["analytics"] = {}
+        site.save()
+        self.assertFalse(get_plan().get("conversions"))
+
+        self.assertEqual(self.admin_client.post("/api/tracking/scan/?source=headless", fixture["scan"], format="json").status_code, 200)
+        self.assertEqual(self.admin_client.put("/api/tracking/plan/?unlock=1", {"plan": fixture["plan"]}, format="json").status_code, 200)
+        r = self.admin_client.post("/api/tracking/plan/approve/")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["plan"]["status"], "approved")
+        self.assertEqual(len(r.data["plan"]["conversions"]), len(approved["conversions"]))
+
+    def test_export_refuses_without_a_plan(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command("tracking_export", "/tmp/never-written.json")

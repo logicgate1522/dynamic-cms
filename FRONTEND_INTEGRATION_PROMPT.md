@@ -640,6 +640,16 @@ Every rule is a MUST. Rule numbers are referenced throughout this file.
   every option of a "who are you" form field (business type, industry,
   size…) a segment. A full Checks run passes only if it tested at least one
   lead conversion per lead form (zero tests is a fail).
+- **Must (installed on every environment):** after the plan is approved in the
+  integration database, export it —
+  `python manage.py tracking_export ../frontend/scripts/tracking-seed.json` —
+  and have the site's seed script run `scripts/tracking-seed.mjs` last (the
+  kit ships it; `npm run cms:seed` calls it). It installs the scan and the plan
+  **approved** on any environment that has none, so the conversions set up
+  during integration are there from day one, visible under Tracking, and the
+  owner only adjusts them. It never overwrites a plan the owner already has
+  (`--force` does), and tool IDs (GA4, GTM, Meta…) are never in the fixture.
+  Re-export after the page paths or forms change.
 - **Never:** a valid but thin plan (an empty or partial plan "passes" nothing);
   conversions, events or audiences written in code; triggers that
   depend on text the owner can edit (bind to blocks, paths, form option
