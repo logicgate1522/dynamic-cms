@@ -7,7 +7,7 @@ import VerifyHarness from "@/components/seo/VerifyHarness";
 import { API } from "@/lib/api";
 import { configureConsent, getConsent, onConsent } from "@/lib/consent";
 import { initProfile, setProfilePersistence, visitorId } from "@/lib/intentProfile";
-import { configureTracking, setVerifyToken } from "@/lib/track";
+import { configureTracking, fireTestEvents, setVerifyToken } from "@/lib/track";
 import { startCapture, startPage } from "@/lib/trackCapture";
 
 /* =========================================
@@ -66,6 +66,50 @@ function Events({ analytics, tracking, consent }) {
 
     useEffect(() => {
         startCapture();
+    }, []);
+
+    // "Send test events" (Settings → Tracking, Tracking → Tools): fire every event and conversion once into the
+    // data layer of THIS page, so a GTM Preview / GA4 DebugView session attached to it receives them.
+    // `?cms-fire-events=1` does it on load for a signed-in admin; the tracking drawer calls window.__cmsFireEvents.
+    useEffect(() => {
+        const note = (text, done) => {
+            let box = document.querySelector("[data-cms-fire-note]");
+            if (!box) {
+                box = Object.assign(document.createElement("div"), { className: "cms-ui" });
+                box.setAttribute("data-cms-fire-note", "");
+                box.setAttribute("data-visual-ignore", "");
+                box.style.cssText = "position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:2147483000;max-width:92vw;padding:10px 16px;border-radius:12px;background:#0F172A;color:#fff;font:600 13px/1.4 system-ui,sans-serif;box-shadow:0 12px 32px rgba(2,6,23,.4)";
+                document.body.appendChild(box);
+            }
+            box.textContent = text;
+            if (done) setTimeout(() => box.remove(), 9000);
+        };
+        const run = async () => {
+            if (!window.__cmsAdmin) {
+                note("Sign in to the CMS on this browser to send test events.", true);
+                return null;
+            }
+            const result = await fireTestEvents({ onProgress: (p) => note(`Sending test ${p.step}: ${p.name}…`) });
+            note(`Sent ${result.events} events and ${result.conversions} conversions to this page's data layer. Check GTM Preview or GA4 DebugView.`, true);
+            return result;
+        };
+        window.__cmsFireEvents = run;
+        let timer = 0;
+        if (new URLSearchParams(window.location.search).get("cms-fire-events")) {
+            // The admin flag is set once the session check finishes.
+            let tries = 0;
+            timer = setInterval(() => {
+                tries += 1;
+                if (window.__cmsAdmin || tries > 20) {
+                    clearInterval(timer);
+                    run();
+                }
+            }, 400);
+        }
+        return () => {
+            clearInterval(timer);
+            delete window.__cmsFireEvents;
+        };
     }, []);
 
     useEffect(() => {

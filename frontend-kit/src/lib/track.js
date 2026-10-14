@@ -37,6 +37,9 @@ let plan = { conversions: [], intents: [], segments: [], stages: [], pageTypes: 
 const queue = [];
 let flushTimer = null;
 let verifyToken = "";
+// "Send test events" (fireTestEvents): events go to the data layer and GA4 only, flagged as debug/internal test
+// traffic: never to the server beacon, the visitor profile, ad pixels or Google Ads conversions.
+let fireMode = false;
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE_RE = /\+?\d[\d\s().-]{6,}\d/g;
@@ -143,11 +146,11 @@ export function matchConversions(name, params) {
  */
 export function track(name, params = {}, { initial = false } = {}) {
     if (typeof window === "undefined") return null;
-    if (config.excludeAdmins && window.__cmsAdmin && !verifyToken) return null;
+    if (config.excludeAdmins && window.__cmsAdmin && !verifyToken && !fireMode) return null;
     if (SWITCH[name] && config.events[SWITCH[name]] === false) return null;
     if (ENGAGEMENT.has(name) && config.events.engagement === false) return null;
 
-    const eventId = params.event_id || newEventId();
+    const eventId = params.event_id || (fireMode ? `test-${newEventId()}` : newEventId());
     const ctx = context(params);
     const raw = { ...params, ...Object.fromEntries(Object.entries(ctx).filter(([k]) => params[k] == null)) };
     const matched = matchConversions(name, raw);
@@ -158,10 +161,11 @@ export function track(name, params = {}, { initial = false } = {}) {
         out[k] = clean(v);
     }
     out.event_id = eventId;
-    if (verifyToken) {
+    if (verifyToken || fireMode) {
         out.debug_mode = true;
         out.traffic_type = "internal";
     }
+    if (fireMode) out.cms_test = true;
     const conversions = matched.length ? `|${matched.map((c) => c.id).join("|")}|` : "";
     if (conversions) out.conversions = conversions;
     const primaryValue = matched.filter((c) => c.tier === "primary" && c.value != null).map((c) => c.value);
@@ -170,7 +174,7 @@ export function track(name, params = {}, { initial = false } = {}) {
         out.currency = plan.currency;
     }
 
-    recordEvent(name, raw, { stages: raw.stages, segments: raw.segments, intents: raw.intents });
+    if (!fireMode) recordEvent(name, raw, { stages: raw.stages, segments: raw.segments, intents: raw.intents });
     const consent = getConsent();
 
     if (!initial) {
@@ -187,7 +191,7 @@ export function track(name, params = {}, { initial = false } = {}) {
             for (const c of matched) window.gtag("event", `cv_${c.id}`.slice(0, 40), { ...out, conversion_id: c.id });
         }
         sendAds(name, matched, out, eventId);
-        if (consent.marketing || verifyToken) {
+        if (!fireMode && (consent.marketing || verifyToken)) {
             sendMeta(name, matched, out, eventId);
             sendTikTok(name, matched, out, eventId);
             sendLinkedIn(name, matched);
@@ -201,7 +205,7 @@ export function track(name, params = {}, { initial = false } = {}) {
         }
     }
 
-    if (name !== "generate_lead" && (SERVER_EVENTS.has(name) || matched.length || name === "cta_click" || name === "faq_open" || name === "form_abandon")) {
+    if (!fireMode && name !== "generate_lead" && (SERVER_EVENTS.has(name) || matched.length || name === "cta_click" || name === "faq_open" || name === "form_abandon")) {
         enqueue({ name, event_id: eventId, params: out, conversions: matched.map((c) => c.id) });
     }
     window.__cmsVerify?.record?.({ name, params: out, matched: matched.map((c) => c.id), eventId, initial });
@@ -209,7 +213,7 @@ export function track(name, params = {}, { initial = false } = {}) {
 }
 
 function sendAds(name, matched, out, eventId) {
-    if (typeof window.gtag !== "function" || verifyToken) return;
+    if (typeof window.gtag !== "function" || verifyToken || fireMode) return;
     for (const c of matched) {
         if (c.tier === "primary" && c.adsSendTo) {
             window.gtag("event", "conversion", { send_to: c.adsSendTo, transaction_id: `${eventId}:${c.id}`,
@@ -281,4 +285,54 @@ export function flush() {
 if (typeof window !== "undefined") {
     window.addEventListener("pagehide", flush);
     document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush());
+}
+
+/* ---------------------------------------------------------- test events */
+
+const TEST_EVENTS = ["cta_click", "nav_click", "section_view", "scroll_depth", "service_engaged", "faq_open", "form_start",
+    "form_error", "form_abandon", "contact_click", "outbound_click", "file_download", "search"];
+
+/**
+ * Fire every event and every approved conversion once into the data layer (and GA4 when loaded directly),
+ * flagged cms_test / debug_mode / internal traffic, so Google Tag Manager (Preview / Tag Assistant) and
+ * GA4 DebugView receive them straight after setup, without waiting for a visitor. Ad pixels, Google Ads,
+ * the server and the visitor profile are untouched. Resolves { events, conversions }.
+ */
+export async function fireTestEvents({ onProgress, delay = 300 } = {}) {
+    if (typeof window === "undefined") return { events: 0, conversions: 0 };
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    fireMode = true;
+    let events = 0;
+    let conversions = 0;
+    try {
+        const names = Object.keys(plan.vocab?.events || {}).filter((n) => n !== "page_view" && n !== "generate_lead");
+        for (const name of names.length ? names : TEST_EVENTS) {
+            onProgress?.({ step: "event", name });
+            track(name, { cta_label: "Test", cta_target: "/", block: "test" });
+            events += 1;
+            await wait(delay);
+        }
+        for (const c of plan.conversions || []) {
+            const t = c.trigger || {};
+            const w = t.where || {};
+            onProgress?.({ step: "conversion", name: c.id });
+            const params = {
+                form_name: w.form, intent: w.intent, stage: w.stage, segment: w.segment, block: w.blocks?.[0],
+                cta_target: w.ctaTargets?.[0], cta_label: w.ctaLabel || "Test", page_path: w.path || (w.pathPrefix ? `${w.pathPrefix}/` : undefined),
+                page_type: w.pageType, percent: w.percent, method: w.method, ...(w.field ? { _values: { [w.field]: w.option } } : {}),
+                ...(t.event === "generate_lead" ? { _conversions: [{ id: c.id, tier: c.tier, value: c.value?.mode === "fixed" ? c.value.amount : null, currency: plan.currency }] } : {}),
+            };
+            const result = track(t.event || "cta_click", params);
+            // The trigger could not be reproduced from the plan alone: still send the conversion event itself.
+            if (!result?.matched?.some((m) => m.id === c.id)) {
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({ event: "conversion", conversion_id: c.id, tier: c.tier, event_id: `test-${newEventId()}:${c.id}`, cms_test: true, debug_mode: true, traffic_type: "internal" });
+            }
+            conversions += 1;
+            await wait(delay);
+        }
+    } finally {
+        fireMode = false;
+    }
+    return { events, conversions };
 }

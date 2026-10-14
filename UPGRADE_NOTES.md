@@ -866,3 +866,6 @@ endpoint's shape is documented in `FRONTEND_INTEGRATION_PROMPT.md` §13.6.
 
 ## Cascading collections (countries, services, …)
 Index page + children = a collection, not a code array (R13 "Must (cascade)"). Adding one is "＋ New …" on the index: fill the facts (or paste the AI reply that fills them all), publish, and the page, map pin, index card, sitemap entry, schema and neighbour links follow. Verified on Logic Gate's `markets` collection: a published "Japan" entry went 404 → 200, appeared on the index, the sitemap and the map within seconds, without a rebuild.
+
+## Send test events to GTM
+`fireTestEvents()` (lib/track.js) fires every event and every approved conversion once into the data layer (and GA4 when loaded directly), flagged `cms_test`/`debug_mode`/internal traffic: no ad pixels, no Google Ads conversions, no server beacon, no visitor profile. Buttons: Settings → Tracking and Tracking → Tools ("Send test events to GTM": opens the site with `?cms-fire-events=1`, or fires in place from the tracking drawer). Works for signed-in admins even with "Don't track admins" on.
