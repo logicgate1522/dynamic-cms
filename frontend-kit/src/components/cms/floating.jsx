@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /* =========================================
@@ -94,7 +94,13 @@ export function useFloating(anchorRef, { enabled = true, pinned = false, target:
         };
         const hide = () => {
             clearTimeout(hideTimer.current);
-            hideTimer.current = setTimeout(() => setActive(false), 220);
+            hideTimer.current = setTimeout(() => {
+                // Tools that appear under a resting pointer get no mouseenter, so the target's mouseleave
+                // would hide them and the target's mouseenter would bring them back: a blink loop. Only
+                // hide when the pointer really is over neither.
+                if (target.matches(":hover") || toolsRef.current?.matches(":hover")) return;
+                setActive(false);
+            }, 220);
         };
         const onFocusOut = (event) => {
             if (toolsRef.current?.contains(event.relatedTarget)) return;
@@ -154,7 +160,10 @@ export function useFloating(anchorRef, { enabled = true, pinned = false, target:
     const keep = () => clearTimeout(hideTimer.current);
     const release = () => {
         clearTimeout(hideTimer.current);
-        hideTimer.current = setTimeout(() => setActive(false), 220);
+        hideTimer.current = setTimeout(() => {
+            if (targetRef.current?.matches(":hover") || toolsRef.current?.matches(":hover")) return;
+            setActive(false);
+        }, 220);
     };
     return { rect, visible, toolsRef, keep, release, inFixed: rect ? inFixed(targetRef.current) : false, show: () => { keep(); setActive(true); } };
 }
@@ -186,6 +195,13 @@ export function FloatingTools({ tools, place = PLACE.insideTopRight, className =
     // viewport clamping always use the real size.
     const [node, setNode] = useState(null);
     const [size, setSize] = useState(null);
+    // A stable ref callback: an inline one is detached and re-attached on every render (null, then the
+    // node), which re-renders again and makes the tools blink while the pointer is over them.
+    const toolsRef = tools.toolsRef;
+    const attach = useCallback((el) => {
+        toolsRef.current = el;
+        if (el) setNode(el);
+    }, [toolsRef]);
     useLayoutEffect(() => {
         if (!node) return undefined;
         const measure = () => {
@@ -217,10 +233,7 @@ export function FloatingTools({ tools, place = PLACE.insideTopRight, className =
         <Layer>
             <div
                 {...rest}
-                ref={(el) => {
-                    tools.toolsRef.current = el;
-                    if (el !== node) setNode(el);
-                }}
+                ref={attach}
                 onMouseEnter={tools.keep}
                 onMouseLeave={tools.release}
                 onMouseDown={(e) => e.stopPropagation()}

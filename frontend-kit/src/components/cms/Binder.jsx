@@ -245,14 +245,12 @@ const belowTarget = (r, s, min) => {
     return { left: r.left + r.width / 2 - s.w / 2, top: below + s.h <= vh - 8 ? below : Math.max(min, r.bottom - s.h - 10) };
 };
 
-function ImageStrip({ list, data, update, root, found }) {
-    const anchor = useRef(null);
+function StripRow({ list, data, update, label, setBusyUp }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const items = getPath(data, list.path) || [];
     const valueOf = (item) => (list.key ? item?.[list.key] : item);
-    const els = found.images.filter((i) => i.path.startsWith(`${list.path}.`)).map((i) => i.el);
-    const tools = useFloating(anchor, { pinned: busy || Boolean(error), target: () => lowestCommonAncestor(els, root) });
+    useEffect(() => { setBusyUp(busy || Boolean(error)); }, [busy, error, setBusyUp]);
     const write = (next) => update(list.path, next);
     const move = (from, to) => {
         if (to < 0 || to >= items.length) return;
@@ -261,10 +259,8 @@ function ImageStrip({ list, data, update, root, found }) {
         write(next);
     };
     return (
-        <>
-            <span ref={anchor} hidden data-cms-image-anchor="strip" />
-            <FloatingTools tools={tools} place={belowTarget} data-cms-image-strip className="flex max-w-[92vw] items-center gap-2 overflow-x-auto rounded-xl bg-white p-2 shadow-[0_12px_32px_rgba(2,6,23,0.35)] ring-1 ring-black/10">
-                <span className="shrink-0 px-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#475569]">Images · {items.length}</span>
+            <div data-cms-image-strip-row={list.path} className="flex items-center gap-2 overflow-x-auto">
+                <span className="w-24 shrink-0 px-1 text-[11px] font-bold uppercase leading-tight tracking-[0.08em] text-[#475569]">{label} · {items.length}</span>
                 {items.map((item, index) => {
                     const value = valueOf(item);
                     return (
@@ -312,6 +308,32 @@ function ImageStrip({ list, data, update, root, found }) {
                     />
                 </label>
                 {error ? <span className="shrink-0 rounded bg-[#FEF3F2] px-2 py-1 text-[11px] text-[#B42318]">{error}</span> : null}
+            </div>
+    );
+}
+
+
+// "phoneImages" -> "Phone images"
+const labelOf = (path, only) => {
+    if (only) return "Images";
+    const last = String(path).split(".").pop().replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim().toLowerCase();
+    return last ? last[0].toUpperCase() + last.slice(1) : "Images";
+};
+
+// ONE strip per block however many image lists it has: separate floating strips for lists that share
+// an area would pile up on top of each other. Rows are stacked in a single tray under the images.
+function ImageStrips({ lists, data, update, root, found }) {
+    const anchor = useRef(null);
+    const [pinned, setPinned] = useState(false);
+    const els = found.images.filter((i) => lists.some((l) => i.path.startsWith(`${l.path}.`))).map((i) => i.el);
+    const tools = useFloating(anchor, { pinned, target: () => lowestCommonAncestor(els, root) });
+    return (
+        <>
+            <span ref={anchor} hidden data-cms-image-anchor="strip" />
+            <FloatingTools tools={tools} place={belowTarget} data-cms-image-strip className="flex max-h-[45vh] max-w-[min(92vw,56rem)] flex-col gap-2 overflow-y-auto rounded-xl bg-white p-2 shadow-[0_12px_32px_rgba(2,6,23,0.35)] ring-1 ring-black/10">
+                {lists.map((list) => (
+                    <StripRow key={list.path} list={list} data={data} update={update} label={labelOf(list.path, lists.length === 1)} setBusyUp={setPinned} />
+                ))}
             </FloatingTools>
         </>
     );
@@ -403,7 +425,7 @@ export default function Binder({ name, data, update }) {
                 />
             ) : null}
             {found.images.map(({ el, path }, i) => <ReplaceImage key={`${path}:${i}`} el={el} path={path} update={update} />)}
-            {root ? index.lists.map((list) => <ImageStrip key={list.path} list={list} data={data} update={update} root={root} found={found} />) : null}
+            {root && index.lists.length ? <ImageStrips lists={index.lists} data={data} update={update} root={root} found={found} /> : null}
         </>
     );
 }

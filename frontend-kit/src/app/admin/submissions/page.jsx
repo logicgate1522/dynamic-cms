@@ -345,6 +345,7 @@ export default function SubmissionsPage() {
     const [error, setError] = useState("");
     const [openId, setOpenId] = useState(null);
     const [search, setSearch] = useState("");
+    const [country, setCountry] = useState("");
     const [wide, setWide] = useState(true);
 
     useEffect(() => {
@@ -396,12 +397,23 @@ export default function SubmissionsPage() {
             .catch(() => setSpec({}));
     }, [form]);
 
+    // Where the leads come from: the country they chose with their phone code (no extra question asked).
+    const countryOf = (sub) => String(sub.data?.country || sub.country || "").trim();
+    const countries = useMemo(() => {
+        const counts = new Map();
+        for (const sub of rows(data)) {
+            const c = countryOf(sub);
+            if (c) counts.set(c, (counts.get(c) || 0) + 1);
+        }
+        return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    }, [data]);
+
     const list = useMemo(() => {
-        const all = rows(data);
+        const all = rows(data).filter((sub) => !country || countryOf(sub) === country);
         const needle = search.trim().toLowerCase();
         if (!needle) return all;
         return all.filter((sub) => JSON.stringify(sub.data || {}).toLowerCase().includes(needle));
-    }, [data, search]);
+    }, [data, search, country]);
 
     const selected = list.find((sub) => sub.id === openId) || (wide ? list[0] : null);
 
@@ -481,6 +493,16 @@ export default function SubmissionsPage() {
                 />
                 <span className="text-[12px] text-[#475569]">{total} {total === 1 ? "enquiry" : "enquiries"}</span>
             </div>
+
+            {countries.length > 1 ? (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by country" data-cms-country-filter>
+                    <span className="mr-1 text-[12px] font-semibold text-[#475569]">Country</span>
+                    <button type="button" aria-pressed={!country} onClick={() => { setCountry(""); setOpenId(null); }} className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${!country ? "border-[#0F172A] bg-[#0F172A] text-white" : "border-[#D6DEE8] bg-white text-[#334155]"}`}>All</button>
+                    {countries.map(([name, count]) => (
+                        <button key={name} type="button" aria-pressed={country === name} onClick={() => { setCountry(country === name ? "" : name); setOpenId(null); }} className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${country === name ? "border-[#0F172A] bg-[#0F172A] text-white" : "border-[#D6DEE8] bg-white text-[#334155]"}`}>{name} · {count}</button>
+                    ))}
+                </div>
+            ) : null}
 
             {data === null ? <p className="text-[13px] text-[#475569]">Loading…</p> : null}
             {data && rows(data).length === 0 ? (
