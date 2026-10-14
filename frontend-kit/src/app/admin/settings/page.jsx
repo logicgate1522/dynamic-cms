@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Card, Notice, PageTitle } from "@/components/admin/AdminShell";
 import SetupCard from "@/components/admin/SetupCard";
+import GtmGuide from "@/components/admin/tracking/GtmGuide";
 import { useApi } from "@/components/admin/useApi";
 import { buttonStyles } from "@/components/cms/Drawer";
 import { ObjectFields } from "@/components/cms/FieldEditor";
@@ -202,6 +203,7 @@ export default function SettingsPage() {
                         {tab === "tracking" ? (
                             <>
                                 <TrackingActions />
+                                <GtmGuide analytics={draft.analytics} />
                                 <TrackingCard value={draft.analytics} onChange={(analytics) => setDraft({ ...draft, analytics })} />
                             </>
                         ) : null}

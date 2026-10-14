@@ -6,6 +6,7 @@ import { useApi } from "@/components/admin/useApi";
 import { buttonStyles } from "@/components/cms/Drawer";
 import { TOOL_NAMES } from "@/components/admin/tracking/describe";
 import { Empty, input, Pill, Section } from "@/components/admin/tracking/ui";
+import GtmGuide from "@/components/admin/tracking/GtmGuide";
 import { apiFetch, apiRequest } from "@/lib/api";
 
 const BROWSER_TOOLS = [["gtm", "gtmId"], ["ga4", "ga4Id"], ["googleAds", "googleAdsId"], ["meta", "metaPixelId"], ["tiktok", "tiktokPixelId"],
@@ -60,6 +61,8 @@ export default function ToolsTab({ explain, settings, onChanged }) {
         <div>
             {message.error ? <p className="mb-3 rounded-lg bg-[#FEF3F2] px-3 py-2 text-[13px] text-[#B42318]">{message.error}</p> : null}
             {message.success ? <p className="mb-3 rounded-lg bg-[#ECFDF3] px-3 py-2 text-[13px] text-[#067647]">{message.success}</p> : null}
+
+            <GtmGuide analytics={analytics} />
 
             <Section title="Tools on the site" description="Paste IDs in Site tools → Settings → Tracking & analytics. Every event and conversion reaches each one automatically, in its own format.">
                 <div className="grid gap-2 sm:grid-cols-2">

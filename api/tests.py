@@ -947,6 +947,7 @@ class PermissionAuditTests(APITestCase):
     PUBLIC_WRITE_ALLOWLIST = {
         "admin-login": "credential exchange, throttled (login scope)",
         "form-submit": "public form endpoint, throttled (form_submit) + honeypot",
+        "form-followup": "adds follow-up answers to a stored submission: needs its event id (24h receipt), throttled (form_submit), only followUp fields",
         "auth-logout": "ends the caller's own session; a no-op when anonymous",
         "events-ingest": "tracking beacon (R31): throttled (events), origin-checked, size-capped, allowlisted names",
         "events-forget": "consent withdrawn: unlinks a visitor id; throttled + origin-checked",
@@ -2540,6 +2541,11 @@ class PythonCompatibilityTests(APITestCase):
 class FormSubmitWithSessionTests(APITestCase):
     """A signed-in editor browsing the site submits a public form: the session cookie travels with the
     request (same-origin proxy) but the endpoint is anonymous, so it must not demand a CSRF token."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()  # the form_submit throttle counts across tests in one run
 
     def test_signed_in_browser_can_submit_a_public_form_without_csrf(self):
         from django.test import Client

@@ -858,3 +858,29 @@ class TrackingFixtureTests(TrackingBase):
         from django.core.management.base import CommandError
         with self.assertRaises(CommandError):
             call_command("tracking_export", "/tmp/never-written.json")
+
+
+class GtmContainerNativeGa4Tests(TrackingBase):
+    """The site loads GA4 itself when a GA4 id is set; the GTM container must not add a second Google tag."""
+
+    def test_container_has_google_tag_only_when_the_site_does_not_load_ga4(self):
+        from .tracking_adapters import gtm
+        plan = self.approved_plan()
+        names = lambda c: [t["name"] for t in c["containerVersion"]["tag"]]
+        self.assertIn("CMS - Google tag", names(gtm.container(plan, "G-ABC1234")))
+        native = gtm.container(plan, "G-ABC1234", native_ga4=True)
+        self.assertNotIn("CMS - Google tag", names(native))
+        self.assertIn("CMS - GA4 events", names(native))
+        self.assertIn("CMS - GA4 conversion events", names(native))
+        # built-in All Pages trigger
+        self.assertEqual(gtm.container(plan, "G-ABC1234")["containerVersion"]["tag"][0]["firingTriggerId"], ["2147479553"])
+
+    def test_download_follows_the_sites_ga4_setting(self):
+        self.approved_plan()
+        site = SiteSettings.objects.get(pk=1)
+        site.data["analytics"] = {**(site.data.get("analytics") or {}), "ga4Id": "G-ABC1234"}
+        site.save()
+        r = self.admin_client.get("/api/tracking/gtm/")
+        self.assertEqual(r.status_code, 200)
+        tags = [t["name"] for t in json.loads(r.content)["containerVersion"]["tag"]]
+        self.assertNotIn("CMS - Google tag", tags)

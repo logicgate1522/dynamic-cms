@@ -537,18 +537,23 @@ class GtmContainerView(APIView):
     API; POST ?publish=<workspace path> → publish (explicit click)."""
     permission_classes = [IsAdminUser]
 
+    def _analytics(self):
+        from .models import SiteSettings
+        return ((SiteSettings.objects.filter(pk=1).first() or SiteSettings()).data or {}).get("analytics") or {}
+
     def _mid(self):
-        from .models import SiteSettings, TrackingConnection
-        a = ((SiteSettings.objects.filter(pk=1).first() or SiteSettings()).data or {}).get("analytics") or {}
+        from .models import TrackingConnection
         conn = TrackingConnection.objects.filter(tool="google").first()
-        return a.get("ga4Id") or ((conn.account or {}).get("measurementId") if conn else "") or "G-XXXXXXXXXX"
+        return self._analytics().get("ga4Id") or ((conn.account or {}).get("measurementId") if conn else "") or "G-XXXXXXXXXX"
 
     def get(self, request):
         from django.http import HttpResponse
 
         from .tracking_adapters import gtm
         import json as _json
-        body = _json.dumps(gtm.container(tp.get_plan(), self._mid()), indent=2)
+        a = self._analytics()
+        # The site loads GA4 itself when a GA4 id is set in Settings: the container then must not add a second Google tag.
+        body = _json.dumps(gtm.container(tp.get_plan(), self._mid(), native_ga4=bool(a.get("ga4Id"))), indent=2)
         resp = HttpResponse(body, content_type="application/json")
         resp["Content-Disposition"] = 'attachment; filename="gtm-container-dynamic-cms.json"'
         return resp
@@ -565,7 +570,7 @@ class GtmContainerView(APIView):
                 path = gtm.publish(request.query_params["publish"], conn)
                 _audit(request, "gtm_publish", path)
                 return Response({"published": path})
-            path = gtm.push(tp.get_plan(), conn, self._mid())
+            path = gtm.push(tp.get_plan(), conn, self._mid(), native_ga4=bool(self._analytics().get("ga4Id")))
             return Response({"workspace": path})
         except ToolError as err:
             return Response({"detail": str(err)}, status=status.HTTP_400_BAD_REQUEST)
