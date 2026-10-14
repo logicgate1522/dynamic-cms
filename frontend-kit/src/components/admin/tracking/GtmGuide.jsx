@@ -15,14 +15,16 @@ export default function GtmGuide({ analytics = {} }) {
     const ga4 = String(analytics.ga4Id || "").trim();
 
     const [fired, setFired] = useState("");
+    const [tools, setTools] = useState(["datalayer", "meta", "tiktok", "linkedin"]);
+    const toggle = (key) => setTools((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
     // On a site page (the tracking drawer) fire into THIS page's data layer; in the admin, open the site and fire there.
     const fire = async () => {
         setFired("");
         if (typeof window.__cmsFireEvents === "function") {
-            const result = await window.__cmsFireEvents();
-            if (result) setFired(`Sent ${result.events} events and ${result.conversions} conversions.`);
+            const result = await window.__cmsFireEvents({ tools });
+            if (result) setFired(`Sent ${result.events} events and ${result.conversions} conversions.${result.missing.length ? ` Not loaded here: ${result.missing.join(", ")} (accept the cookie banner first).` : ""}`);
         } else {
-            window.open("/?cms-fire-events=1", "_blank", "noopener");
+            window.open(`/?cms-fire-events=${encodeURIComponent(tools.join(",") || "datalayer")}`, "_blank", "noopener");
             setFired("Opened your site in a new tab: it sends every event and conversion once, then shows a confirmation.");
         }
     };
@@ -54,9 +56,14 @@ export default function GtmGuide({ analytics = {} }) {
                 </li>
                 <li><strong>3. Preview, then publish.</strong> In GTM click Preview, open your site and do a conversion (submit the form, click a phone number): the left list shows each event and the tags that fired. Publish when it looks right.</li>
                 <li>
-                    <strong>4. Send the events to GTM.</strong> One click fires every event and every conversion once into the data layer, flagged as test traffic (no ad pixels, no server copies, no visitor data). Do it while GTM Preview is connected to the site, so each one shows up in the left list with the tags that fired.
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2"><button type="button" className={buttonStyles.secondary} onClick={fire} data-cms-action="fire-test-events">Send test events to GTM</button>{fired ? <span className="text-[12px] font-semibold text-[#067647]">{fired}</span> : null}</div>
-                    <span className="mt-1 block text-[12px] text-[#64748B]">With Preview: click Preview in GTM, enter your site address, then in the tab it opens add <code>?cms-fire-events=1</code> to the address (signed in to the CMS).</span>
+                    <strong>4. Send the events to your tools.</strong> One click fires every event and every conversion once, flagged as test traffic (<code>cms_test</code>, internal), so each tool receives them and you can configure it: in GTM Preview, GA4 DebugView, Meta Events Manager → Test events, TikTok and LinkedIn event screens. Nothing goes to the server and no visitor data is touched.
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+                        {[["datalayer", "GTM / GA4"], ["meta", "Meta"], ["tiktok", "TikTok"], ["linkedin", "LinkedIn"], ["ads", "Google Ads (counts as real conversions)"]].map(([key, label]) => (
+                            <label key={key} className="inline-flex items-center gap-1.5"><input type="checkbox" checked={tools.includes(key)} onChange={() => toggle(key)} />{label}</label>
+                        ))}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2"><button type="button" className={buttonStyles.secondary} onClick={fire} disabled={!tools.length} data-cms-action="fire-test-events">Send test events</button>{fired ? <span className="text-[12px] font-semibold text-[#067647]">{fired}</span> : null}</div>
+                    <span className="mt-1 block text-[12px] text-[#64748B]">Open the tool's test screen first (GTM: Preview; Meta: Events Manager → Test events, enter your site address), then send from the tab it opens (add <code>?cms-fire-events=1</code> to its address, signed in to the CMS). Ad pixels only load after the visitor accepts the cookie banner, so accept it on that page first. Meta and TikTok also log these as events in the account: use their test screens to tell them apart (event ids start with <code>test-</code>).</span>
                 </li>
                 <li><strong>5. Prove it.</strong> Tracking → Checks → <em>Run checks</em> triggers every conversion on the live site and shows what each tool received.</li>
             </ol>

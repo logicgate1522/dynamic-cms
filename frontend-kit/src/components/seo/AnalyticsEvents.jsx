@@ -84,25 +84,29 @@ function Events({ analytics, tracking, consent }) {
             box.textContent = text;
             if (done) setTimeout(() => box.remove(), 9000);
         };
-        const run = async () => {
+        const LABEL = { datalayer: "GTM / data layer", meta: "Meta", tiktok: "TikTok", linkedin: "LinkedIn", ads: "Google Ads" };
+        const run = async (opts = {}) => {
             if (!window.__cmsAdmin) {
                 note("Sign in to the CMS on this browser to send test events.", true);
                 return null;
             }
-            const result = await fireTestEvents({ onProgress: (p) => note(`Sending test ${p.step}: ${p.name}…`) });
-            note(`Sent ${result.events} events and ${result.conversions} conversions to this page's data layer. Check GTM Preview or GA4 DebugView.`, true);
+            const result = await fireTestEvents({ ...opts, onProgress: (p) => note(`Sending test ${p.step}: ${p.name}…`) });
+            const sent = Object.entries(result.sent).map(([tool, n]) => `${LABEL[tool] || tool} ${n}`).join(", ");
+            const missing = result.missing.map((tool) => LABEL[tool] || tool).join(", ");
+            note(`Sent ${result.events} events and ${result.conversions} conversions${sent ? ` (${sent})` : ""}.${missing ? ` Not loaded on this page: ${missing}. Accept the cookie banner here, then try again.` : ""} Check each tool's test screen.`, true);
             return result;
         };
         window.__cmsFireEvents = run;
         let timer = 0;
-        if (new URLSearchParams(window.location.search).get("cms-fire-events")) {
+        const wanted = new URLSearchParams(window.location.search).get("cms-fire-events");
+        if (wanted) {
             // The admin flag is set once the session check finishes.
             let tries = 0;
             timer = setInterval(() => {
                 tries += 1;
                 if (window.__cmsAdmin || tries > 20) {
                     clearInterval(timer);
-                    run();
+                    run(wanted === "1" ? {} : { tools: wanted.split(",").filter(Boolean) });
                 }
             }, 400);
         }

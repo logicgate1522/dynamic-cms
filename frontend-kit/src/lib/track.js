@@ -40,6 +40,11 @@ let verifyToken = "";
 // "Send test events" (fireTestEvents): events go to the data layer and GA4 only, flagged as debug/internal test
 // traffic: never to the server beacon, the visitor profile, ad pixels or Google Ads conversions.
 let fireMode = false;
+let fireTools = new Set();
+const fireStats = { sent: {}, missing: {} };
+const firing = (tool) => !fireMode || fireTools.has(tool);
+const fired = (tool) => { if (fireMode) fireStats.sent[tool] = (fireStats.sent[tool] || 0) + 1; };
+const absent = (tool) => { if (fireMode && fireTools.has(tool)) fireStats.missing[tool] = true; };
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE_RE = /\+?\d[\d\s().-]{6,}\d/g;
@@ -179,8 +184,8 @@ export function track(name, params = {}, { initial = false } = {}) {
 
     if (!initial) {
         window.dataLayer = window.dataLayer || [];
-        window.dataLayer.push({ event: name, ...out });
-        for (const c of matched) {
+        if (firing("datalayer")) window.dataLayer.push({ event: name, ...out });
+        if (firing("datalayer")) for (const c of matched) {
             window.dataLayer.push({ event: "conversion", conversion_id: c.id, tier: c.tier, event_id: `${eventId}:${c.id}`,
                 ...(c.value != null ? { value: c.value, currency: c.currency } : {}) });
         }
@@ -191,7 +196,7 @@ export function track(name, params = {}, { initial = false } = {}) {
             for (const c of matched) window.gtag("event", `cv_${c.id}`.slice(0, 40), { ...out, conversion_id: c.id });
         }
         sendAds(name, matched, out, eventId);
-        if (!fireMode && (consent.marketing || verifyToken)) {
+        if (fireMode || consent.marketing || verifyToken) {
             sendMeta(name, matched, out, eventId);
             sendTikTok(name, matched, out, eventId);
             sendLinkedIn(name, matched);
@@ -213,11 +218,15 @@ export function track(name, params = {}, { initial = false } = {}) {
 }
 
 function sendAds(name, matched, out, eventId) {
-    if (typeof window.gtag !== "function" || verifyToken || fireMode) return;
+    if (fireMode && !fireTools.has("ads")) return;
+    if (typeof window.gtag !== "function") return absent("ads");
+    if (verifyToken) return;
+    if (fireMode && !matched.some((c) => c.tier === "primary" && c.adsSendTo)) return;
     for (const c of matched) {
         if (c.tier === "primary" && c.adsSendTo) {
             window.gtag("event", "conversion", { send_to: c.adsSendTo, transaction_id: `${eventId}:${c.id}`,
                 ...(c.value != null ? { value: c.value, currency: c.currency } : {}) });
+            fired("ads");
         }
     }
     if (name === "generate_lead" && config.googleAdsId && config.googleAdsLeadLabel && !matched.some((c) => c.adsSendTo)) {
@@ -226,7 +235,8 @@ function sendAds(name, matched, out, eventId) {
 }
 
 function sendMeta(name, matched, out, eventId) {
-    if (typeof window.fbq !== "function" || name === "page_view") return;
+    if (!firing("meta") || name === "page_view") return;
+    if (typeof window.fbq !== "function") return absent("meta");
     const mapped = matched.find((c) => c.tier === "primary" && c.meta && c.meta !== "custom")?.meta;
     const standard = mapped || plan.vocab?.events?.[name]?.meta || FALLBACK_META[name];
     if (!standard && !matched.length) return;
@@ -235,21 +245,25 @@ function sendMeta(name, matched, out, eventId) {
     const data = { ...out };
     if (out.intent) data.content_category = out.intent;
     window.fbq(isStandard ? "track" : "trackCustom", eventName, data, { eventID: eventId });
+    fired("meta");
 }
 
 function sendTikTok(name, matched, out, eventId) {
-    if (!window.ttq?.track || name === "page_view") return;
+    if (!firing("tiktok") || name === "page_view") return;
+    if (!window.ttq?.track) return absent("tiktok");
     const mapped = matched.find((c) => c.tier === "primary" && c.tiktok)?.tiktok;
     const event = mapped || plan.vocab?.events?.[name]?.tiktok || FALLBACK_TIKTOK[name];
     if (!event) return;
     window.ttq.track(event, { content_category: out.intent, value: out.value, currency: out.currency, description: out.conversions }, { event_id: eventId });
+    fired("tiktok");
 }
 
 function sendLinkedIn(name, matched) {
-    if (typeof window.lintrk !== "function") return;
+    if (!firing("linkedin")) return;
+    if (typeof window.lintrk !== "function") return absent("linkedin");
     const ids = matched.filter((c) => c.tier === "primary" && c.linkedinConversionId).map((c) => c.linkedinConversionId);
     if (!ids.length && name === "generate_lead" && config.linkedinLeadConversionId) ids.push(config.linkedinLeadConversionId);
-    for (const id of ids) window.lintrk("track", { conversion_id: Number(id) });
+    for (const id of ids) { window.lintrk("track", { conversion_id: Number(id) }); fired("linkedin"); }
 }
 
 /* ---------------------------------------------------------- beacon */
@@ -294,14 +308,19 @@ const TEST_EVENTS = ["cta_click", "nav_click", "section_view", "scroll_depth", "
 
 /**
  * Fire every event and every approved conversion once into the data layer (and GA4 when loaded directly),
- * flagged cms_test / debug_mode / internal traffic, so Google Tag Manager (Preview / Tag Assistant) and
- * GA4 DebugView receive them straight after setup, without waiting for a visitor. Ad pixels, Google Ads,
- * the server and the visitor profile are untouched. Resolves { events, conversions }.
+ * flagged cms_test / debug_mode / internal traffic, so Google Tag Manager (Preview / Tag Assistant), GA4
+ * DebugView and the ad tools' own test screens (Meta Test events, TikTok, LinkedIn) receive them straight
+ * after setup, without waiting for a visitor. `tools` picks who gets them ("datalayer", "meta", "tiktok",
+ * "linkedin", "ads"); the pixels only exist on a page where the visitor gave marketing consent. The server beacon
+ * and the visitor profile are never touched. Resolves { events, conversions, sent, missing }.
  */
-export async function fireTestEvents({ onProgress, delay = 300 } = {}) {
+export async function fireTestEvents({ onProgress, delay = 300, tools = ["datalayer", "meta", "tiktok", "linkedin"] } = {}) {
     if (typeof window === "undefined") return { events: 0, conversions: 0 };
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     fireMode = true;
+    fireTools = new Set(tools);
+    fireStats.sent = {};
+    fireStats.missing = {};
     let events = 0;
     let conversions = 0;
     try {
@@ -324,7 +343,7 @@ export async function fireTestEvents({ onProgress, delay = 300 } = {}) {
             };
             const result = track(t.event || "cta_click", params);
             // The trigger could not be reproduced from the plan alone: still send the conversion event itself.
-            if (!result?.matched?.some((m) => m.id === c.id)) {
+            if (firing("datalayer") && !result?.matched?.some((m) => m.id === c.id)) {
                 window.dataLayer = window.dataLayer || [];
                 window.dataLayer.push({ event: "conversion", conversion_id: c.id, tier: c.tier, event_id: `test-${newEventId()}:${c.id}`, cms_test: true, debug_mode: true, traffic_type: "internal" });
             }
@@ -334,5 +353,5 @@ export async function fireTestEvents({ onProgress, delay = 300 } = {}) {
     } finally {
         fireMode = false;
     }
-    return { events, conversions };
+    return { events, conversions, sent: { ...fireStats.sent }, missing: Object.keys(fireStats.missing) };
 }
