@@ -855,3 +855,10 @@ upsert-safe: GET on an unknown key → `200 {}`, first PATCH creates, PATCH
 deep-merges objects and replaces arrays. `blog/`, `redirects/`, `images/`,
 `content/pages/`, sections, and submissions use normal id/slug REST. Every new
 endpoint's shape is documented in `FRONTEND_INTEGRATION_PROMPT.md` §13.6.
+
+
+## Site settings: setup %, one-go AI fill, tabs, one-click events
+- **Setup card** (top of Site settings): a percent of the essentials every site should have (`api/settings_setup.py` `FIELDS`: business name/description/logo/contact, live URL, default title/description/share image, locale, schema type, Search Console, enquiry email, brand voice/audience/location, GTM or GA4 id, approved tracking plan). Optional things (extra pixels, custom code, social handles, opening hours) are never counted or nagged. Adding an always-needed setting = one entry in `FIELDS`.
+- **Fill with AI**: `POST ai/settings-prompt/ {notes?}` builds ONE prompt with everything the site knows, the missing fields and, for each, the question to ask; the AI is told to ask the owner (numbered, ≤8) instead of guessing, then reply with one JSON block. `POST settings/setup/ {reply}` applies it: only assistant-fillable keys, each validated (email, https URL, tracking-ID shapes, length), owner-only items (logo, share image, verification) never written.
+- **Tabs**: Your business · Search & sharing · Enquiries · Tracking · Advanced (the old single page rendered every stored key, including collections).
+- **Tracking → "Set up & fire all events"** (`/admin/tracking/?run=all`): syncs every conversion to the connected tools, then runs every check once so each tool receives its events.

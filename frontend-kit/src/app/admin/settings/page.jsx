@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Card, Notice, PageTitle } from "@/components/admin/AdminShell";
+import SetupCard from "@/components/admin/SetupCard";
 import { useApi } from "@/components/admin/useApi";
 import { buttonStyles } from "@/components/cms/Drawer";
 import { ObjectFields } from "@/components/cms/FieldEditor";
@@ -13,7 +14,7 @@ import { SITE_NAME } from "@/lib/brand";
 // Canonical SiteSettings.data shape (FRONTEND_INTEGRATION_PROMPT.md §13.6).
 const TEMPLATE = {
     organization: { name: "", legalName: "", logo: "", logoAlt: "", foundingDate: "", description: "", sameAs: [""] },
-    contact: { email: "", phone: "", contactType: "customer service", availableLanguages: ["English"] },
+    contact: { email: "", phone: "", whatsapp: "", location: "", contactType: "customer service", availableLanguages: ["English"] },
     locations: [
         {
             name: "",
@@ -42,10 +43,16 @@ const TEMPLATE = {
         searchUrl: "",
     },
     schema: { organizationType: "Organization", enabled: true },
+    ai: { brandVoice: "", audience: "", location: "" },
     robotsTxt: { disallow: ["/api/"], allow: [""] },
 };
 
 const HINTS = {
+    "contact.whatsapp": { label: "WhatsApp number (digits, with country code)", help: "Only if you publish one — the WhatsApp links appear only when it is set." },
+    "contact.location": { label: "Where you are based (shown to visitors)" },
+    "ai.brandVoice": { label: "Brand voice", type: "textarea", help: "How writing should sound, e.g. warm, plain-spoken, never hype." },
+    "ai.audience": { label: "Who you serve", type: "textarea", help: "Your customers and what they need." },
+    "ai.location": { label: "Where you work", help: "Areas or countries you serve." },
     "organization.logo": { type: "image", category: "brand" },
     "organization.sameAs": { label: "Social profile URLs" },
     "organization.description": { type: "textarea" },
@@ -105,12 +112,38 @@ function clean(value) {
     return value;
 }
 
+const TABS = [
+    ["business", "Your business"],
+    ["search", "Search & sharing"],
+    ["leads", "Enquiries"],
+    ["tracking", "Tracking"],
+    ["advanced", "Advanced"],
+];
+// Setup groups (api/settings_setup.py) -> the tab that holds their fields.
+const GROUP_TAB = { business: "business", voice: "business", search: "search", leads: "leads", tracking: "tracking" };
+const TAB_KEYS = {
+    business: ["organization", "contact", "ai"],
+    search: ["seoDefaults", "schema"],
+    advanced: ["robotsTxt", "locations"],
+};
+const pick = (source, keys) => Object.fromEntries(keys.filter((k) => k in source).map((k) => [k, source[k]]));
+// The voice fields are everyday settings; page kinds and house rules are edited by whoever tunes the AI.
+const VOICE_KEYS = ["brandVoice", "audience", "location"];
+const forTab = (draft, tab) => {
+    const value = pick(draft, TAB_KEYS[tab]);
+    if (value.ai) value.ai = pick(draft.ai, VOICE_KEYS);
+    return value;
+};
+const fromTab = (draft, next) => ({ ...draft, ...next, ...(next.ai ? { ai: { ...draft.ai, ...next.ai } } : {}) });
+
 export default function SettingsPage() {
-    const { data, error: loadError, setData } = useApi("settings/site/");
+    const { data, error: loadError, setData, reload } = useApi("settings/site/");
     const [draft, setDraft] = useState(null);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
+    const [tab, setTab] = useState("business");
+    const [setupKey, setSetupKey] = useState(0);
 
     useEffect(() => {
         if (data) {
@@ -130,6 +163,7 @@ export default function SettingsPage() {
         try {
             const saved = await apiRequest("settings/site/", { method: "PATCH", body: clean(draft) });
             setData(saved);
+            setSetupKey((k) => k + 1);
             setSuccess("Settings saved. Metadata, analytics and structured data update across the site.");
         } catch (err) {
             setError(err.message);
@@ -147,22 +181,67 @@ export default function SettingsPage() {
             />
             <Notice error={error || loadError} success={success} />
             {draft ? (
-                <div className="mb-6 space-y-6">
-                    <FormNotificationsCard value={draft.forms} onChange={(forms) => setDraft({ ...draft, forms })} />
-                    <TrackingCard value={draft.analytics} onChange={(analytics) => setDraft({ ...draft, analytics })} />
-                    <VerificationCard value={draft.verification} siteUrl={draft.seoDefaults?.siteUrl} onChange={(verification) => setDraft({ ...draft, verification })} />
-                </div>
+                <SetupCard
+                    refreshKey={setupKey}
+                    onJump={(group) => { setTab(GROUP_TAB[group] || "business"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                    onApplied={() => { setSetupKey((k) => k + 1); reload(); }}
+                />
             ) : null}
             {draft ? (
-                <Card>
-                    <div className="space-y-5">
-                        <ObjectFields value={draft} template={TEMPLATE} hints={HINTS} onChange={setDraft} />
+                <>
+                    <div role="tablist" className="mb-5 flex flex-wrap gap-1 border-b border-[#E2E8F0]">
+                        {TABS.map(([key, label]) => (
+                            <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)} data-cms-settings-tab={key}
+                                className={`-mb-px border-b-2 px-4 py-2.5 text-[13px] font-semibold ${tab === key ? "border-[var(--cms-accent)] text-[#0F172A]" : "border-transparent text-[#64748B] hover:text-[#0F172A]"}`}>
+                                {label}
+                            </button>
+                        ))}
                     </div>
-                </Card>
+                    <div className="mb-6 space-y-6">
+                        {tab === "leads" ? <FormNotificationsCard value={draft.forms} onChange={(forms) => setDraft({ ...draft, forms })} /> : null}
+                        {tab === "tracking" ? (
+                            <>
+                                <TrackingActions />
+                                <TrackingCard value={draft.analytics} onChange={(analytics) => setDraft({ ...draft, analytics })} />
+                            </>
+                        ) : null}
+                        {tab === "search" ? <VerificationCard value={draft.verification} siteUrl={draft.seoDefaults?.siteUrl} onChange={(verification) => setDraft({ ...draft, verification })} /> : null}
+                        {TAB_KEYS[tab] ? (
+                            <Card>
+                                <div className="space-y-5">
+                                    <ObjectFields
+                                        value={forTab(draft, tab)}
+                                        template={pick(TEMPLATE, TAB_KEYS[tab])}
+                                        hints={HINTS}
+                                        onChange={(next) => setDraft(fromTab(draft, next))}
+                                    />
+                                </div>
+                            </Card>
+                        ) : null}
+                    </div>
+                </>
             ) : (
                 <p className="text-[13px] text-[#64748B]">Loading…</p>
             )}
         </>
+    );
+}
+
+// One click: push every conversion to every connected tool, then fire each one once so the tools
+// start receiving them (the Checks run), instead of waiting for a real visitor.
+function TrackingActions() {
+    return (
+        <Card data-cms-settings="tracking-actions">
+            <h2 className="text-[15px] font-bold">Send every conversion to every tool</h2>
+            <p className="mt-1 text-[13px] text-[#475569]">
+                Creates the conversions in each connected tool, then triggers every one of them once on the live site (marked as tests) so Google, Meta and the others
+                see them straight away. The full plan, tools and results are under Tracking.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+                <a className={buttonStyles.primary} href="/admin/tracking/?run=all" data-cms-action="run-all-events">Set up &amp; fire all events</a>
+                <a className={buttonStyles.secondary} href="/admin/tracking/">Open Tracking</a>
+            </div>
+        </Card>
     );
 }
 

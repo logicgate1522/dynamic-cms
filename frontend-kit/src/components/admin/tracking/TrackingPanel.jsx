@@ -24,7 +24,7 @@ import { scanSite } from "@/lib/siteScan";
 
 const TABS = [["overview", "Overview"], ["plan", "Plan"], ["tools", "Tools"], ["checks", "Checks"], ["ai", "Ask AI"]];
 
-export default function TrackingPanel({ initialTab = "overview", inDrawer = false, onPickStart }) {
+export default function TrackingPanel({ initialTab = "overview", inDrawer = false, onPickStart, autoRun = false }) {
     const [tab, setTab] = useState(initialTab);
     const state = useApi("tracking/plan/");
     const facts = useApi("tracking/facts/");
@@ -162,7 +162,7 @@ export default function TrackingPanel({ initialTab = "overview", inDrawer = fals
                 <PlanEditor plan={plan} facts={facts.data} onChange={(next) => { setDraft(next); setDirty(true); }} onPick={inDrawer ? pick : undefined} />
             ) : null}
             {tab === "tools" ? <ToolsTab explain={s?.tools} settings={settings.data} onChanged={reloadAll} /> : null}
-            {tab === "checks" ? <ChecksTab plan={plan} settings={settings.data} onDone={reloadAll} /> : null}
+            {tab === "checks" ? <ChecksTab plan={plan} settings={settings.data} onDone={reloadAll} autoRun={autoRun} /> : null}
             {tab === "ai" ? <AiTab onProposal={(p) => setProposal({ ...p, source: "ai" })} /> : null}
         </div>
     );

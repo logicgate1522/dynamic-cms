@@ -51,7 +51,7 @@ function toolsFrom(settings) {
     return { gtm: on("gtmId"), ga4: on("ga4Id"), meta: on("metaPixelId"), tiktok: on("tiktokPixelId"), linkedin: on("linkedinPartnerId"), googleAds: on("googleAdsId") };
 }
 
-export default function ChecksTab({ plan, settings, onDone }) {
+export default function ChecksTab({ plan, settings, onDone, autoRun = false }) {
     const runs = useApi("tracking/verify/runs/");
     const [running, setRunning] = useState(false);
     const [progress, setProgress] = useState({ done: 0, total: 0, current: "" });
@@ -112,6 +112,14 @@ export default function ChecksTab({ plan, settings, onDone }) {
     };
 
     const approved = plan?.status === "approved";
+    // "Set up & fire all events" (Settings → Tracking): sync the definitions to the tools, then run every check once.
+    const started = useRef(false);
+    useEffect(() => {
+        if (!autoRun || !approved || started.current || !settings) return;
+        started.current = true;
+        apiRequest("tracking/sync/", { method: "POST" }).catch(() => {}).finally(() => run());
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoRun, approved, settings]);
     return (
         <div>
             {error ? <p className="mb-3 rounded-lg bg-[#FEF3F2] px-3 py-2 text-[13px] text-[#B42318]">{error}</p> : null}

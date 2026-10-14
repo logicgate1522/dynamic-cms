@@ -2707,3 +2707,52 @@ class AutoReplyTests(AdminAuthMixin, APITestCase):
             self._submit({"name": "Cy", "email": "cy@example.com"})
         note = [m for m in mail.outbox if m.to == ["owner@example.com"]][0]
         self.assertEqual(note.reply_to, ["cy@example.com"])
+
+
+class SettingsSetupTests(APITestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username="setup-admin", password="pass1234", is_staff=True)
+        self.client.force_authenticate(user=self.admin)
+        SiteSettings.objects.update_or_create(pk=1, defaults={"data": {"organization": {"name": "Acme Ltd"}}})
+
+    def test_report_counts_only_what_should_always_be_set(self):
+        r = self.client.get("/api/settings/setup/")
+        self.assertEqual(r.status_code, 200)
+        keys = {i["key"] for i in r.data["items"]}
+        self.assertIn("organization.description", keys)
+        self.assertNotIn("analytics.metaPixelId", keys)   # optional things are never nagged
+        self.assertGreater(r.data["percent"], 0)
+        self.assertLess(r.data["percent"], 100)
+
+    def test_prompt_lists_missing_fields_and_tells_the_ai_to_ask(self):
+        r = self.client.post("/api/ai/settings-prompt/", {"notes": "We are accountants in Leeds"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        p = r.data["prompt"]
+        self.assertIn("organization.description", p)
+        self.assertIn("do NOT guess", p)
+        self.assertIn("accountants in Leeds", p)
+        self.assertNotIn("organization.logo —", p)        # owner-only items are not asked
+
+    def test_apply_writes_only_checked_assistant_keys(self):
+        reply = ('```json\n{"organization.description": "We prepare accounts and tax returns for small businesses in Leeds.",'
+                 '"contact.email": "hello@acme.test", "seoDefaults.siteUrl": "http://localhost:3000",'
+                 '"organization.logo": "/x.png", "forms.notifyEmail": "not-an-email", "analytics.gtmId": "GTM-ABC1234"}\n```')
+        r = self.client.post("/api/settings/setup/", {"reply": reply}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(sorted(r.data["applied"]), ["analytics.gtmId", "contact.email", "organization.description"])
+        reasons = {s["key"]: s["reason"] for s in r.data["skipped"]}
+        self.assertIn("seoDefaults.siteUrl", reasons)
+        self.assertIn("forms.notifyEmail", reasons)
+        self.assertIn("organization.logo", reasons)
+        data = SiteSettings.objects.get(pk=1).data
+        self.assertEqual(data["organization"]["name"], "Acme Ltd")      # untouched values stay
+        self.assertEqual(data["contact"]["email"], "hello@acme.test")
+        self.assertNotIn("logo", data["organization"])
+
+    def test_apply_rejects_a_reply_that_is_not_json(self):
+        r = self.client.post("/api/settings/setup/", {"reply": "1. What is your email?"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_setup_is_admin_only(self):
+        self.client.force_authenticate(user=None)
+        self.assertIn(self.client.get("/api/settings/setup/").status_code, (401, 403))

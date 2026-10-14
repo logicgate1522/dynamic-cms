@@ -217,3 +217,16 @@ class NormalizeView(APIView):
             return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"detail": "kind must be one of: section, page_assist, seo, keywords, page."},
                         status=status.HTTP_400_BAD_REQUEST)
+
+
+class SettingsPromptView(APIView):
+    """POST ai/settings-prompt/ {notes?} -> {prompt, report}: the one-go "fill in my settings" prompt."""
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        from . import settings_setup
+        from .models import SiteSettings
+        data = (SiteSettings.objects.filter(pk=1).first() or SiteSettings()).data or {}
+        d = request.data if isinstance(request.data, dict) else {}
+        return Response({"prompt": settings_setup.prompt(data, str(d.get("notes") or "")),
+                         "report": settings_setup.report(data, settings_setup.plan_is_approved(data))})

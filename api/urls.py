@@ -23,6 +23,7 @@ from .ai_views import (
     PageAssistPromptView,
     SectionPromptView,
     SeoPromptView,
+    SettingsPromptView,
 )
 from .section_views import (
     BlogPasteToEditView,
@@ -50,6 +51,7 @@ from . import tracking_views as tv
 from .sitemaps import SitemapReportView
 from .draft_views import DraftDiscardView, DraftListView, DraftPublishView
 from .views import (
+    SettingsSetupView,
     AdminLoginView,
     BlogPostViewSet,
     ComponentDataView,
@@ -139,6 +141,8 @@ urlpatterns = [
     path('ai/new-page-prompt/', NewPagePromptView.as_view(), name='ai-new-page-prompt'),
     path('ai/section-prompt/', SectionPromptView.as_view(), name='ai-section-prompt'),
     path('ai/page-assist-prompt/', PageAssistPromptView.as_view(), name='ai-page-assist-prompt'),
+    path('ai/settings-prompt/', SettingsPromptView.as_view(), name='ai-settings-prompt'),
+    path('settings/setup/', SettingsSetupView.as_view(), name='settings-setup'),
     path('ai/seo-prompt/', SeoPromptView.as_view(), name='ai-seo-prompt'),
     path('ai/keyword-prompt/', KeywordPromptView.as_view(), name='ai-keyword-prompt'),
     path('ai/normalize/', NormalizeView.as_view(), name='ai-normalize'),

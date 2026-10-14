@@ -988,3 +988,34 @@ class FormSubmissionDetailView(APIView):
         """DELETE — remove a test or spam submission for good."""
         FormSubmission.objects.filter(form_name=kwargs.get("name"), pk=kwargs.get("pk")).delete()
         return Response(status=204)
+
+
+class SettingsSetupView(APIView):
+    """GET settings/setup/ (admin) — how complete the always-needed settings are.
+    POST settings/setup/ {reply} — apply an AI/pasted reply (only the assistant-fillable keys, each checked)."""
+    permission_classes = [IsAdminUser]
+
+    def _data(self):
+        return (SiteSettings.objects.filter(pk=1).first() or SiteSettings()).data or {}
+
+    def get(self, request, *args, **kwargs):
+        from . import settings_setup
+        data = self._data()
+        return Response(settings_setup.report(data, settings_setup.plan_is_approved(data)))
+
+    def post(self, request, *args, **kwargs):
+        from . import settings_setup
+        raw = request.data.get("reply") if isinstance(request.data, dict) else None
+        try:
+            patch, applied, skipped = settings_setup.apply(self._data(), raw)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if patch:
+            with transaction.atomic():
+                row, created = SiteSettings.objects.select_for_update().get_or_create(pk=1, defaults={"data": patch})
+                if not created:
+                    row.data = deep_merge(row.data or {}, patch)
+                    row.save()
+        data = self._data()
+        return Response({"applied": applied, "skipped": skipped,
+                         "report": settings_setup.report(data, settings_setup.plan_is_approved(data))})
